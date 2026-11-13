@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/calibration_title"
+        android:textSize="20sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text="@string/calib_hint" />
+
+    <!-- FIT_XY so view coordinates map linearly to image coordinates. -->
+    <FrameLayout
+        android:id="@+id/calib_frame"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="12dp"
+        android:layout_weight="1">
+
+        <ImageView
+            android:id="@+id/calib_preview"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="#000000"
+            android:scaleType="fitXY" />
+
+        <ImageView
+            android:id="@+id/handle_tl"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:src="@drawable/corner_handle" />
+
+        <ImageView
+            android:id="@+id/handle_tr"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:src="@drawable/corner_handle" />
+
+        <ImageView
+            android:id="@+id/handle_br"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:src="@drawable/corner_handle" />
+
+        <ImageView
+            android:id="@+id/handle_bl"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:src="@drawable/corner_handle" />
+
+    </FrameLayout>
+
+    <Button
+        android:id="@+id/btn_redetect"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="@string/btn_redetect" />
+
+    <Button
+        android:id="@+id/btn_save"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="@string/btn_save" />
+
+    <Button
+        android:id="@+id/btn_clear"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="@string/btn_clear" />
+
+</LinearLayout>

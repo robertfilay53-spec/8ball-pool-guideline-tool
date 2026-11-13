@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Pool Guide</string>
+
+    <string name="status_ready">Ready. Start capture, then switch to the game.</string>
+    <string name="status_capturing">Capturing — aim lines active over the game.</string>
+    <string name="status_capture_denied">Screen capture was denied. Tap Start to try again.</string>
+    <string name="status_overlay_denied">Overlay permission was denied. The tool cannot draw lines without it.</string>
+    <string name="status_demo">Demo mode — synthetic table, no game needed.</string>
+    <string name="status_stopped">Stopped.</string>
+
+    <string name="btn_start">Start capture</string>
+    <string name="btn_stop">Stop</string>
+    <string name="btn_demo">Demo mode (no game)</string>
+    <string name="btn_calibrate">Calibrate table</string>
+    <string name="stop">Stop</string>
+    <string name="cancel">Cancel</string>
+    <string name="hide_guides">Hide guides</string>
+    <string name="show_guides">Show guides</string>
+
+    <string name="preview_title">Diagnostic preview (what the tool actually sees)</string>
+    <string name="preview_switch">Show captured frame</string>
+    <string name="preview_ok">Capture looks fine — the table is visible.</string>
+    <string name="preview_black">Capture is BLACK. The game is probably using FLAG_SECURE, so the tool cannot see the table. There is no legitimate bypass.</string>
+
+    <string name="notif_channel_name">Screen capture</string>
+    <string name="notif_channel_desc">Shows while the guideline tool is capturing the screen.</string>
+
+    <string name="overlay_needed">The tool needs “Display over other apps” to draw aim lines. Please enable it, then come back.</string>
+
+    <string name="warning_title">Before you use this tool</string>
+    <string name="warning_body">This is a companion helper, not a mod. It does not touch the game, its files, or its memory, and it never plays for you.\n\nBut be honest with yourself: an overlay that draws aim lines over a game gives you an in-game advantage. The game can detect the overlay (every touch on a line is reported as obscured), and it can hide the table from screen capture entirely with FLAG_SECURE. No tool can promise you will not be banned.\n\nUse a secondary or guest account first. If the capture preview shows a black frame, the game is secure and this tool cannot help with it.</string>
+    <string name="warning_understood">I understand</string>
+
+    <string name="calibration_title">Calibrate table</string>
+    <string name="calib_hint">Drag the four red handles to the table corners, then Save. Re-detect runs the automatic table finder on the current frame.</string>
+    <string name="btn_redetect">Re-detect table</string>
+    <string name="btn_save">Save</string>
+    <string name="btn_clear">Clear calibration</string>
+    <string name="calib_cleared">Calibration cleared — auto-detect will be used.</string>
+    <string name="calib_no_frame">No frame available.</string>
+    <string name="calib_opencv_missing">OpenCV failed to load.</string>
+    <string name="calib_not_found">Table not found in this frame. Drag the handles by hand.</string>
+    <string name="calib_found">Table found — check the corners, then Save.</string>
+    <string name="calib_failed">Detection failed.</string>
+    <string name="calib_saved">Table calibration saved.</string>
+
+    <string name="footer">Sideloaded tool. Not affiliated with Miniclip or 8 Ball Pool. Not a mod: it never touches the game.</string>
+</resources>

@@ -1,0 +1,19 @@
+# Android / Gradle build outputs
+.gradle/
+build/
+local.properties
+*.iml
+.DS_Store
+# Local Android SDK (downloaded via cmdline-tools; the CI runners have their own).
+# Kept inside the repo dir for the local build only — never committed.
+android-sdk/
+gradle-dist/
+gradle-8.9-bin.zip
+# Gradle wrapper jar is committed intentionally (standard practice).
+!gradle/wrapper/gradle-wrapper.jar
+# NEVER commit workflow files from this machine: the VM's GitHub token has
+# no `workflow` scope and pushes containing .github/workflows/* are rejected
+# (403). The CI workflow is added by the maintainer via the GitHub web UI.
+.github/
+# Never commit the game APK, any dump, or any Miniclip asset.
+*.apk
