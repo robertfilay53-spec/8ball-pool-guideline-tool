@@ -1,11 +1,16 @@
 package com.poolguide.tool.cv
 
 /**
- * Detection constants. Two sources, both cited in the README:
- * - kaigiii/8-Ball-Pool-Aim-Assist-for-macOS (bilateral / Canny / dual
- *   HoughLinesP / verifier / LineTracker parameters).
+ * Detection constants. Three sources, all cited in the README:
+ * - kaigiii/8-Ball-Pool-Aim-Assist-for-macOS (bilateral / verifier /
+ *   LineTracker parameters and structure).
  * - ChatGPT's Android overlay guide, Nov 13 2026 (HoughCircles parameters,
  *   downscale target, frame-skipping strategy).
+ * - workua94-afk/8ball-aim-master, via the Nov 13 GitHub search
+ *   (guideline Canny 50/150 + HoughLinesP 30/15/8 on the table ROI, and
+ *   the 15-frame cache idea): the kaigiii Canny (500, 350) killed the
+ *   thin 2 px guideline after the 720-wide downscale — the instrumented
+ *   tests proved it (0 verified segments on the green table).
  */
 object CvConfig {
 
@@ -16,17 +21,23 @@ object CvConfig {
      * (FLAG_SECURE blackout or a dead capture). */
     const val BLACK_FRAME_MEAN = 8.0
 
-    // ---- Guideline detection (kaigiii) ----
+    // ---- Guideline detection (kaigiii structure, 8ball-aim-master params) ----
     const val BILATERAL_D = 20
     const val BILATERAL_SIGMA_COLOR = 200.0
     const val BILATERAL_SIGMA_SPACE = 1.0
-    const val CANNY_LOW = 500.0
-    const val CANNY_HIGH = 350.0
-    /** Long-line Hough: threshold, min line length, max line gap. */
-    const val HOUGH_LONG_THRESHOLD = 20.0
-    const val HOUGH_LONG_MIN_LENGTH = 20.0
-    const val HOUGH_LONG_MAX_GAP = 1.0
-    /** Short-line Hough (catches the guideline when it is short). */
+    /** Canny thresholds (8ball-aim-master 50/150): the guideline is ~2 px
+     * wide at the working resolution, so its Sobel response is far below
+     * the old 500/350 pair, which kept almost no edges at all. */
+    const val CANNY_LOW = 50.0
+    const val CANNY_HIGH = 150.0
+    /** Guideline Hough (8ball-aim-master): threshold, min line length,
+     * max line gap, on the table-ROI crop. */
+    const val HOUGH_GUIDELINE_THRESHOLD = 30.0
+    const val HOUGH_GUIDELINE_MIN_LENGTH = 15.0
+    const val HOUGH_GUIDELINE_MAX_GAP = 8.0
+    /** Short-line fallback (kaigiii): only run when the main Hough finds
+     * no verified segment — it catches a very short guideline (balls
+     * nearly touching) without paying its ~150 junk candidates per frame. */
     const val HOUGH_SHORT_THRESHOLD = 10.0
     const val HOUGH_SHORT_MIN_LENGTH = 1.0
     const val HOUGH_SHORT_MAX_GAP = 1.0
@@ -34,6 +45,10 @@ object CvConfig {
     const val VERIFY_MAX_DIST_PX = 1.5
     const val VERIFY_MIN_INLIERS = 20
     const val VERIFY_KEEP_TOP = 3
+    /** Robust refit (yasin IRLS/Tukey lead, one guarded pass): a refitted
+     * segment is kept only when it stays close to the verified one. */
+    const val REFIT_MAX_ANGLE_DEG = 5.0
+    const val REFIT_MIN_LENGTH_FRACTION = 0.5
     /** LineTracker: alpha starts here, fades by this much per lost frame. */
     const val TRACKER_ALPHA_START = 40
     const val TRACKER_ALPHA_FADE = 8
@@ -48,7 +63,10 @@ object CvConfig {
     const val HOUGH_CIRCLES_DP = 1.0
     const val HOUGH_CIRCLES_MIN_DIST = 20.0
     const val HOUGH_CIRCLES_PARAM1 = 100.0
-    const val HOUGH_CIRCLES_PARAM2 = 25.0
+    /** Accumulator threshold: 25 missed the stripe balls and the cue on
+     * the synthetic tables (sweep, Nov 14); 15 finds them, 12 adds
+     * nothing but noise. */
+    const val HOUGH_CIRCLES_PARAM2 = 15.0
     const val HOUGH_CIRCLES_MIN_RADIUS = 8
     const val HOUGH_CIRCLES_MAX_RADIUS = 18
     /** Run HoughCircles every Nth frame (HSV contours run every frame). */
@@ -80,4 +98,15 @@ object CvConfig {
     val FELT_BLUE_UPPER = doubleArrayOf(130.0, 255.0, 255.0)
     /** Pocket inset as a fraction of the table width. */
     const val POCKET_INSET_FRACTION = 0.015
+    /** Pocket radius as a fraction of the table width (working res):
+     * pockets are ~24 px across at 720 wide. Used for the disc-overlap
+     * pocket exclusion (a ball's disc can never overlap a pocket's). */
+    const val POCKET_RADIUS_FRACTION = 0.02
+    /** A quad whose edges are within this many degrees of horizontal /
+     * vertical counts as axis-aligned: the table is rendered aligned with
+     * the screen, so the bounding rect then gives symmetric corners
+     * (approxPolyDP cuts the rounded corners asymmetrically and the
+     * pocket notches skew the fit — that skew flipped a tied pocket
+     * pick on the synthetic green table). */
+    const val AXIS_ALIGNED_MAX_ANGLE_DEG = 6.0
 }

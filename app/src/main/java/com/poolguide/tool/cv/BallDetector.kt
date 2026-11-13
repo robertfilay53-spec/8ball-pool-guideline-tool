@@ -16,13 +16,31 @@ import kotlin.math.abs
  *
  * Fast path (every frame): HSV inRange + findContours per colour family,
  * minEnclosingCircle gives centre + radius + colour in one pass.
- * Slow path (every 3rd frame): HoughCircles (ChatGPT params) as a fallback
- * for the white cue ball / black 8-ball and for colours the HSV pass misses
- * (notably the green ball, whose HSV band overlaps the green felt — the
- * contour pass deliberately skips green; Hough finds it on the grey frame).
+ * Slow path (every 3rd frame): HoughCircles (param2 15, swept Nov 14)
+ * as a fallback for the white cue ball / black 8-ball, for stripe balls
+ * (whose white band splits the colour into two caps that fail the
+ * circularity check), and for colours the HSV pass misses.
  *
  * Stripe vs solid: the centre pixel of a stripe ball is white (the number
  * band); a solid ball's centre pixel is its own colour.
+ *
+ * v1.0.1 fixes (instrumented tests, Nov 14):
+ * - RETR_LIST, not RETR_EXTERNAL: the wooden rails fall inside the red
+ *   and orange windows and form a closed ring around the table; every
+ *   ball inside that ring's hole was dropped by RETR_EXTERNAL. The same
+ *   trap hid the black ball (the dark background is a ring in the black
+ *   window) and every ball inside it.
+ * - Green ball: a GREEN window whose S lower bound is learned from the
+ *   felt (Scugalug adaptive cloth-colour lead). The green ball's hue IS
+ *   the felt's hue, so hue cannot separate them — but the ball is more
+ *   saturated than the cloth (S 218 vs 171 on the synthetic table).
+ * - Blue ball on a blue table: the same felt-relative tightening for the
+ *   blue window (S and V above the felt's), since the whole felt falls
+ *   inside the static blue window.
+ * - Pocket exclusion is now a disc-overlap test (pocket radius + ball
+ *   radius): Hough fitted r~12 circles to the pocket rims whose centres
+ *   sit ~25 px from the pocket centres, just outside the old radius+12
+ *   rule. A real ball's disc can never overlap a pocket's disc.
  */
 class BallDetector {
 
@@ -35,37 +53,69 @@ class BallDetector {
     private var lastSeenFrame = mutableMapOf<Int, Long>()
     private var nextId = 1
 
-    /** Colour windows: (colour, HSV lower, HSV upper). */
-    private val colorWindows = listOf(
-        Triple(BallColor.RED, doubleArrayOf(0.0, 100.0, 70.0), doubleArrayOf(10.0, 255.0, 255.0)),
-        Triple(BallColor.RED, doubleArrayOf(160.0, 100.0, 70.0), doubleArrayOf(179.0, 255.0, 255.0)),
-        Triple(BallColor.ORANGE, doubleArrayOf(10.0, 100.0, 70.0), doubleArrayOf(20.0, 255.0, 255.0)),
-        Triple(BallColor.YELLOW, doubleArrayOf(20.0, 100.0, 70.0), doubleArrayOf(35.0, 255.0, 255.0)),
-        Triple(BallColor.BLUE, doubleArrayOf(90.0, 100.0, 70.0), doubleArrayOf(130.0, 255.0, 255.0)),
-        Triple(BallColor.PURPLE, doubleArrayOf(130.0, 80.0, 50.0), doubleArrayOf(160.0, 255.0, 255.0)),
-        Triple(BallColor.WHITE, doubleArrayOf(0.0, 0.0, 200.0), doubleArrayOf(180.0, 40.0, 255.0)),
-        Triple(BallColor.BLACK, doubleArrayOf(0.0, 0.0, 0.0), doubleArrayOf(180.0, 255.0, 60.0))
-        // GREEN is deliberately absent: its HSV band is the felt itself.
-    )
+    /**
+     * Colour windows: (colour, HSV lower, HSV upper). The green and blue
+     * windows are felt-relative when [feltHsv] is known (see below);
+     * the rest are static.
+     */
+    private fun colorWindows(feltHsv: DoubleArray?): List<Triple<BallColor, DoubleArray, DoubleArray>> {
+        val feltH = feltHsv?.get(0) ?: -1.0
+        val feltS = feltHsv?.get(1) ?: 0.0
+        val feltV = feltHsv?.get(2) ?: 0.0
+        // Same-hue-as-felt colours need S/V separation from the cloth:
+        // the ball is more saturated and brighter than the felt it sits
+        // on. Only tightened when the felt's hue is inside that colour's
+        // hue range; otherwise the static window applies.
+        val greenSLow = if (feltH in 55.0..85.0) {
+            (feltS + 25.0).coerceIn(150.0, 235.0)
+        } else {
+            195.0
+        }
+        val blueSLow = if (feltH in 90.0..130.0) {
+            (feltS + 20.0).coerceIn(120.0, 240.0)
+        } else {
+            100.0
+        }
+        val blueVLow = if (feltH in 90.0..130.0) {
+            (feltV + 15.0).coerceIn(70.0, 240.0)
+        } else {
+            70.0
+        }
+        return listOf(
+            Triple(BallColor.RED, doubleArrayOf(0.0, 100.0, 70.0), doubleArrayOf(10.0, 255.0, 255.0)),
+            Triple(BallColor.RED, doubleArrayOf(160.0, 100.0, 70.0), doubleArrayOf(179.0, 255.0, 255.0)),
+            Triple(BallColor.ORANGE, doubleArrayOf(10.0, 100.0, 70.0), doubleArrayOf(20.0, 255.0, 255.0)),
+            Triple(BallColor.YELLOW, doubleArrayOf(20.0, 100.0, 70.0), doubleArrayOf(35.0, 255.0, 255.0)),
+            Triple(BallColor.BLUE, doubleArrayOf(90.0, blueSLow, blueVLow), doubleArrayOf(130.0, 255.0, 255.0)),
+            Triple(BallColor.PURPLE, doubleArrayOf(130.0, 80.0, 50.0), doubleArrayOf(160.0, 255.0, 255.0)),
+            Triple(BallColor.GREEN, doubleArrayOf(55.0, greenSLow, 40.0), doubleArrayOf(85.0, 255.0, 255.0)),
+            Triple(BallColor.WHITE, doubleArrayOf(0.0, 0.0, 200.0), doubleArrayOf(180.0, 40.0, 255.0)),
+            Triple(BallColor.BLACK, doubleArrayOf(0.0, 0.0, 0.0), doubleArrayOf(180.0, 255.0, 60.0))
+        )
+    }
 
     /**
      * Detect balls in [hsv] and [gray] (working resolution). [table] bounds
      * the search when known. [pockets] are excluded: the pockets are black
      * circles that would otherwise be detected as black balls. [runHough]
-     * enables the slower HoughCircles fallback for this frame.
+     * enables the slower HoughCircles fallback for this frame. [feltHsv]
+     * is the felt's mean HSV (from the table detector) for the adaptive
+     * green/blue windows; [pocketRadiusPx] is the pocket radius at the
+     * working resolution for the disc-overlap exclusion.
      */
     fun detect(
         hsv: Mat, gray: Mat, table: TableRect?, pockets: List<Vec2> = emptyList(),
-        runHough: Boolean, frameIndex: Long
+        runHough: Boolean, frameIndex: Long,
+        feltHsv: DoubleArray? = null, pocketRadiusPx: Double = 12.0
     ): List<Ball> {
         val found = mutableListOf<Ball>()
 
-        for ((color, lower, upper) in colorWindows) {
+        for ((color, lower, upper) in colorWindows(feltHsv)) {
             Core.inRange(hsv, Scalar(lower), Scalar(upper), mask)
             val contours = mutableListOf<MatOfPoint>()
             Imgproc.findContours(
                 mask, contours, hierarchy,
-                Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE
+                Imgproc.RETR_LIST, Imgproc.CHAIN_APPROX_SIMPLE
             )
             for (contour in contours) {
                 val center = Point()
@@ -77,7 +127,7 @@ class BallDetector {
                 if (area / (PI * r * r) < CvConfig.BALL_MIN_CIRCULARITY) continue
                 val c = Vec2(center.x, center.y)
                 if (table != null && !insideTable(c, table)) continue
-                if (isPocket(c, r, pockets)) continue
+                if (isPocket(c, r, pockets, pocketRadiusPx)) continue
                 if (found.any { it.center.distanceTo(c) < CvConfig.BALL_DEDUP_DIST_PX }) continue
                 found += Ball(0, c, r, color, isStripeAt(hsv, c, color))
             }
@@ -101,7 +151,7 @@ class BallDetector {
                 val r = v[2]
                 if (r < CvConfig.BALL_MIN_RADIUS_PX || r > CvConfig.BALL_MAX_RADIUS_PX) continue
                 if (table != null && !insideTable(c, table)) continue
-                if (isPocket(c, r, pockets)) continue
+                if (isPocket(c, r, pockets, pocketRadiusPx)) continue
                 if (found.any { it.center.distanceTo(c) < CvConfig.BALL_DEDUP_DIST_PX }) continue
                 val color = colorAt(hsv, c)
                 found += Ball(0, c, r, color, isStripeAt(hsv, c, color))
@@ -155,10 +205,16 @@ class BallDetector {
         return result
     }
 
-    /** True when [p] is a pocket, not a ball (pockets are black circles). */
-    private fun isPocket(p: Vec2, radius: Double, pockets: List<Vec2>): Boolean {
+    /**
+     * True when [p] is a pocket, not a ball. Disc-overlap test: a ball's
+     * disc can never overlap a pocket's disc (a ball that close would
+     * have dropped in), so any candidate whose disc touches the pocket
+     * disc — plus 3 px of detection noise — is the pocket itself, or a
+     * circle fitted to the pocket rim by Hough.
+     */
+    private fun isPocket(p: Vec2, radius: Double, pockets: List<Vec2>, pocketRadiusPx: Double): Boolean {
         for (pocket in pockets) {
-            if (p.distanceTo(pocket) < radius + 12.0) return true
+            if (p.distanceTo(pocket) < pocketRadiusPx + radius + 3.0) return true
         }
         return false
     }

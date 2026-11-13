@@ -55,8 +55,10 @@ MediaProjection + VirtualDisplay (1280x720, foreground service)
   -> ImageReader RGBA frames (10-15 FPS, frames dropped when behind)
   -> OpenCV: downscale to 720 wide, HSV felt mask -> table corners
      -> HSV contours (every frame) + HoughCircles (every 3rd frame) -> balls
-     -> the game's own white guideline: bilateral filter -> Canny
-        -> dual HoughLinesP -> verifier -> LineTracker
+        (green/blue ball windows are learned from the felt colour, so a
+        ball the same hue as the cloth is still separated from it)
+     -> the game's own white guideline: bilateral filter -> Canny (50, 150)
+        -> HoughLinesP (30/15/8) -> verifier -> robust refit -> LineTracker
   -> shot solver (ghost ball, cut angle, tangent, mirror-pocket banks)
   -> one small TYPE_APPLICATION_OVERLAY window per line
 ```
@@ -175,10 +177,17 @@ Code and ideas reused (with thanks):
 - **kaigiii/8-Ball-Pool-Aim-Assist-for-macOS** (CC BY-NC-SA 4.0) — the
   guideline detector is a port of its `vision_core.py` / `verifier.py` /
   `line_tracker.py`: bilateral filter (d=20, sigmaColor=200, sigmaSpace=1),
-  Canny (500, 350), dual HoughLinesP (long threshold 20 / minLen 20, short
-  threshold 10 / minLen 1), verifier (edge points within 1.5 px, min 20
-  inliers, top 3), LineTracker (alpha 40, fade 8/frame), HSV white window
-  (0,0,200)-(180,30,255).
+  verifier (edge points within 1.5 px, min 20 inliers, top 3), LineTracker
+  (alpha 40, fade 8/frame), HSV white window (0,0,200)-(180,30,255). The
+  Canny thresholds and Hough parameters now come from
+  workua94-afk/8ball-aim-master instead (Canny 50/150, HoughLinesP
+  threshold 30 / minLen 15 / maxGap 8): the kaigiii Canny (500, 350) kept
+  almost no edges for the ~2 px guideline after the 720-wide downscale.
+- **workua94-afk/8ball-aim-master** — guideline detector parameters
+  (above) and the 15-frame cache idea; **Scugalug/8-ball-pool-aim-assistant**
+  — adaptive cloth-colour learning (the felt's mean HSV tightens the
+  green/blue ball windows); **yasin4815162342/Aim** — the IRLS/Tukey robust
+  line fit (one guarded Tukey-weighted refit of each verified segment).
 - **jonathansilva/8BallPool** (306 stars) — the earliest Android overlay
   approach; its per-device tuning notes and its warning not to reuse the
   package name or publish on the Play Store shaped this project's

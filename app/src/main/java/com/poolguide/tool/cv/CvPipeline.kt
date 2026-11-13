@@ -121,8 +121,10 @@ class CvPipeline(
             }
 
         val runHough = frameIndex % CvConfig.HOUGH_CIRCLES_EVERY_N_FRAMES == 0L
+        val pocketRadiusPx = table?.let { it.width * CvConfig.POCKET_RADIUS_FRACTION } ?: 12.0
         val balls = ballDetector.detect(
-            hsv, gray, table, table?.pockets() ?: emptyList(), runHough, frameIndex
+            hsv, gray, table, table?.pockets() ?: emptyList(), runHough, frameIndex,
+            tableDetector.feltHsvMean, pocketRadiusPx
         )
         val cue = balls.firstOrNull { it.isCue }
 
@@ -217,14 +219,10 @@ class CvPipeline(
             ?: return Triple(null, null, "No target ball in line")
         val radius = (cue.radiusPx + target.radiusPx) / 2.0
 
-        var best: ShotSolver.ShotSolution? = null
-        for (pocket in pockets) {
-            val solved = ShotSolver.solveShot(cue.center, target.center, pocket, radius)
-                ?: continue
-            if (best == null || solved.cutAngleDegrees < best.cutAngleDegrees) {
-                best = solved
-            }
-        }
+        // Best direct shot: smallest cut angle, first-listed pocket wins
+        // ties within the tie margin (a symmetric layout must not flip
+        // on sub-degree detection noise).
+        val best = ShotSolver.bestShot(cue.center, target.center, pockets, radius)
         if (best != null) {
             val warn = if (best.isThinCut) " — thin cut, very low margin" else ""
             return Triple(best, null, "Shot to pocket${warn}")

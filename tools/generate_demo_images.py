@@ -124,7 +124,11 @@ green_balls = [
 make_table(os.path.join(OUT, "demo_table_green.png"),
            (46, 139, 87), (350, 360), (700, 360), (1200, 90), green_balls)
 
-# --- Blue table: cue (300,500) -> red 3-ball (800,200) -> top-left pocket
+# --- Blue table: cue (300,500) -> red 3-ball (800,200). The aim line is
+# drawn toward the top-left pocket's ghost point, but that pocket is
+# geometrically unreachable (cut ~141 deg, the solver correctly rejects
+# it); the shot solves via the top-right pocket instead (cut ~17 deg,
+# the smallest cut). The test only asserts that a shot solves.
 blue_balls = [
     (950, 300, "yellow", False, 1),
     (600, 420, "blue", False, 2),

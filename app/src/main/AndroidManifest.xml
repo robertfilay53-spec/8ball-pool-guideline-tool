@@ -4,7 +4,14 @@
   Per-version checklist (ChatGPT, Android 10-15):
   - FOREGROUND_SERVICE_MEDIA_PROJECTION declared (Android 12+ mandatory).
   - POST_NOTIFICATIONS declared (Android 13+ runtime request).
-  - CaptureService declares foregroundServiceType="mediaProjection".
+  - CaptureService declares foregroundServiceType="mediaProjection|specialUse".
+    Live capture starts with the mediaProjection type (it holds a real
+    MediaProjection token). Demo mode has no token, and on Android 14+ a
+    mediaProjection-type FGS without one throws SecurityException and
+    crashes the process — so demo starts with the specialUse type on 34+
+    (FOREGROUND_SERVICE_SPECIAL_USE + the subtype property below) and
+    with the typeless startForeground overload below 34, where the token
+    check does not exist.
   - No INTERNET permission: the tool is fully offline.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -13,6 +20,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <!-- Android 12+ : mandatory for a mediaProjection foreground service -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <!-- Android 14+ : demo mode runs as a specialUse foreground service -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <!-- Android 13+ : requested at runtime before starting capture -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
@@ -42,7 +51,11 @@
         <service
             android:name=".capture.CaptureService"
             android:exported="false"
-            android:foregroundServiceType="mediaProjection" />
+            android:foregroundServiceType="mediaProjection|specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Demo mode: loops a bundled synthetic table image through the CV pipeline so the user can preview the aim lines without starting screen capture." />
+        </service>
     </application>
 
 </manifest>

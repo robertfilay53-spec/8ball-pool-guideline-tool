@@ -40,7 +40,14 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Per-version checklist (ChatGPT, Android 10-15) implemented here:
  * - FOREGROUND_SERVICE_MEDIA_PROJECTION declared in the manifest.
  * - startForeground(id, notification, FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
- *   — the 3-arg overload, mandatory on Android 14+.
+ *   — the 3-arg overload, mandatory on Android 14+ — for LIVE capture only.
+ *   Demo mode has no MediaProjection token, and on Android 14+ a
+ *   mediaProjection-type FGS without one throws SecurityException and
+ *   crashes the process (v1.0.0 bug, caught by the instrumented tests).
+ *   Demo therefore starts with FOREGROUND_SERVICE_TYPE_SPECIAL_USE on 34+
+ *   (declared in the manifest with its subtype property) and with the
+ *   typeless startForeground overload below 34, where the token check
+ *   does not exist.
  * - OpenCV warm-up happens AFTER startForeground (5-second timeout on 14+).
  * - The MediaProjection token is created in THIS process, in this service,
  *   from the resultCode/data the Activity passes immediately.
@@ -123,12 +130,26 @@ class CaptureService : Service() {
         store = CalibrationStore(this)
 
         // 1. Notification + startForeground FIRST (5s timeout on Android 14+).
+        // The FGS type depends on the mode: live capture holds a real
+        // MediaProjection token and uses the mediaProjection type; demo mode
+        // has no token, so on 14+ it must NOT use that type (SecurityException
+        // -> process crash), and on older releases it uses the typeless
+        // overload, where the token check does not exist.
         createNotificationChannel()
-        startForeground(
-            NOTIF_ID,
-            buildNotification("Starting capture…"),
-            android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-        )
+        val notif = buildNotification("Starting capture…")
+        if (demoMode && Build.VERSION.SDK_INT >= 34) {
+            startForeground(
+                NOTIF_ID, notif,
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            )
+        } else if (demoMode) {
+            startForeground(NOTIF_ID, notif)
+        } else {
+            startForeground(
+                NOTIF_ID, notif,
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            )
+        }
 
         // 2. Heavy work only AFTER startForeground.
         if (!OpenCvInit.ensureLoaded()) {

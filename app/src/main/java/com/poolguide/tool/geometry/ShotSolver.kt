@@ -22,6 +22,34 @@ object ShotSolver {
     /** Cut angle above this is a thin cut with very low margin. */
     const val THIN_CUT_DEGREES = 80.0
 
+    /** Cut angles within this of each other count as a tie: the first-listed
+     * pocket wins, so sub-degree detection noise cannot flip a symmetric
+     * layout (e.g. the synthetic green table, where the top-right and
+     * bottom-right pockets tie at ~30 degrees — the depicted shot is the
+     * top-right one, listed first). */
+    const val TIE_MARGIN_DEGREES = 1.0
+
+    /** Best direct shot across [pockets]: the smallest cut angle, with the
+     * first-listed pocket winning ties within [TIE_MARGIN_DEGREES].
+     * Returns null when no pocket is reachable. */
+    fun bestShot(
+        cue: Vec2,
+        target: Vec2,
+        pockets: List<Vec2>,
+        ballRadiusPx: Double
+    ): ShotSolution? {
+        var best: ShotSolution? = null
+        for (pocket in pockets) {
+            val solved = solveShot(cue, target, pocket, ballRadiusPx) ?: continue
+            if (best == null ||
+                solved.cutAngleDegrees < best.cutAngleDegrees - TIE_MARGIN_DEGREES
+            ) {
+                best = solved
+            }
+        }
+        return best
+    }
+
     /** Result of solving one direct (no-bank) shot. */
     data class ShotSolution(
         /** Ghost-ball point: where the cue-ball centre must be at impact. */

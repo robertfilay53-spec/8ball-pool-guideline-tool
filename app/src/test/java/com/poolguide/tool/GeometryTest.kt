@@ -151,6 +151,47 @@ class ShotSolverTest {
         assertEquals(90.0, angle, 1e-6)
         assertEquals(0.0, ShotSolver.cutAngleDegrees(Vec2(1.0, 0.0), Vec2(1.0, 0.0)), 1e-6)
     }
+
+    @Test
+    fun `pocket tie within one degree goes to the first-listed pocket`() {
+        // Symmetric layout (the synthetic green table): cue (197,202),
+        // target (394,202), top-right and bottom-right pockets tie at
+        // ~30 degrees. The first-listed pocket must win so detection
+        // noise cannot flip the pick.
+        val cue = Vec2(197.0, 202.0)
+        val target = Vec2(394.0, 202.0)
+        val topRight = Vec2(666.5, 60.5)
+        val bottomRight = Vec2(666.5, 344.5)
+        val best = ShotSolver.bestShot(cue, target, listOf(topRight, bottomRight), 9.0)
+        assertNotNull(best)
+        best!!
+        assertEquals(topRight, best.targetLine.end)
+        assertEquals(30.2, best.cutAngleDegrees, 0.5)
+    }
+
+    @Test
+    fun `a clearly better pocket wins over list order`() {
+        // First-listed pocket is a ~60 degree cut; the second is ~30.
+        // A 30-degree gap is far outside the 1-degree tie margin.
+        val cue = Vec2(197.0, 202.0)
+        val target = Vec2(394.0, 202.0)
+        val bad = Vec2(500.0, 50.0)
+        val good = Vec2(666.5, 344.5)
+        val best = ShotSolver.bestShot(cue, target, listOf(bad, good), 9.0)
+        assertNotNull(best)
+        best!!
+        assertEquals(good, best.targetLine.end)
+        assertEquals(30.2, best.cutAngleDegrees, 0.5)
+    }
+
+    @Test
+    fun `no reachable pocket returns null`() {
+        val cue = Vec2(197.0, 202.0)
+        val target = Vec2(394.0, 202.0)
+        // Both pockets sit behind the target relative to the cue.
+        val behind = listOf(Vec2(100.0, 50.0), Vec2(100.0, 350.0))
+        assertNull(ShotSolver.bestShot(cue, target, behind, 9.0))
+    }
 }
 
 class TableGeometryTest {
