@@ -23,6 +23,15 @@
 # the app was installed ("No UID for com.poolguide.tool"), so the script
 # must install the debug APK first; boots took 575-800s, so the boot
 # timeout is raised to 1200s.
+#
+# Release signing (fix for v1.0.0 being debug-signed): the build job
+# decodes the persistent release keystore from the
+# RELEASE_KEYSTORE_BASE64 secret into release.keystore and exports the
+# four RELEASE_* env vars, so the release APK is signed with the same
+# key on every run (CN=Pool Guide). v1.0.0 shipped debug-signed, so
+# v1.0.1 requires uninstall + reinstall once; the signature then stays
+# stable for all future releases. The keystore file itself is never
+# committed; the backup lives outside the repo.
 name: Android CI
 
 on:
@@ -57,6 +66,19 @@ jobs:
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
+
+      - name: Decode release keystore
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > release.keystore
+          echo "RELEASE_KEYSTORE_FILE=$GITHUB_WORKSPACE/release.keystore" >> "$GITHUB_ENV"
+          echo "RELEASE_KEYSTORE_PASSWORD=$RELEASE_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+          echo "RELEASE_KEY_ALIAS=$RELEASE_KEY_ALIAS" >> "$GITHUB_ENV"
+          echo "RELEASE_KEY_PASSWORD=$RELEASE_KEY_PASSWORD" >> "$GITHUB_ENV"
 
       - name: Build release APK + run unit tests
         run: ./gradlew assembleRelease testDebugUnitTest --stacktrace
