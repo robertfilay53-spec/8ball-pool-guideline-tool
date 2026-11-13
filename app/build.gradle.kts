@@ -26,14 +26,37 @@ android {
         }
     }
 
+    signingConfigs {
+        create("release") {
+            // Release signing via env vars (CI decodes the release keystore
+            // from the RELEASE_KEYSTORE_BASE64 secret). When the env vars
+            // are absent (local builds) this config is unused — the release
+            // build type falls back to the debug signing config below.
+            val keystorePath = System.getenv("RELEASE_KEYSTORE_FILE")
+            if (!keystorePath.isNullOrBlank()) {
+                storeFile = file(keystorePath)
+                storePassword = System.getenv("RELEASE_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("RELEASE_KEY_ALIAS")
+                keyPassword = System.getenv("RELEASE_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
             isShrinkResources = false
-            // v1 is signed with the debug keystore (documented in README).
-            // A proper release keystore is a maintainer step before any
-            // wide distribution; the APK is sideloaded, not Play Store.
-            signingConfig = signingConfigs.getByName("debug")
+            // Signed with the persistent release keystore in CI (env vars
+            // present); locally, without the keystore, falls back to debug
+            // signing so the build still works. NOTE: v1.0.0 shipped
+            // debug-signed, so v1.0.1 (first release-signed build) requires
+            // uninstall + reinstall — the signature changes once, then
+            // stays stable for all future releases.
+            signingConfig = if (System.getenv("RELEASE_KEYSTORE_FILE").isNullOrBlank()) {
+                signingConfigs.getByName("debug")
+            } else {
+                signingConfigs.getByName("release")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
