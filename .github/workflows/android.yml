@@ -10,6 +10,14 @@
 #   build — Gradle build + JVM unit tests + assembleRelease APK (artifact).
 #   emulator-test — instrumented tests on an API 34 x86_64 emulator, with
 #     the overlay permission pre-granted (the overlay tests need it).
+#
+# SDK setup note (fix for run 43474188020): android-actions/setup-android@v3
+# runs `sdkmanager tools`, and the legacy `tools` package no longer exists
+# in current cmdline-tools — that step failed with exit code 1 before
+# Gradle ever ran. ubuntu-latest runners ship a preinstalled Android SDK
+# (ANDROID_HOME set, cmdline-tools/latest present), so we use it directly:
+# add cmdline-tools + platform-tools to PATH, accept licenses, and install
+# exactly the components the build needs.
 name: Android CI
 
 on:
@@ -32,7 +40,12 @@ jobs:
           java-version: "17"
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        run: |
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
+          yes | sdkmanager --licenses >/dev/null
+          sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools"
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v3
@@ -72,7 +85,12 @@ jobs:
           java-version: "17"
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        run: |
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
+          yes | sdkmanager --licenses >/dev/null
+          sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools"
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v3
