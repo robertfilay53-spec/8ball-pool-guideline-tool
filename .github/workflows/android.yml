@@ -18,6 +18,11 @@
 # (ANDROID_HOME set, cmdline-tools/latest present), so we use it directly:
 # add cmdline-tools + platform-tools to PATH, accept licenses, and install
 # exactly the components the build needs.
+#
+# Emulator-test fix (run 43475219203): the appops overlay grant ran BEFORE
+# the app was installed ("No UID for com.poolguide.tool"), so the script
+# must install the debug APK first; boots took 575-800s, so the boot
+# timeout is raised to 1200s.
 name: Android CI
 
 on:
@@ -110,8 +115,10 @@ jobs:
           cores: 4
           ram-size: 6144M
           heap-size: 1024M
+          emulator-boot-timeout: 1200
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
           script: |
+            ./gradlew installDebug
             adb shell appops set --uid com.poolguide.tool SYSTEM_ALERT_WINDOW allow
             ./gradlew connectedDebugAndroidTest --stacktrace
 
