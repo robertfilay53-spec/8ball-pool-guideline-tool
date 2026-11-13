@@ -1,0 +1,106 @@
+# CI for the 8 Ball Pool Guideline Tool.
+#
+# HOW TO ADD: the VM's GitHub token has no `workflow` scope, so workflow
+# files cannot be pushed from the VM. Add this file via the GitHub web UI:
+# repo -> Add file -> Create new file -> path
+# `.github/workflows/android.yml` -> paste this content -> Commit.
+# Then trigger a run with: gh workflow run android.yml
+#
+# Two jobs:
+#   build — Gradle build + JVM unit tests + assembleRelease APK (artifact).
+#   emulator-test — instrumented tests on an API 34 x86_64 emulator, with
+#     the overlay permission pre-granted (the overlay tests need it).
+name: Android CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build release APK + run unit tests
+        run: ./gradlew assembleRelease testDebugUnitTest --stacktrace
+
+      - name: Upload release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: pool-guide-release-apk
+          path: app/build/outputs/apk/release/app-release.apk
+          retention-days: 30
+
+      - name: Upload unit test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-reports
+          path: app/build/reports/tests/testDebugUnitTest/
+          retention-days: 14
+
+  emulator-test:
+    runs-on: ubuntu-latest
+    needs: build
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      # The overlay tests add real TYPE_APPLICATION_OVERLAY windows, which
+      # needs the permission granted first. The script runs line by line.
+      - name: Run instrumented tests on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7_pro
+          cores: 4
+          ram-size: 6144M
+          heap-size: 1024M
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          script: |
+            adb shell appops set --uid com.poolguide.tool SYSTEM_ALERT_WINDOW allow
+            ./gradlew connectedDebugAndroidTest --stacktrace
+
+      - name: Upload instrumented test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: instrumented-test-reports
+          path: app/build/reports/androidTests/
+          retention-days: 14
