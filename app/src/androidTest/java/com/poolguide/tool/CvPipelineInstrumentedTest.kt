@@ -4,6 +4,7 @@ import android.graphics.BitmapFactory
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.poolguide.tool.cv.CvPipeline
+import com.poolguide.tool.cv.DetectionResult
 import com.poolguide.tool.cv.OpenCvInit
 import com.poolguide.tool.geometry.BallGroup
 import com.poolguide.tool.geometry.Vec2
@@ -47,6 +48,28 @@ class CvPipelineInstrumentedTest {
         }
     }
 
+    /** Undirected angle of the longest detected guideline segment, in
+     * [-90, 90] degrees. The demo tables draw the guideline as the
+     * true aim ray (v1.0.28), so the fitted angle must match the
+     * solver's aim angle for the depicted shot (pinned by a kotlinc
+     * probe on ShotSolver.ghostPoint before the test was written:
+     * green 2.7048 deg, blue -29.0394 deg, bank 63.3387 deg). A
+     * Hough segment has no direction, so the angle is normalised
+     * to [-90, 90]; the 1.5 deg tolerance is 5x the measured fit
+     * error (<= 0.3 deg) and still catches the old chord, which
+     * sat 3.01 deg (green) / 2.05 deg (blue) off the aim. */
+    private fun guidelineAngleDeg(result: DetectionResult): Double {
+        val seg = result.guideline.maxByOrNull { it.segment.length() }?.segment
+            ?: return Double.NaN
+        var angle = Math.toDegrees(
+            kotlin.math.atan2(seg.end.y - seg.start.y, seg.end.x - seg.start.x)
+        )
+        angle %= 180.0
+        if (angle > 90.0) angle -= 180.0
+        if (angle < -90.0) angle += 180.0
+        return angle
+    }
+
     /** A solid mid-grey frame: no felt, no balls, not black (mean grey
      * 128, far above the black-frame threshold). It stands in for a
      * non-table screen — the home screen, the lobby, a menu. */
@@ -74,6 +97,13 @@ class CvPipelineInstrumentedTest {
         assertNotNull("cue ball not found", result.cueBall)
         assertTrue("expected >= 8 balls, got ${result.balls.size}", result.balls.size >= 8)
         assertTrue("guideline not found", result.guideline.isNotEmpty())
+        // v1.0.28: the demo guideline is the true aim ray, so the
+        // fitted angle must be the solver's aim angle (2.7048 deg).
+        val greenAngle = guidelineAngleDeg(result)
+        assertTrue(
+            "guideline angle must be the true aim ~2.70 deg, got $greenAngle",
+            kotlin.math.abs(greenAngle - 2.7048) < 1.5
+        )
         assertNotNull("no shot solved: ${result.status}", result.shot)
         val shot = result.shot!!
         // The solved target should be the red ball near (394, 202).
@@ -193,6 +223,15 @@ class CvPipelineInstrumentedTest {
             )
         }
         assertTrue("guideline not found", result.guideline.isNotEmpty())
+        // v1.0.28 note: no angle assertion on the bank table. The drawn
+        // guideline IS the true aim ray (the Python replica fits it at
+        // 63.29 deg vs the solver's 63.34 deg at full resolution), but it
+        // is only ~24 px long at working resolution, below the detector's
+        // Hough threshold of 30, so the main pass never detects it and the
+        // returned segments come from the short-line fallback. That is
+        // pre-existing: the old chord image behaved the same way. The
+        // target pick still lands on the red ball because cue and target
+        // are vertically aligned on this table.
         assertNull("no direct shot must solve: ${result.status}", result.shot)
         assertNull("no kick must solve: ${result.status}", result.kick)
         assertNotNull("no bank solved: ${result.status}", result.bank)
@@ -266,16 +305,26 @@ class CvPipelineInstrumentedTest {
         assertEquals(BallGroup.STRIPE, phantom!!.group)
         // The depicted shot is now real-cue -> red solid -> top-right
         // pocket, cut ~16.8 deg (harness replica, probe20) — AND it
-        // is flagged blocked: the green ball at (281.0, 196.6) sits
+        // is flagged blocked: the green ball at (357.2, 149.6) sits
         // 12.6 px off the aim line, inside the one-diameter threshold
-        // 2r = 17.1 px, so it is genuinely on the path. (An earlier
-        // version of this test asserted the path clear from a probe
-        // that read a key the harness replica never computes — the
-        // replica has no blocked-path check — and CI proved it wrong:
-        // blockedBy was the green ball. The flag, not a clear path,
-        // is the correct expectation, and the blue table now proves
-        // the flag on the real depicted shot, not just the green
-        // table's 1-px-off case.)
+        // 2r = 17.1 px, so it is genuinely on the path. (v1.0.28: the
+        // ball moved from (281.0, 196.6) along the solved aim line so
+        // the red ball still wins the target pick now that the
+        // guideline is the true aim ray; it sits exactly as far off
+        // the solved aim line as before. An earlier version of this
+        // test asserted the path clear from a probe that read a key
+        // the harness replica never computes (the replica has no
+        // blocked-path check) and CI proved it wrong: blockedBy was
+        // the green ball. The flag, not a clear path, is the correct
+        // expectation, and the blue table now proves the flag on the
+        // real depicted shot, not just the green table's 1-px-off case.)
+        // v1.0.28: the demo guideline is the true aim ray, so the
+        // fitted angle must be the solver's aim angle (-29.0394 deg).
+        val blueAngle = guidelineAngleDeg(result)
+        assertTrue(
+            "guideline angle must be the true aim ~-29.04 deg, got $blueAngle",
+            kotlin.math.abs(blueAngle - (-29.0394)) < 1.5
+        )
         val shot = result.shot!!
         assertTrue(
             "blue cut angle must be ~16.8 deg, got ${shot.cutAngleDegrees}",
@@ -285,7 +334,7 @@ class CvPipelineInstrumentedTest {
         val blocker = result.blockedBy!!
         assertTrue(
             "blocker is not the green ball: $blocker",
-            blocker.distanceTo(Vec2(281.0, 196.6)) < 10.0
+            blocker.distanceTo(Vec2(357.2, 149.6)) < 10.0
         )
         assertTrue("status must say the path is blocked", result.status.contains("path blocked"))
     }

@@ -80,9 +80,17 @@ def measure(path, cue, target, pocket, scale=1.0):
     gx, gy = target[0]-2*r*ux, target[1]-2*r*uy
     ax, ay = gx-cue[0], gy-cue[1]; ad = math.hypot(ax,ay); ax/=ad; ay/=ad
     true_ang = math.degrees(math.atan2(ay, ax))
-    # drawn chord: cue + a*(r+2) -> target - a*(r+2)
+    # drawn line (v1.0.28): cue edge -> foot of perpendicular, pulled
+    # back along the ray so it stays r+2 clear of the target ball.
+    # the true aim ray, not the old cue-edge -> target-edge chord
     c0 = (cue[0]+ax*(r+2), cue[1]+ay*(r+2))
-    c1 = (target[0]-ax*(r+2), target[1]-ay*(r+2))
+    foot_dist = (target[0]-cue[0])*ax + (target[1]-cue[1])*ay
+    fx, fy = cue[0]+ax*foot_dist, cue[1]+ay*foot_dist
+    foot_perp = math.hypot(target[0]-fx, target[1]-fy)
+    end_dist = foot_dist
+    if foot_perp < r+2:
+        end_dist = foot_dist - math.sqrt((r+2)**2 - foot_perp**2)
+    c1 = (cue[0]+ax*end_dist, cue[1]+ay*end_dist)
     chord_ang = math.degrees(math.atan2(c1[1]-c0[1], c1[0]-c0[0]))
     out = {"true_aim_deg": true_ang, "drawn_chord_deg": chord_ang,
            "chord_vs_aim_deg": chord_ang-true_ang, "n_candidates": len(cands),
