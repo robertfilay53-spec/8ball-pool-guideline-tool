@@ -5,6 +5,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.poolguide.tool.cv.CvPipeline
 import com.poolguide.tool.cv.OpenCvInit
+import com.poolguide.tool.geometry.Vec2
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -92,6 +93,18 @@ class CvPipelineInstrumentedTest {
         assertTrue("allShots must not be empty", result.allShots.isNotEmpty())
         assertEquals("best shot must be allShots.first()", shot, result.allShots.first())
         assertTrue("expected >1 candidate shot, got ${result.allShots.size}", result.allShots.size > 1)
+        // v1.0.19: the depicted best shot is blocked — the yellow
+        // 1-ball sits ~1 px off the target line to the top-right
+        // pocket — so the pipeline flags it instead of drawing the
+        // line as a clean make. The flag names the blocking ball,
+        // and the status line says so.
+        assertNotNull("best shot must be flagged blocked", result.blockedBy)
+        val blocker = result.blockedBy!!
+        assertTrue(
+            "blocker is not the yellow 1-ball: $blocker",
+            blocker.distanceTo(Vec2(506.25, 140.62)) < 30.0
+        )
+        assertTrue("status must say the path is blocked", result.status.contains("path blocked"))
     }
 
     @Test
@@ -105,6 +118,16 @@ class CvPipelineInstrumentedTest {
         assertNotNull("blue table not found", result.table)
         assertNotNull("blue cue ball not found", result.cueBall)
         assertNotNull("no shot on blue table: ${result.status}", result.shot)
+        // v1.0.19: the blue best shot is blocked too — the green
+        // 6-ball sits on the aim line — so the flag must be set
+        // here as well, naming that ball.
+        assertNotNull("blue best shot must be flagged blocked", result.blockedBy)
+        val blocker = result.blockedBy!!
+        assertTrue(
+            "blocker is not the green 6-ball: $blocker",
+            blocker.distanceTo(Vec2(281.25, 196.88)) < 30.0
+        )
+        assertTrue("status must say the path is blocked", result.status.contains("path blocked"))
     }
 
     @Test

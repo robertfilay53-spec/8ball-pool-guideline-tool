@@ -256,6 +256,31 @@ screen. Nothing about the game is changed.**
     tap Save. Applying a preset fills the screen only; nothing is
     kept until Save.
 
+20. **A blocked path is flagged, not re-ranked.** Since v1.0.19
+    the tool checks whether another detected ball sits on the
+    shown shot's path (within one ball diameter of the cue's aim
+    line or the potted ball's path, for direct, bank, and kick
+    shots) and flags it: a "Path blocked" label over the table in
+    the warning amber, "— path blocked by another ball" on the
+    status line, and "— blocked" on the shot-history line. The
+    line itself stays drawn — the flag is a warning, not a
+    re-ranking: the best shot stays the best shot even when it is
+    blocked, and the faint candidate lines are not flagged. That
+    is deliberate, not an oversight: the project's own fixtures
+    depict blocked shots (the green demo table's best shot has the
+    yellow 1-ball sitting 1 px off the target line, and 11 of the
+    15 harness tables inherit that layout), so re-ranking to a
+    clear pocket would invalidate the demo and harness baselines.
+    Re-ranking is a later slice, once the fixtures are rebuilt
+    with clear paths. Combo and kiss shots are not flagged in
+    v1.0.19 either: their potting chain has two struck balls and
+    the second leg's path is only defined once the first leg
+    lands. Detection noise (~0.4 px on the synthetic tables) can
+    flip the verdict for a ball sitting within a pixel or two of
+    the one-diameter boundary, and EDIT mode never shows the flag
+    (the frozen shot is the player's manual aim, not the live
+    detection the flag belongs to).
+
 ## How it works
 
 ```
@@ -269,7 +294,8 @@ MediaProjection + VirtualDisplay (960x540, foreground service)
         -> HoughLinesP (30/15/8) -> verifier -> robust refit -> LineTracker
   -> shot solver (ghost ball, cut angle, tangent, mirror-pocket banks
      (one- and two-rail), mirror-ghost kicks (one- and two-rail), combo + kiss
-     shots; every reachable pocket ranked, best first)
+     shots; every reachable pocket ranked, best first; the shown shot is
+     flagged "Path blocked" when another ball sits on its path)
   -> one small TYPE_APPLICATION_OVERLAY window per line (best shot in
      full colour, other candidates faint — PoolAimAssist UX)
 ```
@@ -445,7 +471,8 @@ runs the instrumented tests on API 34 (x86_64). The workflow file is
 
 ```
 app/src/main/java/com/poolguide/tool/
-  geometry/   Vec2, ShotSolver            (pure Kotlin, JVM-testable)
+  geometry/   Vec2, ShotSolver, PathBlock, BlockedPathLabel
+              (pure Kotlin, JVM-testable)
   cv/         CvConfig, TableGeometry, TableDetector, BallDetector,
               GuidelineDetector, CvPipeline, OpenCvInit,
               RatioTableGeometry (fallback table from frame size)
@@ -455,7 +482,8 @@ app/src/main/java/com/poolguide/tool/
               (one small window per line; specialUse foreground svc;
               EDIT mode: frozen shot + draggable cue/ghost anchors)
   data/       CalibrationStore, GameProfile (per-version calibration),
-              TablePreset (7ft/8ft/9ft table-size presets)
+              TablePreset (7ft/8ft/9ft table-size presets),
+              ShotHistory (last 8 solved shots, with the blocked flag)
   ui/         MainActivity, CalibrationActivity, PracticeState,
               PracticeView, PracticeActivity (offline practice table)
 app/src/main/assets/demo/  synthetic tables + black frame (tests + demo mode)
