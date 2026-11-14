@@ -6,13 +6,13 @@ import android.content.Intent
 import android.provider.Settings
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import com.poolguide.tool.capture.CaptureService
 import com.poolguide.tool.cv.DetectionResult
 import com.poolguide.tool.data.CalibrationStore
 import com.poolguide.tool.geometry.Segment
 import com.poolguide.tool.geometry.ShotSolver
 import com.poolguide.tool.geometry.Vec2
 import com.poolguide.tool.overlay.LineOverlayManager
+import com.poolguide.tool.overlay.OverlayService
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -31,9 +31,14 @@ class OverlayInstrumentedTest {
         InstrumentationRegistry.getInstrumentation().targetContext
 
     private fun shotResult(): DetectionResult {
-        val shot = ShotSolver.solveShot(
-            Vec2(100.0, 200.0), Vec2(300.0, 200.0), Vec2(600.0, 50.0), 9.0
-        )!!
+        // Three candidate shots to three pockets (same target ball),
+        // ranked by ShotSolver.allShots — best first.
+        val all = ShotSolver.allShots(
+            Vec2(100.0, 200.0), Vec2(300.0, 200.0),
+            listOf(Vec2(600.0, 50.0), Vec2(600.0, 350.0), Vec2(650.0, 200.0)),
+            9.0
+        )
+        val shot = all.first()
         return DetectionResult(
             frameIndex = 1,
             workingWidth = 720,
@@ -52,6 +57,7 @@ class OverlayInstrumentedTest {
             ),
             shot = shot,
             bank = null,
+            allShots = all,
             status = "Shot to pocket"
         )
     }
@@ -68,8 +74,17 @@ class OverlayInstrumentedTest {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
 
         // A shot draws 4 windows: aim, target, deflection, pocket ring.
+        // With "Show all shots" on, the 2 extra candidates add 2 faint
+        // windows each (aim + target): 4 + 4 = 8.
+        store.showAllShots = true
         instrumentation.runOnMainSync { manager.update(shotResult()) }
-        assertEquals("expected 4 line windows", 4, manager.lineWindowCount)
+        assertEquals("expected 8 line windows with all shots", 8, manager.lineWindowCount)
+
+        // Toggle off: only the best shot's 4 windows.
+        store.showAllShots = false
+        instrumentation.runOnMainSync { manager.update(shotResult()) }
+        assertEquals("expected 4 line windows with all shots off", 4, manager.lineWindowCount)
+        store.showAllShots = true
 
         // Hide toggle removes them all.
         store.guidesHidden = true
@@ -79,7 +94,7 @@ class OverlayInstrumentedTest {
         // Black frame removes them too.
         store.guidesHidden = false
         instrumentation.runOnMainSync { manager.update(shotResult()) }
-        assertEquals(4, manager.lineWindowCount)
+        assertEquals(8, manager.lineWindowCount)
         val black = shotResult().copy(isCaptureBlack = true, shot = null, guideline = emptyList())
         instrumentation.runOnMainSync { manager.update(black) }
         assertEquals("black frame must remove all line windows", 0, manager.lineWindowCount)
@@ -91,8 +106,10 @@ class OverlayInstrumentedTest {
     @Test
     fun demoService_startsAndStaysRunning() {
         val ctx = appContext()
-        val start = Intent(ctx, CaptureService::class.java).apply {
-            action = CaptureService.ACTION_DEMO
+        // Demo runs in the OverlayService alone (FGS split, v1.0.2):
+        // specialUse, no MediaProjection token, no capture service.
+        val start = Intent(ctx, OverlayService::class.java).apply {
+            action = OverlayService.ACTION_DEMO
         }
         ctx.startForegroundService(start)
         // Let the demo loop run a few frames.
@@ -100,11 +117,11 @@ class OverlayInstrumentedTest {
         val am = ctx.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
         @Suppress("DEPRECATION")
         val running = am.getRunningServices(Int.MAX_VALUE)
-            .any { it.service.className == CaptureService::class.java.name }
-        assertTrue("CaptureService should still be running in demo mode", running)
+            .any { it.service.className == OverlayService::class.java.name }
+        assertTrue("OverlayService should still be running in demo mode", running)
 
-        val stop = Intent(ctx, CaptureService::class.java).apply {
-            action = CaptureService.ACTION_STOP
+        val stop = Intent(ctx, OverlayService::class.java).apply {
+            action = OverlayService.ACTION_STOP
         }
         ctx.startService(stop)
         Thread.sleep(1000)

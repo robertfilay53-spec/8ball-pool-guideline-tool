@@ -61,6 +61,13 @@
         android:layout_marginTop="4dp"
         android:text="@string/preview_switch" />
 
+    <Switch
+        android:id="@+id/show_all_shots_switch"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text="@string/show_all_shots" />
+
     <ImageView
         android:id="@+id/preview_image"
         android:layout_width="match_parent"

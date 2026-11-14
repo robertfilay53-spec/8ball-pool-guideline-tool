@@ -20,11 +20,14 @@
 
     <string name="preview_title">Diagnostic preview (what the tool actually sees)</string>
     <string name="preview_switch">Show captured frame</string>
+    <string name="show_all_shots">Show all shots (best highlighted, others faint)</string>
     <string name="preview_ok">Capture looks fine — the table is visible.</string>
     <string name="preview_black">Capture is BLACK. The game is probably using FLAG_SECURE, so the tool cannot see the table. There is no legitimate bypass.</string>
 
     <string name="notif_channel_name">Screen capture</string>
     <string name="notif_channel_desc">Shows while the guideline tool is capturing the screen.</string>
+    <string name="notif_overlay_channel_name">Guide overlay</string>
+    <string name="notif_overlay_channel_desc">Shows while the aim-line overlay is active.</string>
 
     <string name="overlay_needed">The tool needs “Display over other apps” to draw aim lines. Please enable it, then come back.</string>
 

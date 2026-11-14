@@ -1,5 +1,6 @@
 package com.poolguide.tool.cv
 
+import com.poolguide.tool.data.GameProfile
 import com.poolguide.tool.geometry.Rail
 import com.poolguide.tool.geometry.Segment
 import com.poolguide.tool.geometry.ShotSolver
@@ -73,6 +74,12 @@ class CvPipeline(
     /** Manual table corners from calibration (normalised 0-1), or null. */
     var tableOverrideNormalized: List<Vec2>? = null
 
+    /** Per-game-version calibration profile (aimcall lead): pocket
+     * fractions + ball radius for the detected game version. Set by the
+     * service from the CalibrationStore; defaults match the old
+     * hardcoded fractions. */
+    var gameProfile: GameProfile = GameProfile.DEFAULT
+
     private var screenWidth = screenWidth
     private var screenHeight = screenHeight
 
@@ -121,9 +128,9 @@ class CvPipeline(
             }
 
         val runHough = frameIndex % CvConfig.HOUGH_CIRCLES_EVERY_N_FRAMES == 0L
-        val pocketRadiusPx = table?.let { it.width * CvConfig.POCKET_RADIUS_FRACTION } ?: 12.0
+        val pocketRadiusPx = table?.let { it.width * gameProfile.pocketRadiusFraction } ?: 12.0
         val balls = ballDetector.detect(
-            hsv, gray, table, table?.pockets() ?: emptyList(), runHough, frameIndex,
+            hsv, gray, table, table?.pockets(gameProfile) ?: emptyList(), runHough, frameIndex,
             tableDetector.feltHsvMean, pocketRadiusPx
         )
         val cue = balls.firstOrNull { it.isCue }
@@ -137,8 +144,8 @@ class CvPipeline(
                 lastGuideline
             }
 
-        val pockets = table?.pockets() ?: emptyList()
-        val (shot, bank, status) = solveFor(cue, balls, pockets, guideline)
+        val pockets = table?.pockets(gameProfile) ?: emptyList()
+        val outcome = solveFor(cue, balls, pockets, guideline)
 
         return DetectionResult(
             frameIndex = frameIndex,
@@ -152,9 +159,10 @@ class CvPipeline(
             balls = balls,
             cueBall = cue,
             guideline = guideline,
-            shot = shot,
-            bank = bank,
-            status = status
+            shot = outcome.shot,
+            bank = outcome.bank,
+            allShots = outcome.allShots,
+            status = outcome.status
         )
     }
 
@@ -201,6 +209,15 @@ class CvPipeline(
         }
     }
 
+    /** One frame's solve: best direct shot, every candidate shot, a
+     * one-rail bank fallback, and the status line. */
+    private data class SolveOutcome(
+        val shot: ShotSolver.ShotSolution?,
+        val bank: ShotSolver.BankSolution?,
+        val allShots: List<ShotSolver.ShotSolution>,
+        val status: String
+    )
+
     /**
      * Pick the target ball (nearest ball along the guideline ray from the cue
      * ball; nearest ball overall when no guideline is visible) and the pocket
@@ -212,33 +229,35 @@ class CvPipeline(
         balls: List<Ball>,
         pockets: List<Vec2>,
         guideline: List<GuidelineSegment>
-    ): Triple<ShotSolver.ShotSolution?, ShotSolver.BankSolution?, String> {
-        if (cue == null) return Triple(null, null, "Cue ball not found")
-        if (pockets.isEmpty()) return Triple(null, null, "Table not found")
+    ): SolveOutcome {
+        if (cue == null) return SolveOutcome(null, null, emptyList(), "Cue ball not found")
+        if (pockets.isEmpty()) return SolveOutcome(null, null, emptyList(), "Table not found")
         val target = pickTarget(cue, balls, guideline)
-            ?: return Triple(null, null, "No target ball in line")
+            ?: return SolveOutcome(null, null, emptyList(), "No target ball in line")
         val radius = (cue.radiusPx + target.radiusPx) / 2.0
 
-        // Best direct shot: smallest cut angle, first-listed pocket wins
-        // ties within the tie margin (a symmetric layout must not flip
-        // on sub-degree detection noise).
-        val best = ShotSolver.bestShot(cue.center, target.center, pockets, radius)
+        // Every direct shot, best first: smallest cut angle, first-listed
+        // pocket wins ties within the tie margin (a symmetric layout must
+        // not flip on sub-degree detection noise). The best is
+        // allShots.firstOrNull(); the overlay draws the rest faint.
+        val all = ShotSolver.allShots(cue.center, target.center, pockets, radius)
+        val best = all.firstOrNull()
         if (best != null) {
             val warn = if (best.isThinCut) " — thin cut, very low margin" else ""
-            return Triple(best, null, "Shot to pocket${warn}")
+            return SolveOutcome(best, null, all, "Shot to pocket$warn")
         }
 
         // No direct shot: try one-rail banks.
-        val tableRect = table ?: return Triple(null, null, "No shot found")
+        val tableRect = table ?: return SolveOutcome(null, null, emptyList(), "No shot found")
         val rails = railsOf(tableRect)
         for (pocket in pockets) {
             for (rail in rails) {
                 val bank = ShotSolver.solveBank(cue.center, target.center, pocket, rail, radius)
                     ?: continue
-                return Triple(null, bank, "Bank shot (one rail) to pocket")
+                return SolveOutcome(null, bank, emptyList(), "Bank shot (one rail) to pocket")
             }
         }
-        return Triple(null, null, "No shot found for this ball")
+        return SolveOutcome(null, null, emptyList(), "No shot found for this ball")
     }
 
     private fun pickTarget(

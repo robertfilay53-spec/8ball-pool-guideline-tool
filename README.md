@@ -51,35 +51,57 @@ screen. Nothing about the game is changed.**
 ## How it works
 
 ```
-MediaProjection + VirtualDisplay (1280x720, foreground service)
-  -> ImageReader RGBA frames (10-15 FPS, frames dropped when behind)
+MediaProjection + VirtualDisplay (960x540, foreground service)
+  -> ImageReader RGBA frames (15 FPS cap, frames dropped when behind)
   -> OpenCV: downscale to 720 wide, HSV felt mask -> table corners
      -> HSV contours (every frame) + HoughCircles (every 3rd frame) -> balls
         (green/blue ball windows are learned from the felt colour, so a
         ball the same hue as the cloth is still separated from it)
      -> the game's own white guideline: bilateral filter -> Canny (50, 150)
         -> HoughLinesP (30/15/8) -> verifier -> robust refit -> LineTracker
-  -> shot solver (ghost ball, cut angle, tangent, mirror-pocket banks)
-  -> one small TYPE_APPLICATION_OVERLAY window per line
+  -> shot solver (ghost ball, cut angle, tangent, mirror-pocket banks,
+     combo + kiss shots; every reachable pocket ranked, best first)
+  -> one small TYPE_APPLICATION_OVERLAY window per line (best shot in
+     full colour, other candidates faint — PoolAimAssist UX)
 ```
+
+Two foreground services (split in v1.0.2): `CaptureService` is
+mediaProjection only (it holds the MediaProjection token); `OverlayService`
+is specialUse only (it owns the overlay windows + Demo mode, which has no
+token). They talk via `OverlayBus`. One service cannot be both types — on
+Android 14+ a mediaProjection-type foreground service without a token throws
+`SecurityException` and crashes the process (the v1.0.0 demo bug), so the
+split makes that impossible by construction. Stopping either service stops
+both, so the lines never outlive the capture.
 
 - **OpenCV**: Maven AAR `org.opencv:opencv:4.10.0` (4.9+ supports Android
   15's 16 KB page size). Fallback documented in `app/build.gradle.kts`:
   JitPack `com.github.opencv:opencv:4.9.0`.
-- **Performance**: 10-15 FPS is realistic only at ~720p downscale, Hough
-  every 2nd-3rd frame, HSV + contours for coloured balls every frame, Hough
-  restricted to the table ROI, Mat objects reused, detection on a background
-  HandlerThread, never `bitmapToMat` per frame.
+- **Performance**: 15 FPS cap (Scugalug measured targets: capture scale
+  0.75, 15 FPS — the table does not move between frames, and anything
+  faster only heats the phone), ~720p downscale, Hough every 2nd-3rd frame,
+  HSV + contours for coloured balls every frame, Hough restricted to the
+  table ROI, Mat objects reused, detection on a background HandlerThread,
+  never `bitmapToMat` per frame. Aim-fit error measured on the synthetic
+  demo tables with a Python replica of the detector (`tools/measure_aim_fit.py`):
+  **green 0.31 deg, blue 0.04 deg** at full resolution (16 px ball radius),
+  against Scugalug's ~0.25 deg target. Note: the demo images draw the
+  guideline as a chord from cue-edge to target-edge, which itself deviates
+  3.01 deg (green) / 2.05 deg (blue) from the true aim ray — a fixture
+  fidelity note, not a detector error; the guideline should be redrawn as
+  the true aim ray in a later cycle.
 - **Android 10-15 checklist** (all implemented in `CaptureService` /
-  `MainActivity`): `FOREGROUND_SERVICE_MEDIA_PROJECTION` declared (12+);
-  `POST_NOTIFICATIONS` requested at runtime (13+); the 3-argument
-  `startForeground(id, notification, FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)`
-  overload (14+); OpenCV warm-up **after** `startForeground` (5-second
-  timeout on 14+); the MediaProjection token is created in the service's own
-  process and passed to it immediately, never held in the Activity; partial
-  screen sharing (14/15) is handled — whatever the user shares is what is
-  captured, and the diagnostic preview shows it; overlay permission needs
-  explicit user enablement (14+).
+  `OverlayService` / `MainActivity`): `FOREGROUND_SERVICE_MEDIA_PROJECTION`
+  declared (12+); `POST_NOTIFICATIONS` requested at runtime (13+); the
+  3-argument `startForeground(id, notification, ...)` overload (14+), with
+  the mediaProjection type in the capture service and the specialUse type
+  in the overlay service (the FGS split — see "How it works"); OpenCV
+  warm-up **after** `startForeground` (5-second timeout on 14+); the
+  MediaProjection token is created in the service's own process and passed
+  to it immediately, never held in the Activity; partial screen sharing
+  (14/15) is handled — whatever the user shares is what is captured, and
+  the diagnostic preview shows it; overlay permission needs explicit user
+  enablement (14+).
 - **Why targetSdk 34**: it avoids the API 35 install-time foreground-service
   declaration friction for this sideloaded v1, while the code still handles
   Android 15 runtime behaviour (partial sharing, overlay rules) correctly.
@@ -100,7 +122,10 @@ MediaProjection + VirtualDisplay (1280x720, foreground service)
    corners, or tap Re-detect). Calibration is stored per game version.
 5. Play. The green line is your aim, the yellow line is the target ball's
    path, the white line is the cue ball's deflection, the red ring is the
-   pocket. Use **Hide guides** on the floating bubble while shooting.
+   pocket. Every other reachable pocket is also drawn, faint grey — the
+   best shot is the highlighted one. Turn that off with **Show all shots**
+   on the main screen if you only want the best shot. Use **Hide guides**
+   on the floating bubble while shooting.
 
 **Demo mode** (no game needed): the app ships with two synthetic table
 images and runs the full pipeline + overlay on them, so you can verify the
@@ -134,14 +159,18 @@ runs the instrumented tests on API 34 (x86_64). The workflow file is
 - **Unit** (`app/src/test`): ghost-ball point, cut angles (0 / 73.3 / 84.3
   degrees), impossible shots (> 90 degrees, overlapping balls), tangent
   deflection, mirror-pocket and reflection math, bank contact point, pocket
-  positions. The geometry module was also verified locally with a standalone
-  harness: 14/14 checks pass, including the demo-table shot (cut 30.9 deg).
+  positions, allShots ranking + symmetric-tie order, combo shots (straight
+  / cut / impossible / overlap), kiss shots (refined deflection, unrefined
+  fallback, impossible approaches), per-version GameProfile defaults +
+  validation, FramePacer 15 FPS admission. 41 tests.
 - **Instrumented** (`app/src/androidTest`): the real pipeline on the two
   synthetic tables (green + blue felt) — table, 6 pockets, cue ball, 8+
-  balls, guideline, and a solved shot with the expected target and pocket;
-  a pure-black frame is reported as secure; the overlay manager shows one
-  small window per line and hides them on toggle / black frame; the capture
-  service runs in demo mode.
+  balls, guideline, and a solved shot with the expected target and pocket,
+  plus the allShots ranking (best = first, > 1 candidate); a pure-black
+  frame is reported as secure; the overlay manager shows one small window
+  per line (4 for the best shot, +2 faint windows per extra candidate when
+  "Show all shots" is on, 4 when it is off) and hides them on toggle /
+  black frame; the overlay service runs in demo mode.
 - **Not yet tested (needs a real phone + the game)**: FLAG_SECURE blackout,
   `isObscured` behaviour while shooting, real-table CV accuracy across
   table skins and resolutions. See `../phone-test/PHONE-TEST-PLAN.md` in
@@ -154,12 +183,14 @@ app/src/main/java/com/poolguide/tool/
   geometry/   Vec2, ShotSolver            (pure Kotlin, JVM-testable)
   cv/         CvConfig, TableGeometry, TableDetector, BallDetector,
               GuidelineDetector, CvPipeline, OpenCvInit
-  capture/    CaptureService, PreviewBus  (MediaProjection, foreground svc)
-  overlay/    LineView, LineOverlayManager (one small window per line)
-  data/       CalibrationStore           (per-version calibration)
+  capture/    CaptureService, PreviewBus, OverlayBus, FramePacer
+              (MediaProjection, foreground svc; 15 FPS pacing)
+  overlay/    LineView, LineOverlayManager, OverlayService
+              (one small window per line; specialUse foreground svc)
+  data/       CalibrationStore, GameProfile (per-version calibration)
   ui/         MainActivity, CalibrationActivity
 app/src/main/assets/demo/  synthetic tables + black frame (tests + demo mode)
-tools/        generate_demo_images.py
+tools/        generate_demo_images.py, measure_aim_fit.py
 ```
 
 ## Research basis and acknowledgements
@@ -186,8 +217,16 @@ Code and ideas reused (with thanks):
 - **workua94-afk/8ball-aim-master** — guideline detector parameters
   (above) and the 15-frame cache idea; **Scugalug/8-ball-pool-aim-assistant**
   — adaptive cloth-colour learning (the felt's mean HSV tightens the
-  green/blue ball windows); **yasin4815162342/Aim** — the IRLS/Tukey robust
-  line fit (one guarded Tukey-weighted refit of each verified segment).
+  green/blue ball windows), and the measured performance targets used in
+  v1.0.2 (capture scale 0.75, 15 FPS cap, aim fit ~0.25 deg at 16 px ball
+  radius); **yasin4815162342/Aim** — the IRLS/Tukey robust line fit (one
+  guarded Tukey-weighted refit of each verified segment), and the combo /
+  kiss / bank shot geometry (closed-form ghost points, mirror contact
+  normals, e=0.95 bisection refinement).
+- **abwahidmoto-beep/PoolAimAssist** — the all-shots UX: every candidate
+  shot drawn faint, the best highlighted; **projectgtp/aimcall** — the
+  per-game-version calibration profiles (pocket fractions + ball radius
+  per version, never hardcoded geometry).
 - **jonathansilva/8BallPool** (306 stars) — the earliest Android overlay
   approach; its per-device tuning notes and its warning not to reuse the
   package name or publish on the Play Store shaped this project's
