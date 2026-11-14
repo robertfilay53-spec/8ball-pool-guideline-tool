@@ -192,6 +192,42 @@ class OverlayInstrumentedTest {
     }
 
     @Test
+    fun lockRing_showsTableLockProgress() {
+        val ctx = appContext()
+        assertTrue(
+            "overlay permission must be granted for this test",
+            Settings.canDrawOverlays(ctx)
+        )
+        val store = CalibrationStore(ctx).apply { guidesHidden = false }
+        val manager = LineOverlayManager(ctx, store)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+
+        // No bubble yet: no ring to read.
+        assertEquals(-1f, manager.lockRingProgress, 0.001f)
+
+        // A settling table shows its progress (halfway to the lock).
+        instrumentation.runOnMainSync {
+            manager.update(shotResult().copy(tableLocked = false, tableLockProgress = 0.5f))
+        }
+        assertEquals(0.5f, manager.lockRingProgress, 0.001f)
+
+        // A locked table fills the ring.
+        instrumentation.runOnMainSync {
+            manager.update(shotResult().copy(tableLocked = true, tableLockProgress = 1f))
+        }
+        assertEquals(1f, manager.lockRingProgress, 0.001f)
+
+        // No table at all empties it again.
+        instrumentation.runOnMainSync {
+            manager.update(shotResult().copy(tableLocked = false, tableLockProgress = 0f))
+        }
+        assertEquals(0f, manager.lockRingProgress, 0.001f)
+
+        instrumentation.runOnMainSync { manager.removeAll() }
+        assertEquals(-1f, manager.lockRingProgress, 0.001f)
+    }
+
+    @Test
     fun editMode_withNoShotDoesNothing() {
         val ctx = appContext()
         assertTrue(

@@ -71,6 +71,15 @@ class LineOverlayManager(
          * 150 px; ours are smaller — a 48 dp touch target is enough to
          * grab, and a smaller window flags fewer touches as obscured). */
         private const val HANDLE_SIZE_DP = 48f
+        /** Bubble drag threshold (Bloro lead, v1.0.5): a touch must
+         * move this far before it counts as a drag; shorter is a tap. */
+        private const val BUBBLE_DRAG_THRESHOLD_DP = 10f
+        /** Bubble edge-snap margin (Bloro lead, v1.0.5). */
+        private const val BUBBLE_EDGE_MARGIN_DP = 16f
+        /** Lock-progress ring size on the bubble (v1.0.5). */
+        private const val BUBBLE_RING_SIZE_DP = 28f
+        /** Bubble default top offset. */
+        private const val BUBBLE_DEFAULT_Y_DP = 120f
     }
 
     private val windowManager =
@@ -91,6 +100,8 @@ class LineOverlayManager(
     private val handleWindows = mutableListOf<HandleWindow>()
     private var bubbleParams: WindowManager.LayoutParams? = null
     private var bubbleView: View? = null
+    /** Lock-progress ring on the bubble (v1.0.5). */
+    private var lockRing: LockRingView? = null
     private var hideButton: Button? = null
     private var editButton: Button? = null
     private var framesWithoutGuideline = 0
@@ -118,6 +129,11 @@ class LineOverlayManager(
     /** Test-only: the corrected shot currently drawn in EDIT mode. */
     @androidx.annotation.VisibleForTesting
     val editedShot: ShotSolver.ShotSolution? get() = manualAim.currentShot()
+
+    /** Test-only: the lock-ring progress currently shown on the bubble
+     * (-1 when the bubble does not exist yet). */
+    @androidx.annotation.VisibleForTesting
+    val lockRingProgress: Float get() = lockRing?.progress ?: -1f
 
     /** Toggle EDIT mode (the bubble's Edit/Done button). Entering freezes
      * the current shot; leaving resumes the live detection and drops
@@ -161,6 +177,9 @@ class LineOverlayManager(
 
     fun update(result: DetectionResult) {
         ensureBubble()
+        // Lock ring (v1.0.5): fills as the table stabilises, green
+        // once locked, empty while no table is detected.
+        lockRing?.progress = result.tableLockProgress
         lastResult = result
         if (result.guideline.isEmpty()) {
             framesWithoutGuideline++
@@ -510,23 +529,55 @@ class LineOverlayManager(
         lineWindows.clear()
     }
 
+    /** Hide/Show toggle, shared by the bubble's Hide button and a tap
+     * on the bubble background (v1.0.5, Bloro lead). */
+    private fun toggleGuidesHidden() {
+        store.guidesHidden = !store.guidesHidden
+        hideButton?.text = if (store.guidesHidden) context.getString(R.string.show_guides)
+        else context.getString(R.string.hide_guides)
+        if (store.guidesHidden) removeLineWindows()
+    }
+
     // ---- Control bubble (draggable, small footprint) ----
+    // Bubble behaviour (v1.0.5, Bloro lead): drag after 10 dp of
+    // movement; a tap (short, no drag) on the bubble background toggles
+    // the guides; on release after a drag the bubble edge-snaps and its
+    // position is saved. The ring at the left of the bubble shows the
+    // table-lock progress (Bloro's ring showed remaining paid minutes;
+    // ours has no credits, so the ring shows the lock instead).
     private fun ensureBubble() {
         if (bubbleView != null) return
+        val metrics = context.resources.displayMetrics
+        val edgeMarginPx = TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_DIP, BUBBLE_EDGE_MARGIN_DP, metrics
+        ).toInt()
+        val dragThresholdPx = TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_DIP, BUBBLE_DRAG_THRESHOLD_DP, metrics
+        )
+        val ringSizePx = TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_DIP, BUBBLE_RING_SIZE_DP, metrics
+        ).toInt()
+        val defaultYPx = TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_DIP, BUBBLE_DEFAULT_Y_DP, metrics
+        ).toInt()
+
         val layout = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             setBackgroundColor(Color.argb(200, 0, 0, 0))
             setPadding(8, 8, 8, 8)
         }
+        val ring = LockRingView(context).apply {
+            layoutParams = LinearLayout.LayoutParams(ringSizePx, ringSizePx).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                marginEnd = 8
+            }
+        }
+        lockRing = ring
+        layout.addView(ring)
         val hide = Button(context).apply {
             text = if (store.guidesHidden) context.getString(R.string.show_guides)
             else context.getString(R.string.hide_guides)
-            setOnClickListener {
-                store.guidesHidden = !store.guidesHidden
-                text = if (store.guidesHidden) context.getString(R.string.show_guides)
-                else context.getString(R.string.hide_guides)
-                if (store.guidesHidden) removeLineWindows()
-            }
+            setOnClickListener { toggleGuidesHidden() }
         }
         hideButton = hide
         val edit = Button(context).apply {
@@ -542,6 +593,11 @@ class LineOverlayManager(
         layout.addView(edit)
         layout.addView(stop)
 
+        // TOP|START so edge-snapping is plain left/right math. The
+        // saved position wins; otherwise the bubble starts top-right.
+        val screenWidth = metrics.widthPixels
+        val savedX = store.bubbleX
+        val savedY = store.bubbleY
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -550,11 +606,21 @@ class LineOverlayManager(
                 WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.TOP or Gravity.END
-            x = 16
-            y = 120
+            gravity = Gravity.TOP or Gravity.START
+            x = savedX ?: run {
+                layout.measure(
+                    View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+                    View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+                )
+                (screenWidth - layout.measuredWidth - edgeMarginPx)
+                    .coerceAtLeast(edgeMarginPx)
+            }
+            y = savedY ?: defaultYPx
         }
         // Drag the bubble by touching anywhere on it except the buttons.
+        // Buttons still get their clicks: a touch landing on a button is
+        // dispatched to the button first, never to this listener.
+        val drag = BubbleDrag(dragThresholdPx)
         var downX = 0f
         var downY = 0f
         var startX = 0
@@ -562,6 +628,7 @@ class LineOverlayManager(
         layout.setOnTouchListener { _, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
+                    drag.onDown(event.rawX, event.rawY, event.eventTime)
                     downX = event.rawX
                     downY = event.rawY
                     startX = params.x
@@ -569,11 +636,33 @@ class LineOverlayManager(
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    params.x = startX + (downX - event.rawX).toInt()
-                    params.y = startY + (event.rawY - downY).toInt()
-                    try {
-                        windowManager.updateViewLayout(layout, params)
-                    } catch (_: Exception) {
+                    if (drag.onMove(event.rawX, event.rawY)) {
+                        params.x = startX + (event.rawX - downX).toInt()
+                        params.y = startY + (event.rawY - downY).toInt()
+                        try {
+                            windowManager.updateViewLayout(layout, params)
+                        } catch (_: Exception) {
+                        }
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    when (drag.onUp(event.eventTime)) {
+                        BubbleDrag.Outcome.Tap -> toggleGuidesHidden()
+                        BubbleDrag.Outcome.Drag -> {
+                            val width = if (layout.width > 0) layout.width
+                            else layout.measuredWidth
+                            params.x = BubbleDrag.snapX(
+                                params.x, width, screenWidth, edgeMarginPx
+                            )
+                            try {
+                                windowManager.updateViewLayout(layout, params)
+                            } catch (_: Exception) {
+                            }
+                            store.bubbleX = params.x
+                            store.bubbleY = params.y
+                        }
+                        BubbleDrag.Outcome.Hold -> Unit
                     }
                     true
                 }
@@ -598,6 +687,7 @@ class LineOverlayManager(
         }
         bubbleView = null
         bubbleParams = null
+        lockRing = null
         hideButton = null
         editButton = null
         framesWithoutGuideline = 0

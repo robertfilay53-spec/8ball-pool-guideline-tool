@@ -94,10 +94,17 @@ data class DetectionResult(
      * set. A calibration override counts as locked immediately. */
     val tableLocked: Boolean = false,
     /** True when [table] is the ratio fallback (v1.0.4, Bloro lead),
-     * not a detection: the rect is a guess from the frame size. The
-     * status line says so, and the detector retries so a real
+     * not a detection: the rect is a guess from the frame size. Since
+     * v1.0.5 the fallback only CONTINUES a lock a real detection
+     * already earned, for at most 150 frames — it can never be the
+     * first table on a fresh screen, and it can never lock the table.
+     * The status line says so, and the detector retries so a real
      * detection replaces the guess as soon as one succeeds. */
     val tableFromFallback: Boolean = false,
+    /** Table-lock progress (0.0-1.0): the fraction of the 75 stable
+     * frames banked so far, 1.0 once locked. The control bubble's ring
+     * shows this. Fallback frames never advance it. */
+    val tableLockProgress: Float = 0f,
     /** Human-readable status for the diagnostic preview. */
     val status: String
 ) {

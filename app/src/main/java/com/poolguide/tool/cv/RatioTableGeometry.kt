@@ -17,7 +17,11 @@ import kotlin.math.min
  * breaks it silently), so it is used only when detection fails, the
  * result is labelled ([TableGeometry.DetectionResult.tableFromFallback]),
  * and the detector retries every 30 frames so a real detection replaces
- * the guess as soon as one succeeds. The pockets come from the standard
+ * the guess as soon as one succeeds. Since v1.0.5 it may only CONTINUE
+ * a lock a real detection already earned, for at most
+ * [CvConfig.FALLBACK_CONTINUATION_FRAMES] frames — on a fresh screen
+ * with no real lock it is never used at all, and it can never lock the
+ * table. The pockets come from the standard
  * [TableGeometry.TableRect.pockets] model, not Bloro's pocket offsets
  * (0.0739726 / 0.063 of band width) — our pocket model is fitted to
  * ground truth (inset 0), and mixing two pocket models would move the

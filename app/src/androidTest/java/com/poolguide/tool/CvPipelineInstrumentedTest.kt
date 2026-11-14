@@ -44,6 +44,19 @@ class CvPipelineInstrumentedTest {
         }
     }
 
+    /** A solid mid-grey frame: no felt, no balls, not black (mean grey
+     * 128, far above the black-frame threshold). It stands in for a
+     * non-table screen — the home screen, the lobby, a menu. */
+    private fun greyFrame(): Mat {
+        val bitmap = android.graphics.Bitmap.createBitmap(
+            1280, 720, android.graphics.Bitmap.Config.ARGB_8888
+        )
+        bitmap.eraseColor(android.graphics.Color.rgb(128, 128, 128))
+        val mat = Mat()
+        Utils.bitmapToMat(bitmap, mat)
+        return mat
+    }
+
     @Test
     fun greenTable_detectsTableBallsGuidelineAndShot() {
         val mat = loadDemoImage("demo_table_green.png")
@@ -116,5 +129,63 @@ class CvPipelineInstrumentedTest {
         repeat(69) { result = pipeline.process(mat) }
         assertTrue("table must lock after 75 stable frames", result.tableLocked)
         assertNotNull("locked table must still solve the shot", result.shot)
+    }
+
+    /**
+     * v1.0.5: a guessed table must never lock. On a fresh non-table
+     * screen the ratio fallback is never used — no table, no lock, no
+     * lines — even after 160 frames (v1.0.4 locked the guess at 75).
+     */
+    @Test
+    fun nonTableScreen_neverLocksAndReportsNoTable() {
+        val grey = greyFrame()
+        val pipeline = CvPipeline(1280, 720)
+        var result = pipeline.process(grey)
+        repeat(159) { result = pipeline.process(grey) }
+        assertFalse("non-table screen must not be black", result.isCaptureBlack)
+        assertTrue("non-table screen must report no table", result.table == null)
+        assertFalse("non-table screen must never lock", result.tableLocked)
+        assertFalse("non-table screen must not use the fallback", result.tableFromFallback)
+        assertTrue("status must say the guides are hidden", result.status.contains("guides hidden"))
+        assertEquals("no lock progress on a non-table screen", 0f, result.tableLockProgress, 0.001f)
+    }
+
+    /**
+     * v1.0.5: the fallback may only CONTINUE a lock a real detection
+     * already earned. Lock on the green table, lose it to a grey
+     * screen: the fallback stands in briefly (labelled), then the lock
+     * drops and the table is reported as gone.
+     */
+    @Test
+    fun lockedTableThenLost_continuesOnFallbackThenDrops() {
+        val green = loadDemoImage("demo_table_green.png")
+        val grey = greyFrame()
+        val pipeline = CvPipeline(1280, 720)
+        var result = pipeline.process(green)
+        repeat(74) { result = pipeline.process(green) }
+        assertTrue("green table must lock after 75 frames", result.tableLocked)
+        assertFalse("green table must be a real detection", result.tableFromFallback)
+
+        // Lose the table: after 40 grey frames the fallback is still
+        // standing in for the locked table, labelled as such.
+        repeat(40) { result = pipeline.process(grey) }
+        assertNotNull("fallback must stand in while the lock continues", result.table)
+        assertTrue("continuation must be labelled fallback", result.tableFromFallback)
+        assertTrue("lock must continue inside the window", result.tableLocked)
+        assertTrue("status must label the continuation", result.status.contains("continuing last lock"))
+
+        // Past the 150-frame continuation window the lock drops and
+        // the table is reported as gone (200 more grey frames covers
+        // the window plus the re-detect cadence).
+        repeat(200) { result = pipeline.process(grey) }
+        assertTrue("table must be gone after the window", result.table == null)
+        assertFalse("lock must drop after the window", result.tableLocked)
+        assertFalse("fallback must stop after the window", result.tableFromFallback)
+        assertTrue("status must say the guides are hidden", result.status.contains("guides hidden"))
+
+        // And a real table re-locks from scratch.
+        repeat(75) { result = pipeline.process(green) }
+        assertTrue("real table must re-lock after the drop", result.tableLocked)
+        assertFalse("re-locked table must be a real detection", result.tableFromFallback)
     }
 }

@@ -60,12 +60,18 @@ screen. Nothing about the game is changed.**
    landing exactly on a handle sets `FLAG_WINDOW_IS_OBSCURED` — use EDIT
    mode to arrange, then tap Done and shoot in PLAY mode, where every line
    window is pass-through again.
-6. **The ratio fallback is a guess.** When the detector finds no table at
+6. **The ratio fallback is a guess — and it can never draw lines on its
+   own anymore (FIXED in v1.0.5).** When the detector finds no table at
    all, the tool falls back to Bloro's screen-fraction table model (band
-   0.237–0.913 of frame height, 2:1 table). It is labelled in the status
-   line ("table: ratio fallback") and the detector keeps retrying, so a
-   real detection replaces the guess. But a guessed table can be wrong —
-   if the lines sit on the wrong place, hide the guides and calibrate the
+   0.237–0.913 of frame height, 2:1 table). In v1.0.4 that guess could
+   lock the table by itself (it is deterministic from the frame size, so
+   it is trivially "stable") and the lines drew on a guessed table on a
+   fresh non-table screen. Since v1.0.5 the guess may only CONTINUE a
+   lock a real detection already earned, for at most 10 s, and it is
+   labelled in the status line ("table: ratio fallback — continuing
+   last lock"); on a fresh screen with no real lock the tool reports no
+   table and draws nothing ("Table not found — guides hidden"). If the
+   lines sit on the wrong place, hide the guides and calibrate the
    corners by hand.
 
 ## How it works
@@ -120,6 +126,18 @@ game. The brown felt window is now part of the per-version
 numbers are unchanged in v1.0.4 (15/15, 85/85, 0 false positives,
 15/15, 0.32 deg) — the fallback only fires when detection fails, which
 never happens on the 15 harness tables.
+
+No-guessed-table work (v1.0.5): the ratio fallback can no longer lock
+the table by itself — it only continues a lock a real detection already
+earned, for at most 10 s, and on a fresh non-table screen the tool
+reports no table and draws nothing. The control bubble now follows
+Bloro's touch pattern (drag after 10 dp, tap toggles the guides,
+edge-snap on release, position saved), and carries a lock-progress ring
+in place of Bloro's credit ring: ours has no credits or paywall, so the
+ring fills as the table stabilises toward the 5 s lock and turns green
+once locked. The harness numbers are unchanged in v1.0.5 (15/15, 85/85,
+0 false positives, 15/15, 0.32 deg) — the gating only fires when
+detection fails, which never happens on the 15 harness tables.
 
 - **OpenCV**: Maven AAR `org.opencv:opencv:4.10.0` (4.9+ supports Android
   15's 16 KB page size). Fallback documented in `app/build.gradle.kts`:
