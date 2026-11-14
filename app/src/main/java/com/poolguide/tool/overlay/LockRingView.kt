@@ -17,7 +17,9 @@ import android.view.View
  * the 5 s lock, and turns solid green once locked. Empty (just the
  * faint background circle) while no table is detected at all. The
  * colour matches the aim line green when locked; amber while the
- * table is still settling.
+ * table is still settling. In EDIT mode the shot is frozen, so the
+ * ring switches to a neutral grey full circle ([isFrozen]) instead of
+ * implying live lock progress (v1.0.6 fix of a v1.0.5 honest limit).
  */
 class LockRingView @JvmOverloads constructor(
     context: Context,
@@ -30,6 +32,24 @@ class LockRingView @JvmOverloads constructor(
             field = value.coerceIn(0f, 1f)
             invalidate()
         }
+
+    /** Frozen (EDIT mode): the shot on screen is a frozen copy, not a
+     * live detection, so the ring must not be read as live lock
+     * progress. When true the ring draws as a neutral grey full
+     * circle — a distinct frozen state, not a progress arc. Set from
+     * [LineOverlayManager] alongside [progress]. */
+    var isFrozen: Boolean = false
+        set(value) {
+            field = value
+            invalidate()
+        }
+
+    private val frozenPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.argb(255, 158, 158, 158) // neutral grey: frozen
+        style = Paint.Style.STROKE
+        strokeWidth = 5f
+        strokeCap = Paint.Cap.ROUND
+    }
 
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.argb(120, 255, 255, 255)
@@ -60,6 +80,13 @@ class LockRingView @JvmOverloads constructor(
             width / 2f + radius, height / 2f + radius
         )
         canvas.drawCircle(width / 2f, height / 2f, radius, backgroundPaint)
+        if (isFrozen) {
+            // Frozen: a full neutral circle. No arc, so nothing here
+            // can be misread as "the table is 60% locked" while the
+            // user is editing a frozen shot.
+            canvas.drawArc(rect, -90f, 360f, false, frozenPaint)
+            return
+        }
         val p = progress
         if (p <= 0f) return
         val paint = if (p >= 1f) lockedPaint else progressPaint

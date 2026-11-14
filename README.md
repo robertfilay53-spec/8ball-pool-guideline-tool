@@ -59,7 +59,10 @@ screen. Nothing about the game is changed.**
    two small windows ARE touchable (that is how dragging works), so a touch
    landing exactly on a handle sets `FLAG_WINDOW_IS_OBSCURED` — use EDIT
    mode to arrange, then tap Done and shoot in PLAY mode, where every line
-   window is pass-through again.
+   window is pass-through again. Since v1.0.6 the lock ring in EDIT mode
+   shows a neutral grey full circle (a frozen state) instead of the last
+   live lock progress, so it cannot be misread as "the table is 60%
+   locked" while you edit a frozen shot.
 6. **The ratio fallback is a guess — and it can never draw lines on its
    own anymore (FIXED in v1.0.5).** When the detector finds no table at
    all, the tool falls back to Bloro's screen-fraction table model (band
@@ -73,6 +76,21 @@ screen. Nothing about the game is changed.**
    table and draws nothing ("Table not found — guides hidden"). If the
    lines sit on the wrong place, hide the guides and calibrate the
    corners by hand.
+7. **Diagnostics export is local only.** Main screen, "Export diagnostics",
+   saves a plain-text session log (detection states, frame stats, lock
+   and fallback events, black-frame warnings, overlay state changes,
+   app + game version, device model, Android version) to a file you
+   pick. Nothing is uploaded and nothing leaves the device unless you
+   choose to share the file. The log holds only the last 500 events.
+8. **Practice mode combos and kisses are geometry only.** Practice mode
+   now has Direct, Combo, and Kiss shots (same solver as the live
+   overlay), but it is a drawing aid, not a physics simulator: no
+   spin, no friction throw, no cushion compression, and the bank-shot
+   cushion correction is fitted to synthetic data, so real-table
+   cushion behaviour is unmeasured. Bank shots are not in practice
+   mode yet (they are in the live solver); what you practise here is
+   the aim geometry of direct, combo, and kiss shots, not the exact
+   outcome on a real table.
 
 ## How it works
 

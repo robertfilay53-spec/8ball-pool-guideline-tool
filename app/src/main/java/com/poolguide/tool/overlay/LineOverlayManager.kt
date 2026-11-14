@@ -15,6 +15,7 @@ import android.widget.Toast
 import com.poolguide.tool.R
 import com.poolguide.tool.cv.DetectionResult
 import com.poolguide.tool.data.CalibrationStore
+import com.poolguide.tool.data.DiagnosticsLog
 import com.poolguide.tool.geometry.Segment
 import com.poolguide.tool.geometry.ShotSolver
 import com.poolguide.tool.geometry.Vec2
@@ -135,6 +136,11 @@ class LineOverlayManager(
     @androidx.annotation.VisibleForTesting
     val lockRingProgress: Float get() = lockRing?.progress ?: -1f
 
+    /** Test-only: whether the lock ring is showing its frozen (EDIT
+     * mode) state rather than live lock progress. */
+    @androidx.annotation.VisibleForTesting
+    val lockRingFrozen: Boolean get() = lockRing?.isFrozen ?: false
+
     /** Toggle EDIT mode (the bubble's Edit/Done button). Entering freezes
      * the current shot; leaving resumes the live detection and drops
      * any corrections. With no shot to edit, the tap does nothing. */
@@ -143,6 +149,8 @@ class LineOverlayManager(
             manualAim.exitEditMode()
             removeHandles()
             editButton?.text = context.getString(R.string.edit_guides)
+            lockRing?.isFrozen = false
+            DiagnosticsLog.record(DiagnosticsLog.Kind.EDIT_EXIT)
             return
         }
         val result = lastResult
@@ -154,6 +162,8 @@ class LineOverlayManager(
         smoother.reset()
         manualAim.enterEditMode(shot, result.cueBall?.radiusPx ?: 9.0)
         editButton?.text = context.getString(R.string.done_editing)
+        lockRing?.isFrozen = true
+        DiagnosticsLog.record(DiagnosticsLog.Kind.EDIT_ENTER)
         result.let { updateEditMode(it) }
     }
 
@@ -178,7 +188,10 @@ class LineOverlayManager(
     fun update(result: DetectionResult) {
         ensureBubble()
         // Lock ring (v1.0.5): fills as the table stabilises, green
-        // once locked, empty while no table is detected.
+        // once locked, empty while no table is detected. In EDIT mode
+        // (v1.0.6) the shot is frozen, so the ring shows the neutral
+        // frozen state instead of implying live lock progress.
+        lockRing?.isFrozen = manualAim.isEditMode
         lockRing?.progress = result.tableLockProgress
         lastResult = result
         if (result.guideline.isEmpty()) {
@@ -535,6 +548,10 @@ class LineOverlayManager(
         store.guidesHidden = !store.guidesHidden
         hideButton?.text = if (store.guidesHidden) context.getString(R.string.show_guides)
         else context.getString(R.string.hide_guides)
+        DiagnosticsLog.record(
+            if (store.guidesHidden) DiagnosticsLog.Kind.GUIDES_HIDDEN
+            else DiagnosticsLog.Kind.GUIDES_SHOWN
+        )
         if (store.guidesHidden) removeLineWindows()
     }
 

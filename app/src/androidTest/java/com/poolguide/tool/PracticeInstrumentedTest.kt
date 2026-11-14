@@ -3,12 +3,14 @@ package com.poolguide.tool
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.poolguide.tool.ui.PracticeActivity
+import com.poolguide.tool.ui.PracticeState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** Offline practice mode (v1.0.4, Cheto lead). */
+/** Offline practice mode (v1.0.4, Cheto lead; combo/kiss modes v1.0.6). */
 @RunWith(AndroidJUnit4::class)
 class PracticeInstrumentedTest {
 
@@ -38,6 +40,47 @@ class PracticeInstrumentedTest {
                 assertEquals(200.0, state.cue.center.x, 0.0)
                 assertEquals(424.0, state.target.center.x, 0.0)
                 assertEquals(0, state.selectedId)
+            }
+        }
+    }
+
+    @Test
+    fun practice_modesSolveComboAndKiss() {
+        ActivityScenario.launch(PracticeActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val state = activity.practiceView.state
+                assertNotNull("practice state must exist", state)
+
+                // Combo via the mode button: three balls, combo solves.
+                activity.findViewById<android.widget.Button>(R.id.btn_mode_combo)
+                    .performClick()
+                assertEquals(PracticeState.PracticeMode.COMBO, state!!.mode)
+                assertEquals(3, state.balls().size)
+                assertTrue(
+                    "combo default must solve",
+                    state.solve() is PracticeState.PracticeSolution.Combo
+                )
+                activity.practiceView.invalidate()
+
+                // Kiss via the mode button: kiss solves.
+                activity.findViewById<android.widget.Button>(R.id.btn_mode_kiss)
+                    .performClick()
+                assertEquals(PracticeState.PracticeMode.KISS, state.mode)
+                assertTrue(
+                    "kiss default must solve",
+                    state.solve() is PracticeState.PracticeSolution.Kiss
+                )
+                activity.practiceView.invalidate()
+
+                // Back to direct: two balls, direct solves.
+                activity.findViewById<android.widget.Button>(R.id.btn_mode_direct)
+                    .performClick()
+                assertEquals(PracticeState.PracticeMode.DIRECT, state.mode)
+                assertEquals(2, state.balls().size)
+                assertTrue(
+                    "direct default must solve",
+                    state.solve() is PracticeState.PracticeSolution.Direct
+                )
             }
         }
     }

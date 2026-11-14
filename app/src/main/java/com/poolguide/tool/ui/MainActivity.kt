@@ -19,11 +19,16 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import com.poolguide.tool.BuildConfig
 import com.poolguide.tool.R
 import com.poolguide.tool.capture.CaptureService
 import com.poolguide.tool.capture.PreviewBus
 import com.poolguide.tool.data.CalibrationStore
+import com.poolguide.tool.data.DiagnosticsLog
 import com.poolguide.tool.overlay.OverlayService
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * Main screen: permission flow, start/stop, demo mode, calibration, and the
@@ -77,6 +82,33 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** Diagnostics export (v1.0.6): the user picks where the report
+     * file goes (Storage Access Framework). The log lives only on
+     * this device; nothing is uploaded, and the user chooses whether
+     * to share the file. A cancelled picker (null Uri) is silent. */
+    private val exportDiagnosticsLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("text/plain")
+    ) { uri ->
+        if (uri == null) return@registerForActivityResult
+        try {
+            val header = DiagnosticsLog.Header(
+                appVersion = BuildConfig.VERSION_NAME,
+                appVersionCode = BuildConfig.VERSION_CODE.toLong(),
+                gameVersion = store.gameVersion,
+                deviceModel = "${Build.MANUFACTURER} ${Build.MODEL}",
+                androidVersion = "API ${Build.VERSION.SDK_INT} (${Build.VERSION.RELEASE})",
+                sessionStartIso = DiagnosticsLog.sessionStartIso()
+            )
+            val report = DiagnosticsLog.buildReport(header)
+            contentResolver.openOutputStream(uri)?.use { out ->
+                out.write(report.toByteArray(Charsets.UTF_8))
+            }
+            Toast.makeText(this, R.string.diagnostics_exported, Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, R.string.diagnostics_export_failed, Toast.LENGTH_LONG).show()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -100,6 +132,9 @@ class MainActivity : AppCompatActivity() {
         }
         findViewById<Button>(R.id.btn_practice).setOnClickListener {
             startActivity(Intent(this, PracticeActivity::class.java))
+        }
+        findViewById<Button>(R.id.btn_export_diagnostics).setOnClickListener {
+            exportDiagnostics()
         }
         previewSwitch.setOnCheckedChangeListener { _, checked ->
             if (checked) {
@@ -222,5 +257,17 @@ class MainActivity : AppCompatActivity() {
         }
         startService(stopOverlay)
         setStatus(getString(R.string.status_stopped))
+    }
+
+    /** Diagnostics export (v1.0.6): build the report from the in-memory
+     * ring buffer and let the user pick the destination file. With no
+     * session yet (no events at all) there is nothing to export. */
+    private fun exportDiagnostics() {
+        if (DiagnosticsLog.eventCount() == 0) {
+            Toast.makeText(this, R.string.diagnostics_empty, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val stamp = SimpleDateFormat("yyyyMMdd-HHmm", Locale.US).format(Date())
+        exportDiagnosticsLauncher.launch("pool-guide-diagnostics-$stamp.txt")
     }
 }

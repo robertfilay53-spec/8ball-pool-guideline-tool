@@ -67,6 +67,12 @@ class PracticeView @JvmOverloads constructor(
         color = Color.rgb(0xD3, 0x2F, 0x2F)
         style = Paint.Style.FILL
     }
+    /** Middle ball (combo first ball / kiss ball): blue, distinct from
+     * the white cue and the red target. */
+    private val middlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.rgb(0x1E, 0x88, 0xE5)
+        style = Paint.Style.FILL
+    }
     private val selectPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.YELLOW
         style = Paint.Style.STROKE
@@ -129,44 +135,38 @@ class PracticeView @JvmOverloads constructor(
             val v = toView(pocket)
             canvas.drawCircle(v.x.toFloat(), v.y.toFloat(), pocketR, pocketPaint)
         }
-        // Solved shot lines.
-        val shot = st.solve()
-        if (shot != null) {
-            val aimS = toView(shot.aimLine.start)
-            val aimE = toView(shot.aimLine.end)
-            canvas.drawLine(
-                aimS.x.toFloat(), aimS.y.toFloat(),
-                aimE.x.toFloat(), aimE.y.toFloat(), aimPaint
-            )
-            val tgtS = toView(shot.targetLine.start)
-            val tgtE = toView(shot.targetLine.end)
-            canvas.drawLine(
-                tgtS.x.toFloat(), tgtS.y.toFloat(),
-                tgtE.x.toFloat(), tgtE.y.toFloat(), targetLinePaint
-            )
-            val defS = toView(shot.deflectionLine.start)
-            val defE = toView(shot.deflectionLine.end)
-            canvas.drawLine(
-                defS.x.toFloat(), defS.y.toFloat(),
-                defE.x.toFloat(), defE.y.toFloat(), deflectPaint
-            )
-            val ghost = toView(shot.ghostPoint)
-            canvas.drawCircle(
-                ghost.x.toFloat(), ghost.y.toFloat(),
-                (BALL_RADIUS_PX * scale).toFloat(), aimPaint
-            )
-            canvas.drawCircle(
-                tgtE.x.toFloat(), tgtE.y.toFloat(),
-                (BALL_RADIUS_PX * 1.8 * scale).toFloat(), ringPaint
-            )
+        // Solved shot lines (v1.0.6: direct, combo, and kiss modes).
+        when (val solution = st.solve()) {
+            is PracticeState.PracticeSolution.Direct -> drawShot(canvas, solution.shot)
+            is PracticeState.PracticeSolution.Combo -> {
+                val combo = solution.solution
+                // First leg's target line ends at the intermediate ghost
+                // point, not a pocket, so no pocket ring on it.
+                drawShot(canvas, combo.firstShot, pocket = false)
+                drawShot(canvas, combo.secondShot)
+            }
+            is PracticeState.PracticeSolution.Kiss -> {
+                val kiss = solution.solution
+                // The kiss leg's target line ends at the cue's ghost
+                // point, not a pocket, so no pocket ring on it.
+                drawShot(canvas, kiss.kissShot, pocket = false)
+                drawShot(canvas, kiss.secondShot)
+            }
+            null -> {
+                // No shot in this layout; the status line says so.
+            }
         }
         // Balls.
         val ballR = (BALL_RADIUS_PX * scale).toFloat()
-        for (ball in listOf(st.cue, st.target)) {
+        for (ball in st.balls()) {
             val v = toView(ball.center)
             canvas.drawCircle(
                 v.x.toFloat(), v.y.toFloat(), ballR,
-                if (ball.isCue) cuePaint else targetPaint
+                when {
+                    ball.isCue -> cuePaint
+                    ball.id == 2 -> middlePaint
+                    else -> targetPaint
+                }
             )
             if (ball.isCue) {
                 canvas.drawCircle(
@@ -179,6 +179,50 @@ class PracticeView @JvmOverloads constructor(
                 )
             }
         }
+    }
+
+    /** Draw one shot's aim, target, and deflection lines plus the
+     * ghost circle and (when [pocket] is true) the pocket ring at the
+     * target line's end. Combo first legs and kiss legs end at a
+     * ghost point, not a pocket, so they pass pocket = false. */
+    private fun drawShot(
+        canvas: Canvas,
+        shot: com.poolguide.tool.geometry.ShotSolver.ShotSolution,
+        pocket: Boolean = true
+    ) {
+        val aimS = toView(shot.aimLine.start)
+        val aimE = toView(shot.aimLine.end)
+        canvas.drawLine(
+            aimS.x.toFloat(), aimS.y.toFloat(),
+            aimE.x.toFloat(), aimE.y.toFloat(), aimPaint
+        )
+        val tgtS = toView(shot.targetLine.start)
+        val tgtE = toView(shot.targetLine.end)
+        canvas.drawLine(
+            tgtS.x.toFloat(), tgtS.y.toFloat(),
+            tgtE.x.toFloat(), tgtE.y.toFloat(), targetLinePaint
+        )
+        val defS = toView(shot.deflectionLine.start)
+        val defE = toView(shot.deflectionLine.end)
+        canvas.drawLine(
+            defS.x.toFloat(), defS.y.toFloat(),
+            defE.x.toFloat(), defE.y.toFloat(), deflectPaint
+        )
+        drawGhost(canvas, shot.ghostPoint)
+        if (pocket) {
+            canvas.drawCircle(
+                tgtE.x.toFloat(), tgtE.y.toFloat(),
+                (BALL_RADIUS_PX * 1.8 * scale).toFloat(), ringPaint
+            )
+        }
+    }
+
+    private fun drawGhost(canvas: Canvas, ghost: Vec2) {
+        val v = toView(ghost)
+        canvas.drawCircle(
+            v.x.toFloat(), v.y.toFloat(),
+            (BALL_RADIUS_PX * scale).toFloat(), aimPaint
+        )
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {

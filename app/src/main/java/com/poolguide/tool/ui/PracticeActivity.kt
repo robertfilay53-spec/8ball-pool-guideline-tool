@@ -33,11 +33,26 @@ class PracticeActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btn_nudge_down).setOnClickListener { nudge(0.0, 1.0) }
         findViewById<Button>(R.id.btn_nudge_left).setOnClickListener { nudge(-1.0, 0.0) }
         findViewById<Button>(R.id.btn_nudge_right).setOnClickListener { nudge(1.0, 0.0) }
+        findViewById<Button>(R.id.btn_mode_direct).setOnClickListener {
+            setMode(PracticeState.PracticeMode.DIRECT)
+        }
+        findViewById<Button>(R.id.btn_mode_combo).setOnClickListener {
+            setMode(PracticeState.PracticeMode.COMBO)
+        }
+        findViewById<Button>(R.id.btn_mode_kiss).setOnClickListener {
+            setMode(PracticeState.PracticeMode.KISS)
+        }
         findViewById<Button>(R.id.btn_practice_reset).setOnClickListener {
             state.reset()
             refresh()
         }
         updateStatus()
+    }
+
+    private fun setMode(mode: PracticeState.PracticeMode) {
+        // Switching mode re-lays out the balls to that mode's default.
+        state.setMode(mode)
+        refresh()
     }
 
     private fun nudge(dx: Double, dy: Double) {
@@ -51,13 +66,48 @@ class PracticeActivity : AppCompatActivity() {
     }
 
     private fun updateStatus() {
-        val shot = state.solve()
-        statusText.text = if (shot == null) {
-            getString(R.string.practice_no_shot)
-        } else if (shot.isThinCut) {
-            getString(R.string.practice_cut_thin, shot.cutAngleDegrees)
-        } else {
-            getString(R.string.practice_cut, shot.cutAngleDegrees)
+        statusText.text = when (val solution = state.solve()) {
+            null -> getString(R.string.practice_no_shot)
+            is PracticeState.PracticeSolution.Direct -> {
+                val shot = solution.shot
+                if (shot.isThinCut) {
+                    getString(R.string.practice_cut_thin, shot.cutAngleDegrees)
+                } else {
+                    getString(R.string.practice_cut, shot.cutAngleDegrees)
+                }
+            }
+            is PracticeState.PracticeSolution.Combo -> {
+                val combo = solution.solution
+                if (combo.firstShot.isThinCut) {
+                    getString(
+                        R.string.practice_combo_thin,
+                        combo.firstShot.cutAngleDegrees,
+                        combo.secondShot.cutAngleDegrees
+                    )
+                } else {
+                    getString(
+                        R.string.practice_combo,
+                        combo.firstShot.cutAngleDegrees,
+                        combo.secondShot.cutAngleDegrees
+                    )
+                }
+            }
+            is PracticeState.PracticeSolution.Kiss -> {
+                val kiss = solution.solution
+                if (kiss.kissShot.isThinCut) {
+                    getString(
+                        R.string.practice_kiss_thin,
+                        kiss.kissShot.cutAngleDegrees,
+                        kiss.secondShot.cutAngleDegrees
+                    )
+                } else {
+                    getString(
+                        R.string.practice_kiss,
+                        kiss.kissShot.cutAngleDegrees,
+                        kiss.secondShot.cutAngleDegrees
+                    )
+                }
+            }
         }
     }
 }
