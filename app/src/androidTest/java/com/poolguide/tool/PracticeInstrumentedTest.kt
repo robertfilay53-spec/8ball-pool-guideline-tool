@@ -80,6 +80,35 @@ class PracticeInstrumentedTest {
     }
 
     @Test
+    fun practice_kickDefaultSolvesAsKick() {
+        ActivityScenario.launch(PracticeActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val state = activity.practiceView.state
+                assertNotNull("practice state must exist", state)
+
+                // KICK mode, default layout (verified against the
+                // solver with kotlinc before the test was written):
+                // cue (120, 80), target (480, 300) — right rail to
+                // the bottom-middle pocket, cut 2.3 deg.
+                activity.findViewById<android.widget.Button>(R.id.btn_mode_kick)
+                    .performClick()
+                assertEquals(PracticeState.PracticeMode.KICK, state!!.mode)
+                val solution = state.solve()
+                assertTrue(
+                    "kick default must solve as Kick",
+                    solution is PracticeState.PracticeSolution.Kick
+                )
+                val kick = solution as PracticeState.PracticeSolution.Kick
+                assertEquals("right", kick.railName)
+                assertEquals(2, kick.solution.kickPath.size)
+                // Drawing the Kick solution exercises drawKick (green
+                // aim, magenta kicked cue ball, yellow target line).
+                activity.practiceView.invalidate()
+            }
+        }
+    }
+
+    @Test
     fun practice_modesSolveBankComboAndKiss() {
         ActivityScenario.launch(PracticeActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->

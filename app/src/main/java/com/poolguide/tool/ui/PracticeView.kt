@@ -106,6 +106,15 @@ class PracticeView @JvmOverloads constructor(
         strokeWidth = 4f
         strokeCap = Paint.Cap.ROUND
     }
+    /** Kick path (cue -> rail contact -> ghost): magenta, the same
+     * colour the live overlay uses for kick lines (distinct from the
+     * cyan bank lines). */
+    private val kickPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFFFF4081.toInt()
+        style = Paint.Style.STROKE
+        strokeWidth = 4f
+        strokeCap = Paint.Cap.ROUND
+    }
     private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = 0xFFFF5252.toInt()
         style = Paint.Style.STROKE
@@ -151,6 +160,7 @@ class PracticeView @JvmOverloads constructor(
             is PracticeState.PracticeSolution.Direct -> drawShot(canvas, solution.shot)
             is PracticeState.PracticeSolution.Bank -> drawBank(canvas, solution.solution.direct, solution.solution.bankPath)
             is PracticeState.PracticeSolution.Bank2 -> drawBank(canvas, solution.solution.direct, solution.solution.bankPath)
+            is PracticeState.PracticeSolution.Kick -> drawKick(canvas, solution.solution)
             is PracticeState.PracticeSolution.Combo -> {
                 val combo = solution.solution
                 // First leg's target line ends at the intermediate ghost
@@ -222,6 +232,50 @@ class PracticeView @JvmOverloads constructor(
         }
         drawGhost(canvas, direct.ghostPoint)
         val pocket = toView(bankPath.last().end)
+        canvas.drawCircle(
+            pocket.x.toFloat(), pocket.y.toFloat(),
+            (BALL_RADIUS_PX * 1.8 * scale).toFloat(), ringPaint
+        )
+    }
+
+    /** Draw one kick shot the way the live overlay does: the green
+     * aim line (cue -> rail contact, the cue-stick direction), the
+     * magenta kicked cue-ball path (contact -> ghost), the yellow
+     * target line (target -> pocket), the white deflection, the ghost
+     * circle at impact, and the pocket ring at the pocket. Unlike a
+     * bank, the target line IS drawn: the target goes straight to
+     * the pocket, it is the cue ball that banks. */
+    private fun drawKick(
+        canvas: Canvas,
+        kick: ShotSolver.KickSolution
+    ) {
+        val direct = kick.direct
+        val aimS = toView(direct.aimLine.start)
+        val aimE = toView(direct.aimLine.end)
+        canvas.drawLine(
+            aimS.x.toFloat(), aimS.y.toFloat(),
+            aimE.x.toFloat(), aimE.y.toFloat(), aimPaint
+        )
+        val kickS = toView(kick.kickPath[1].start)
+        val kickE = toView(kick.kickPath[1].end)
+        canvas.drawLine(
+            kickS.x.toFloat(), kickS.y.toFloat(),
+            kickE.x.toFloat(), kickE.y.toFloat(), kickPaint
+        )
+        val tgtS = toView(direct.targetLine.start)
+        val tgtE = toView(direct.targetLine.end)
+        canvas.drawLine(
+            tgtS.x.toFloat(), tgtS.y.toFloat(),
+            tgtE.x.toFloat(), tgtE.y.toFloat(), targetLinePaint
+        )
+        val defS = toView(direct.deflectionLine.start)
+        val defE = toView(direct.deflectionLine.end)
+        canvas.drawLine(
+            defS.x.toFloat(), defS.y.toFloat(),
+            defE.x.toFloat(), defE.y.toFloat(), deflectPaint
+        )
+        drawGhost(canvas, direct.ghostPoint)
+        val pocket = toView(direct.targetLine.end)
         canvas.drawCircle(
             pocket.x.toFloat(), pocket.y.toFloat(),
             (BALL_RADIUS_PX * 1.8 * scale).toFloat(), ringPaint

@@ -58,6 +58,12 @@ class LineOverlayManager(
         private const val TARGET_COLOR = 0xFFFFD600.toInt() // yellow
         private const val DEFLECT_COLOR = Color.WHITE
         private const val BANK_COLOR = 0xFF00E5FF.toInt() // cyan
+        /** Kick lines (v1.0.10): magenta, distinct from the cyan bank
+         * lines — a kick is the cue ball off a rail, a bank is the
+         * target ball off a rail, and the two must not be confusable
+         * at a glance. Aim stays green, target yellow, deflection
+         * white. */
+        private const val KICK_COLOR = 0xFFFF4081.toInt() // magenta
         private const val POCKET_COLOR = 0xFFFF5252.toInt() // red ring
         /** Non-best candidate shots (PoolAimAssist UX): thin, ~35% alpha
          * grey. The best shot keeps the full-colour lines — its yellow
@@ -447,6 +453,34 @@ class LineOverlayManager(
             out += DrawLine(smoothed[1], BANK_COLOR, LINE_WIDTH_PX)
             out += DrawLine(smoothed[2], BANK_COLOR, LINE_WIDTH_PX)
             val pocket = bank.bankPath.last().end
+            out += DrawLine(
+                Segment(map(pocket), map(pocket)),
+                POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = 18f
+            )
+        } else if (result.kick != null && store.bankLinesEnabled) {
+            // One-rail kick (v1.0.10): the cue ball goes off the rail
+            // first, so the cue path has two segments — cue -> rail
+            // contact in green (the aim direction, same as every other
+            // shot) and contact -> ghost in magenta (the kicked cue
+            // ball, distinct from the cyan bank lines). The target
+            // line and deflection are drawn as for a direct shot.
+            // Four smoothed segments, like a two-rail bank, so a kick
+            // never lerps into a bank or a direct shot.
+            val kick = result.kick
+            val smoothed = smoother.smoothList(
+                listOf(
+                    Segment(map(kick.direct.aimLine.start), map(kick.direct.aimLine.end)),
+                    Segment(map(kick.kickPath[1].start), map(kick.kickPath[1].end)),
+                    Segment(map(kick.direct.targetLine.start), map(kick.direct.targetLine.end)),
+                    Segment(map(kick.direct.deflectionLine.start), map(kick.direct.deflectionLine.end))
+                ),
+                result.status
+            )
+            out += DrawLine(smoothed[0], AIM_COLOR, AIM_WIDTH_PX)
+            out += DrawLine(smoothed[1], KICK_COLOR, LINE_WIDTH_PX)
+            out += DrawLine(smoothed[2], TARGET_COLOR, LINE_WIDTH_PX)
+            out += DrawLine(smoothed[3], DEFLECT_COLOR, LINE_WIDTH_PX)
+            val pocket = kick.direct.targetLine.end
             out += DrawLine(
                 Segment(map(pocket), map(pocket)),
                 POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = 18f

@@ -241,6 +241,96 @@ class PracticeStateTest {
         assertNull(s.solveBank2())
     }
 
+    // ---- v1.0.10: kick mode ----
+
+    @Test
+    fun `kick default layout solves off the right rail to the bottom-middle pocket`() {
+        val s = state()
+        s.setMode(PracticeState.PracticeMode.KICK)
+        val solution = s.solve()
+        assertTrue(solution is PracticeState.PracticeSolution.Kick)
+        val kick = solution as PracticeState.PracticeSolution.Kick
+        // Verified against the solver before the change: same balls
+        // as the bank default, right rail, bottom-middle pocket, cut
+        // 2.3 deg, contact (680.0, 241.5).
+        assertEquals("right", kick.railName)
+        assertTrue(kick.solution.direct.cutAngleDegrees > 1.0)
+        assertTrue(kick.solution.direct.cutAngleDegrees < 4.0)
+        assertEquals(680.0, kick.solution.railContact.x, 0.0)
+        assertEquals(241.5, kick.solution.railContact.y, 0.5)
+        assertEquals(2, kick.solution.kickPath.size)
+        // The kick path ends at the ghost point, not the pocket; the
+        // target line ends at the pocket.
+        assertEquals(497.1, kick.solution.kickPath.last().end.x, 0.5)
+        assertEquals(294.3, kick.solution.kickPath.last().end.y, 0.5)
+        assertEquals(360.0, kick.solution.direct.targetLine.end.x, 0.0)
+        assertEquals(340.0, kick.solution.direct.targetLine.end.y, 0.0)
+        assertTrue(!kick.solution.direct.isThinCut)
+    }
+
+    @Test
+    fun `kick mode has two balls and the middle is not selectable`() {
+        val s = state()
+        s.setMode(PracticeState.PracticeMode.KICK)
+        assertEquals(2, s.balls().size)
+        assertEquals(120.0, s.cue.center.x, 0.0)
+        assertEquals(80.0, s.cue.center.y, 0.0)
+        assertEquals(480.0, s.target.center.x, 0.0)
+        assertEquals(300.0, s.target.center.y, 0.0)
+        s.select(2)
+        assertEquals(0, s.selectedId)
+        assertNull(s.ballAt(Vec2(320.0, 180.0)))
+    }
+
+    @Test
+    fun `kick overlapping balls have no shot`() {
+        val s = state()
+        s.setMode(PracticeState.PracticeMode.KICK)
+        s.moveBall(1, s.cue.center)
+        assertNull(s.solve())
+        assertNull(s.solveKick())
+    }
+
+    @Test
+    fun `kick reset restores the kick layout`() {
+        val s = state()
+        s.setMode(PracticeState.PracticeMode.KICK)
+        s.moveBall(1, Vec2(500.0, 100.0))
+        s.select(1)
+        s.reset()
+        assertEquals(120.0, s.cue.center.x, 0.0)
+        assertEquals(480.0, s.target.center.x, 0.0)
+        assertEquals(300.0, s.target.center.y, 0.0)
+        assertEquals(0, s.selectedId)
+    }
+
+    @Test
+    fun `switching to kick and back restores the direct layout`() {
+        val s = state()
+        s.setMode(PracticeState.PracticeMode.KICK)
+        assertTrue(s.solve() is PracticeState.PracticeSolution.Kick)
+        s.setMode(PracticeState.PracticeMode.DIRECT)
+        assertEquals(2, s.balls().size)
+        assertEquals(200.0, s.cue.center.x, 0.0)
+        assertEquals(424.0, s.target.center.x, 0.0)
+        assertTrue(s.solve() is PracticeState.PracticeSolution.Direct)
+    }
+
+    @Test
+    fun `kick with every contact in the pocket jaws is rejected`() {
+        // Target tucked tight in the top-left corner: every kick has
+        // a contact inside a pocket's jaws (within four ball radii
+        // of a corner), so the corner guards reject them all.
+        // Verified against the solver with kotlinc before the test
+        // was written: kicks solve here, but none passes the guards.
+        val s = state()
+        s.setMode(PracticeState.PracticeMode.KICK)
+        s.moveBall(0, Vec2(80.0, 60.0))
+        s.moveBall(1, Vec2(50.0, 30.0))
+        assertNull(s.solveKick())
+        assertNull(s.solve())
+    }
+
     // ---- v1.0.6: combo mode ----
 
     @Test
