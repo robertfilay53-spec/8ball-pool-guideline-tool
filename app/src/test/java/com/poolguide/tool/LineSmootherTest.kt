@@ -126,8 +126,10 @@ class LineSmootherTest {
         val out = smoother.smoothList(moved, bankStatus)
         assertEquals(4, out.size)
         assertEquals(105.0, out[0].start.x, 1e-9)
-        assertEquals(405.0, out[1].start.x, 1e-9)
-        assertEquals(505.0, out[2].start.x, 1e-9)
+        assertEquals(305.0, out[1].start.x, 1e-9)
+        assertEquals(405.0, out[1].end.x, 1e-9)
+        assertEquals(405.0, out[2].start.x, 1e-9)
+        assertEquals(505.0, out[2].end.x, 1e-9)
         assertEquals(605.0, out[3].end.x, 1e-9)
     }
 
