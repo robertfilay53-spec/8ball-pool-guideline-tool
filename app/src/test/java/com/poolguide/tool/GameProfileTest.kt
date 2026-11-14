@@ -3,6 +3,7 @@ package com.poolguide.tool
 import com.poolguide.tool.cv.CvConfig
 import com.poolguide.tool.data.GameProfile
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Test
 
@@ -60,5 +61,53 @@ class GameProfileTest {
         assertThrows(IllegalArgumentException::class.java) {
             GameProfile("56.35.0", 0.015, 0.02, 100.0)
         }
+    }
+
+    @Test
+    fun `brown window defaults match the pipeline constants`() {
+        val d = GameProfile.DEFAULT
+        assertEquals(CvConfig.FELT_BROWN_LOWER[0], d.brownHLo, 0.0)
+        assertEquals(CvConfig.FELT_BROWN_LOWER[1], d.brownSLo, 0.0)
+        assertEquals(CvConfig.FELT_BROWN_LOWER[2], d.brownVLo, 0.0)
+        assertEquals(CvConfig.FELT_BROWN_UPPER[0], d.brownHHi, 0.0)
+        assertEquals(CvConfig.FELT_BROWN_UPPER[1], d.brownSHi, 0.0)
+        assertEquals(CvConfig.FELT_BROWN_UPPER[2], d.brownVHi, 0.0)
+        assertEquals(13.0, d.brownHLo, 0.0)
+        assertEquals(22.0, d.brownHHi, 0.0)
+    }
+
+    @Test
+    fun `brown window with low above high is rejected`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            GameProfile.DEFAULT.copy(brownHLo = 30.0, brownHHi = 20.0)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            GameProfile.DEFAULT.copy(brownSLo = 300.0)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            GameProfile.DEFAULT.copy(brownVHi = 300.0)
+        }
+    }
+
+    @Test
+    fun `brown window serialise and parse round trip`() {
+        val raw = GameProfile.serializeBrownWindow(
+            doubleArrayOf(13.0, 135.0, 105.0),
+            doubleArrayOf(22.0, 255.0, 255.0)
+        )
+        assertEquals("13.0,135.0,105.0,22.0,255.0,255.0", raw)
+        val parsed = GameProfile.parseBrownWindow(raw)!!
+        assertEquals(13.0, parsed[0], 0.0)
+        assertEquals(255.0, parsed[5], 0.0)
+        assertNull(GameProfile.parseBrownWindow(null))
+        assertNull(GameProfile.parseBrownWindow("13.0,135.0"))
+        assertNull(GameProfile.parseBrownWindow("not,a,window,at,all,here"))
+    }
+
+    @Test
+    fun `forVersion keeps the default brown window`() {
+        val p = GameProfile.forVersion("57.0.0")
+        assertEquals(GameProfile.DEFAULT.brownHLo, p.brownHLo, 0.0)
+        assertEquals(GameProfile.DEFAULT.brownVHi, p.brownVHi, 0.0)
     }
 }

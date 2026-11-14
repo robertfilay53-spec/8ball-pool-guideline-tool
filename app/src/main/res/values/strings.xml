@@ -13,10 +13,26 @@
     <string name="btn_stop">Stop</string>
     <string name="btn_demo">Demo mode (no game)</string>
     <string name="btn_calibrate">Calibrate table</string>
+    <string name="btn_practice">Practice mode (no game)</string>
     <string name="stop">Stop</string>
     <string name="cancel">Cancel</string>
     <string name="hide_guides">Hide guides</string>
     <string name="show_guides">Show guides</string>
+    <string name="edit_guides">Edit guides</string>
+    <string name="done_editing">Done</string>
+    <string name="no_shot_to_edit">No shot to edit yet — aim at a ball first.</string>
+    <string name="status_practice">Practice — drag the balls, no game needed.</string>
+
+    <string name="practice_title">Practice mode</string>
+    <string name="practice_hint">Drag the balls to arrange a shot — the lines update live. This screen never touches 8 Ball Pool, so there is nothing to detect. Tap a ball to select it, then use the arrows to nudge it 1 px at a time.</string>
+    <string name="practice_no_shot">No shot — drag the balls into line.</string>
+    <string name="practice_cut">Cut %.0f deg to pocket.</string>
+    <string name="practice_cut_thin">Cut %.0f deg (thin cut — very low margin) to pocket.</string>
+    <string name="practice_reset">Reset layout</string>
+    <string name="nudge_up">↑</string>
+    <string name="nudge_down">↓</string>
+    <string name="nudge_left">←</string>
+    <string name="nudge_right">→</string>
 
     <string name="preview_title">Diagnostic preview (what the tool actually sees)</string>
     <string name="preview_switch">Show captured frame</string>
@@ -47,6 +63,10 @@
     <string name="calib_found">Table found — check the corners, then Save.</string>
     <string name="calib_failed">Detection failed.</string>
     <string name="calib_saved">Table calibration saved.</string>
+
+    <string name="calib_brown_title">Brown felt window (HSV)</string>
+    <string name="calib_brown_hint">Only for brown tables: if the rail is detected as felt, narrow the H range or raise the S/V floors. Leave the defaults for green/blue tables.</string>
+    <string name="calib_brown_invalid">Brown window values are invalid — check the ranges (H 0-179, S/V 0-255, low &lt;= high).</string>
 
     <string name="footer">Sideloaded tool. Not affiliated with Miniclip or 8 Ball Pool. Not a mod: it never touches the game.</string>
 </resources>

@@ -4,16 +4,19 @@ import android.content.Context
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.PointF
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.Toast
 import com.poolguide.tool.R
 import com.poolguide.tool.cv.DetectionResult
 import com.poolguide.tool.data.CalibrationStore
 import com.poolguide.tool.geometry.Segment
+import com.poolguide.tool.geometry.ShotSolver
 import com.poolguide.tool.geometry.Vec2
 import kotlin.math.max
 import kotlin.math.min
@@ -33,6 +36,14 @@ import kotlin.math.min
  *    frames, the lines are removed — a stale shot is worse than no shot.
  * 4. Windows are reused by index across frames (updateViewLayout), not
  *    re-added, to avoid flicker.
+ * 5. EDIT mode (v1.0.4, Line Guide lead): the bubble's Edit button freezes
+ *    the current shot and shows two draggable anchor handles (cue +
+ *    ghost). The handles are small touchable windows by design — a touch
+ *    landing exactly on one sets FLAG_WINDOW_IS_OBSCURED, so EDIT mode is
+ *    for arranging, not for shooting; leaving it resumes the live
+ *    detection. In EDIT mode the lines do not auto-hide on guideline
+ *    loss (the user is editing precisely because detection missed) and
+ *    do not follow new detections.
  */
 class LineOverlayManager(
     private val context: Context,
@@ -56,6 +67,10 @@ class LineOverlayManager(
         private const val LINE_WIDTH_PX = 4f
         private const val RING_WIDTH_PX = 4f
         private const val NO_GUIDELINE_HIDE_AFTER_FRAMES = 15
+        /** EDIT-mode anchor handle size (Line Guide's controllers are
+         * 150 px; ours are smaller — a 48 dp touch target is enough to
+         * grab, and a smaller window flags fewer touches as obscured). */
+        private const val HANDLE_SIZE_DP = 48f
     }
 
     private val windowManager =
@@ -66,11 +81,24 @@ class LineOverlayManager(
         val params: WindowManager.LayoutParams
     )
 
+    private data class HandleWindow(
+        val anchor: Anchor,
+        val view: LineView,
+        val params: WindowManager.LayoutParams
+    )
+
     private val lineWindows = mutableListOf<LineWindow>()
+    private val handleWindows = mutableListOf<HandleWindow>()
     private var bubbleParams: WindowManager.LayoutParams? = null
     private var bubbleView: View? = null
     private var hideButton: Button? = null
+    private var editButton: Button? = null
     private var framesWithoutGuideline = 0
+    /** EDIT-mode state (v1.0.4): the frozen shot + anchor overrides. */
+    private val manualAim = ManualAim()
+    /** The latest result, kept so a handle drag can re-render without
+     * waiting for the next frame. */
+    private var lastResult: DetectionResult? = null
     /** Jitter gate + interpolation (v1.0.3, Bloro lead): the best
      * shot's lines ease toward new detections instead of snapping. */
     private val smoother = LineSmoother()
@@ -78,6 +106,49 @@ class LineOverlayManager(
     /** Test-only: how many line windows are currently shown. */
     @androidx.annotation.VisibleForTesting
     val lineWindowCount: Int get() = lineWindows.size
+
+    /** Test-only: whether EDIT mode is active. */
+    @androidx.annotation.VisibleForTesting
+    val isEditMode: Boolean get() = manualAim.isEditMode
+
+    /** Test-only: how many anchor-handle windows are currently shown. */
+    @androidx.annotation.VisibleForTesting
+    val handleWindowCount: Int get() = handleWindows.size
+
+    /** Test-only: the corrected shot currently drawn in EDIT mode. */
+    @androidx.annotation.VisibleForTesting
+    val editedShot: ShotSolver.ShotSolution? get() = manualAim.currentShot()
+
+    /** Toggle EDIT mode (the bubble's Edit/Done button). Entering freezes
+     * the current shot; leaving resumes the live detection and drops
+     * any corrections. With no shot to edit, the tap does nothing. */
+    fun toggleEditMode() {
+        if (manualAim.isEditMode) {
+            manualAim.exitEditMode()
+            removeHandles()
+            editButton?.text = context.getString(R.string.edit_guides)
+            return
+        }
+        val result = lastResult
+        val shot = result?.shot
+        if (shot == null) {
+            Toast.makeText(context, R.string.no_shot_to_edit, Toast.LENGTH_SHORT).show()
+            return
+        }
+        smoother.reset()
+        manualAim.enterEditMode(shot, result.cueBall?.radiusPx ?: 9.0)
+        editButton?.text = context.getString(R.string.done_editing)
+        result.let { updateEditMode(it) }
+    }
+
+    /** Test-only: drag an anchor by a working-coordinate delta, then
+     * re-render. No-op outside EDIT mode. */
+    @androidx.annotation.VisibleForTesting
+    fun applyAnchorDrag(anchor: Anchor, deltaWorking: Vec2) {
+        if (!manualAim.isEditMode) return
+        manualAim.dragAnchor(anchor, deltaWorking, lastResult?.table)
+        lastResult?.let { updateEditMode(it) }
+    }
 
     /** One line to draw, in screen coordinates. */
     private data class DrawLine(
@@ -90,10 +161,18 @@ class LineOverlayManager(
 
     fun update(result: DetectionResult) {
         ensureBubble()
+        lastResult = result
         if (result.guideline.isEmpty()) {
             framesWithoutGuideline++
         } else {
             framesWithoutGuideline = 0
+        }
+
+        // EDIT mode (v1.0.4): the frozen shot is drawn, not the live
+        // detection — see updateEditMode.
+        if (manualAim.isEditMode) {
+            updateEditMode(result)
+            return
         }
 
         // Table-lock gate (v1.0.3, Bloro lead): draw nothing until the
@@ -119,6 +198,162 @@ class LineOverlayManager(
             return
         }
         applyLines(lines)
+    }
+
+    /** EDIT-mode frame: draw the frozen shot with any anchor corrections.
+     * No table-lock gate and no guideline-loss auto-hide — the user is
+     * editing precisely because detection missed — and no smoothing or
+     * candidate shots: the drag IS the direct control. Only the explicit
+     * hide toggle and a black capture still remove the lines. */
+    private fun updateEditMode(result: DetectionResult) {
+        if (store.guidesHidden || result.isCaptureBlack) {
+            removeLineWindows()
+            removeHandles()
+            return
+        }
+        val shot = manualAim.currentShot()
+        if (shot == null) {
+            removeLineWindows()
+            removeHandles()
+            return
+        }
+        val lines = buildEditLines(shot, result)
+        if (lines.isEmpty()) {
+            removeLineWindows()
+            removeHandles()
+            return
+        }
+        applyLines(lines)
+        ensureHandles(shot, result)
+    }
+
+    /** The corrected shot's lines, mapped to screen coordinates. The
+     * pocket ring marks the (unchanged) target pocket. */
+    private fun buildEditLines(
+        shot: ShotSolver.ShotSolution,
+        result: DetectionResult
+    ): List<DrawLine> {
+        val sx = result.scaleToScreenX
+        val sy = result.scaleToScreenY
+        fun map(p: Vec2) = Vec2(p.x * sx, p.y * sy)
+        val pocket = shot.targetLine.end
+        return listOf(
+            DrawLine(
+                Segment(map(shot.aimLine.start), map(shot.aimLine.end)),
+                AIM_COLOR, AIM_WIDTH_PX
+            ),
+            DrawLine(
+                Segment(map(shot.targetLine.start), map(shot.targetLine.end)),
+                TARGET_COLOR, LINE_WIDTH_PX
+            ),
+            DrawLine(
+                Segment(map(shot.deflectionLine.start), map(shot.deflectionLine.end)),
+                DEFLECT_COLOR, LINE_WIDTH_PX
+            ),
+            DrawLine(
+                Segment(map(pocket), map(pocket)),
+                POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = 18f
+            )
+        )
+    }
+
+    /** Show the two anchor handles at the corrected cue + ghost points
+     * (screen coordinates), reusing the windows across frames. The
+     * handles are small touchable windows by design (Line Guide's
+     * ControllerPointA/B): a touch landing exactly on one sets
+     * FLAG_WINDOW_IS_OBSCURED, so EDIT mode is for arranging, not for
+     * shooting. */
+    private fun ensureHandles(shot: ShotSolver.ShotSolution, result: DetectionResult) {
+        val sizePx = TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_DIP, HANDLE_SIZE_DP,
+            context.resources.displayMetrics
+        ).toInt()
+        val positions = listOf(
+            Anchor.CUE to shot.aimLine.start,
+            Anchor.GHOST to shot.ghostPoint
+        )
+        for ((index, pair) in positions.withIndex()) {
+            val (anchor, point) = pair
+            val cx = (point.x * result.scaleToScreenX).toInt()
+            val cy = (point.y * result.scaleToScreenY).toInt()
+            val x = cx - sizePx / 2
+            val y = cy - sizePx / 2
+            val color = if (anchor == Anchor.CUE) AIM_COLOR else TARGET_COLOR
+            if (index < handleWindows.size) {
+                val win = handleWindows[index]
+                win.params.x = x
+                win.params.y = y
+                win.view.setDot(
+                    PointF(sizePx / 2f, sizePx / 2f), sizePx * 0.22f, color
+                )
+                windowManager.updateViewLayout(win.view, win.params)
+            } else {
+                val view = LineView(context)
+                view.setDot(PointF(sizePx / 2f, sizePx / 2f), sizePx * 0.22f, color)
+                val params = WindowManager.LayoutParams(
+                    sizePx, sizePx,
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    PixelFormat.TRANSLUCENT
+                ).apply {
+                    gravity = Gravity.TOP or Gravity.START
+                    this.x = x
+                    this.y = y
+                }
+                makeHandleDraggable(view, anchor)
+                windowManager.addView(view, params)
+                handleWindows += HandleWindow(anchor, view, params)
+            }
+        }
+        while (handleWindows.size > positions.size) {
+            val win = handleWindows.removeAt(handleWindows.lastIndex)
+            try {
+                windowManager.removeView(win.view)
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    /** Drag a handle: screen deltas become working-coordinate deltas for
+     * the anchor, then the frozen shot is re-rendered immediately. */
+    private fun makeHandleDraggable(view: LineView, anchor: Anchor) {
+        var lastRawX = 0f
+        var lastRawY = 0f
+        view.setOnTouchListener { _, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    lastRawX = event.rawX
+                    lastRawY = event.rawY
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val result = lastResult ?: return@setOnTouchListener false
+                    val dxScreen = event.rawX - lastRawX
+                    val dyScreen = event.rawY - lastRawY
+                    lastRawX = event.rawX
+                    lastRawY = event.rawY
+                    val delta = Vec2(
+                        dxScreen / result.scaleToScreenX,
+                        dyScreen / result.scaleToScreenY
+                    )
+                    manualAim.dragAnchor(anchor, delta, result.table)
+                    updateEditMode(result)
+                    true
+                }
+                else -> false
+            }
+        }
+    }
+
+    private fun removeHandles() {
+        for (win in handleWindows) {
+            try {
+                windowManager.removeView(win.view)
+            } catch (_: Exception) {
+            }
+        }
+        handleWindows.clear()
     }
 
     /** Build the lines to draw, mapped from working to screen coordinates.
@@ -294,11 +529,17 @@ class LineOverlayManager(
             }
         }
         hideButton = hide
+        val edit = Button(context).apply {
+            text = context.getString(R.string.edit_guides)
+            setOnClickListener { toggleEditMode() }
+        }
+        editButton = edit
         val stop = Button(context).apply {
             text = context.getString(R.string.stop)
             setOnClickListener { onStopRequested() }
         }
         layout.addView(hide)
+        layout.addView(edit)
         layout.addView(stop)
 
         val params = WindowManager.LayoutParams(
@@ -346,7 +587,9 @@ class LineOverlayManager(
 
     fun removeAll() {
         smoother.reset()
+        manualAim.exitEditMode()
         removeLineWindows()
+        removeHandles()
         bubbleView?.let {
             try {
                 windowManager.removeView(it)
@@ -356,6 +599,8 @@ class LineOverlayManager(
         bubbleView = null
         bubbleParams = null
         hideButton = null
+        editButton = null
         framesWithoutGuideline = 0
+        lastResult = null
     }
 }

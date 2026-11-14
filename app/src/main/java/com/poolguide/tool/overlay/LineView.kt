@@ -16,7 +16,7 @@ import android.view.View
  */
 class LineView(context: Context) : View(context) {
 
-    enum class Mode { LINE, RING }
+    enum class Mode { LINE, RING, DOT }
 
     private var mode = Mode.LINE
     private var start = PointF(0f, 0f)
@@ -27,6 +27,11 @@ class LineView(context: Context) : View(context) {
         style = Paint.Style.STROKE
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
+    }
+
+    /** Filled-dot paint (EDIT-mode anchor handles, v1.0.4). */
+    private val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
     }
 
     /** Halo underlay (v1.0.3, Bloro lead): a wide, faint stroke of the
@@ -63,6 +68,19 @@ class LineView(context: Context) : View(context) {
         invalidate()
     }
 
+    /** Set a filled dot (EDIT-mode anchor handle, v1.0.4) centred in
+     * this view. The handle window is larger than the dot so the touch
+     * target is comfortable; the dot itself marks the anchor point. */
+    fun setDot(center: PointF, radius: Float, color: Int) {
+        mode = Mode.DOT
+        this.start = center
+        this.ringRadius = radius
+        dotPaint.color = color
+        paint.color = color
+        paint.strokeWidth = 3f
+        invalidate()
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         when (mode) {
@@ -82,6 +100,10 @@ class LineView(context: Context) : View(context) {
             }
             Mode.RING -> {
                 canvas.drawCircle(start.x, start.y, ringRadius, haloPaint)
+                canvas.drawCircle(start.x, start.y, ringRadius, paint)
+            }
+            Mode.DOT -> {
+                canvas.drawCircle(start.x, start.y, ringRadius, dotPaint)
                 canvas.drawCircle(start.x, start.y, ringRadius, paint)
             }
         }

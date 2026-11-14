@@ -1,5 +1,6 @@
 package com.poolguide.tool.cv
 
+import com.poolguide.tool.data.GameProfile
 import com.poolguide.tool.geometry.Vec2
 import org.opencv.core.Core
 import org.opencv.core.CvType
@@ -37,11 +38,13 @@ class TableDetector {
     var feltHsvMean: DoubleArray? = null
         private set
 
-    /** Detect the table in an HSV [Mat]. Returns null when no felt found. */
-    fun detect(hsv: Mat): TableRect? {
+    /** Detect the table in an HSV [Mat]. Returns null when no felt found.
+     * The brown window comes from [profile] (v1.0.4: recalibratable per
+     * game version); green/blue use the fixed windows. */
+    fun detect(hsv: Mat, profile: GameProfile = GameProfile.DEFAULT): TableRect? {
         return detectWith(hsv, CvConfig.FELT_GREEN_LOWER, CvConfig.FELT_GREEN_UPPER)
             ?: detectWith(hsv, CvConfig.FELT_BLUE_LOWER, CvConfig.FELT_BLUE_UPPER)
-            ?: detectWith(hsv, CvConfig.FELT_BROWN_LOWER, CvConfig.FELT_BROWN_UPPER)
+            ?: detectWith(hsv, profile.brownFeltLower, profile.brownFeltUpper)
     }
 
     private fun detectWith(hsv: Mat, lower: DoubleArray, upper: DoubleArray): TableRect? {

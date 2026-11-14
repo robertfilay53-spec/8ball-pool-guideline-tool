@@ -48,10 +48,25 @@ screen. Nothing about the game is changed.**
    flagged as thin cuts with very low margin. Table skins, resolutions, and
    game versions vary; the first-run calibration exists for that. Brown felt
    is detected with a tightly fitted window (the wooden rail is nearly the
-   same hue) — it works on the synthetic tables but may need recalibration
-   on a real brown table. The bank-shot cushion correction is fitted to the
-   synthetic harness data, where it measures zero; real-table cushion
-   behaviour is unmeasured.
+   same hue) — it works on the synthetic tables, and the window is now
+   recalibratable per game version from the Calibrate screen (HSV fields)
+   if a real brown table needs it. The bank-shot cushion correction is
+   fitted to the synthetic harness data, where it measures zero; real-table
+   cushion behaviour is unmeasured.
+5. **EDIT mode's anchor handles are touchable on purpose.** The Edit button
+   on the floating bubble freezes the current shot and shows two draggable
+   handles (cue + ghost) so you can correct a mis-detection by hand. Those
+   two small windows ARE touchable (that is how dragging works), so a touch
+   landing exactly on a handle sets `FLAG_WINDOW_IS_OBSCURED` — use EDIT
+   mode to arrange, then tap Done and shoot in PLAY mode, where every line
+   window is pass-through again.
+6. **The ratio fallback is a guess.** When the detector finds no table at
+   all, the tool falls back to Bloro's screen-fraction table model (band
+   0.237–0.913 of frame height, 2:1 table). It is labelled in the status
+   line ("table: ratio fallback") and the detector keeps retrying, so a
+   real detection replaces the guess. But a guessed table can be wrong —
+   if the lines sit on the wrong place, hide the guides and calibrate the
+   corners by hand.
 
 ## How it works
 
@@ -91,6 +106,20 @@ systematic angle error is left to correct). The CV harness (15 synthetic
 tables, `../cv-harness/RESULTS.md`) measures the v1.0.3 pipeline at
 15/15 tables, 85/85 balls with 0 false positives, 15/15 shots, mean
 cut-angle error 0.32 deg (v1.0.1 was 13/15, 76/85, 11/15, 1.46 deg).
+
+Interaction work (v1.0.4, the remaining decode items): an **Edit/Play
+toggle** on the floating bubble (Line Guide lead) that freezes the current
+shot and shows two draggable anchor handles — cue and ghost — so a
+mis-detection can be corrected by hand; a **ratio table-geometry
+fallback** (Bloro lead) that guesses the table from the frame size when
+the detector finds nothing, labelled in the status line; and an
+**offline practice mode** (Cheto lead) with a draggable cue + target ball
+and 1-px nudge buttons, so the solver can be learned without opening the
+game. The brown felt window is now part of the per-version
+`GameProfile` and editable from the Calibrate screen. The harness
+numbers are unchanged in v1.0.4 (15/15, 85/85, 0 false positives,
+15/15, 0.32 deg) — the fallback only fires when detection fails, which
+never happens on the 15 harness tables.
 
 - **OpenCV**: Maven AAR `org.opencv:opencv:4.10.0` (4.9+ supports Android
   15's 16 KB page size). Fallback documented in `app/build.gradle.kts`:
@@ -143,12 +172,20 @@ cut-angle error 0.32 deg (v1.0.1 was 13/15, 76/85, 11/15, 1.46 deg).
    pocket. Every other reachable pocket is also drawn, faint grey — the
    best shot is the highlighted one. Turn that off with **Show all shots**
    on the main screen if you only want the best shot. Use **Hide guides**
-   on the floating bubble while shooting.
+   on the floating bubble while shooting. If the lines are wrong, tap
+   **Edit** on the bubble and drag the green (cue) and yellow (ghost)
+   handles to correct them, then tap **Done**.
 
 **Demo mode** (no game needed): the app ships with two synthetic table
 images and runs the full pipeline + overlay on them, so you can verify the
 tool works before ever opening the game. Rotate your phone to landscape
 for the demo, so the lines land where the table would be.
+
+**Practice mode** (no game needed): the main screen's **Practice mode**
+button opens a self-contained table with a draggable cue ball and target
+ball. The aim lines update live from the same solver, and the arrow
+buttons nudge the selected ball 1 px at a time. This screen never touches
+8 Ball Pool — there is nothing for the game to detect.
 
 ## Build it yourself
 
@@ -180,7 +217,12 @@ runs the instrumented tests on API 34 (x86_64). The workflow file is
   positions, allShots ranking + symmetric-tie order, combo shots (straight
   / cut / impossible / overlap), kiss shots (refined deflection, unrefined
   fallback, impossible approaches), per-version GameProfile defaults +
-  validation, FramePacer 15 FPS admission. 41 tests.
+  validation + brown-window parse/serialise, FramePacer 15 FPS admission,
+  table-lock gate (75 frames, tolerance, reset), jitter gate + lerp,
+  cushion-correction fit, EDIT-mode manual aim (cue re-solve, ghost
+  re-aim, impossible-drag guard, table clamp), ratio fallback geometry
+  (Bloro band fractions, 2:1 centring, portrait clamp), practice-table
+  state (1-px nudge, clamp, hit test, reset). 85 tests.
 - **Instrumented** (`app/src/androidTest`): the real pipeline on the two
   synthetic tables (green + blue felt) — table, 6 pockets, cue ball, 8+
   balls, guideline, and a solved shot with the expected target and pocket,
@@ -188,7 +230,10 @@ runs the instrumented tests on API 34 (x86_64). The workflow file is
   frame is reported as secure; the overlay manager shows one small window
   per line (4 for the best shot, +2 faint windows per extra candidate when
   "Show all shots" is on, 4 when it is off) and hides them on toggle /
-  black frame; the overlay service runs in demo mode.
+  black frame; EDIT mode freezes the shot, shows 2 anchor handles, follows
+  a ghost-anchor drag, keeps drawing with no guideline, and resumes live
+  detection on Done; the overlay service runs in demo mode; the practice
+  activity launches, solves the default layout, and nudges 1 px. 10 tests.
 - **Not yet tested (needs a real phone + the game)**: FLAG_SECURE blackout,
   `isObscured` behaviour while shooting, real-table CV accuracy across
   table skins and resolutions. See `../phone-test/PHONE-TEST-PLAN.md` in
@@ -200,13 +245,16 @@ runs the instrumented tests on API 34 (x86_64). The workflow file is
 app/src/main/java/com/poolguide/tool/
   geometry/   Vec2, ShotSolver            (pure Kotlin, JVM-testable)
   cv/         CvConfig, TableGeometry, TableDetector, BallDetector,
-              GuidelineDetector, CvPipeline, OpenCvInit
+              GuidelineDetector, CvPipeline, OpenCvInit,
+              RatioTableGeometry (fallback table from frame size)
   capture/    CaptureService, PreviewBus, OverlayBus, FramePacer
               (MediaProjection, foreground svc; 15 FPS pacing)
-  overlay/    LineView, LineOverlayManager, OverlayService
-              (one small window per line; specialUse foreground svc)
+  overlay/    LineView, LineOverlayManager, OverlayService, ManualAim
+              (one small window per line; specialUse foreground svc;
+              EDIT mode: frozen shot + draggable cue/ghost anchors)
   data/       CalibrationStore, GameProfile (per-version calibration)
-  ui/         MainActivity, CalibrationActivity
+  ui/         MainActivity, CalibrationActivity, PracticeState,
+              PracticeView, PracticeActivity (offline practice table)
 app/src/main/assets/demo/  synthetic tables + black frame (tests + demo mode)
 tools/        generate_demo_images.py, measure_aim_fit.py
 ```

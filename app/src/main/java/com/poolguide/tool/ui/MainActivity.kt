@@ -98,6 +98,9 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btn_calibrate).setOnClickListener {
             startActivity(Intent(this, CalibrationActivity::class.java))
         }
+        findViewById<Button>(R.id.btn_practice).setOnClickListener {
+            startActivity(Intent(this, PracticeActivity::class.java))
+        }
         previewSwitch.setOnCheckedChangeListener { _, checked ->
             if (checked) {
                 PreviewBus.listener = { bitmap, isBlack ->

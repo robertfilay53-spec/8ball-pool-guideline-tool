@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.view.MotionEvent
 import android.view.View
 import android.widget.Button
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.Toast
@@ -14,6 +15,7 @@ import com.poolguide.tool.R
 import com.poolguide.tool.cv.OpenCvInit
 import com.poolguide.tool.cv.TableDetector
 import com.poolguide.tool.data.CalibrationStore
+import com.poolguide.tool.data.GameProfile
 import com.poolguide.tool.geometry.Vec2
 import org.opencv.android.Utils
 import org.opencv.core.Mat
@@ -34,6 +36,9 @@ class CalibrationActivity : AppCompatActivity() {
     private val handles = mutableListOf<ImageView>()
     private var frameBitmap: Bitmap? = null
 
+    /** Brown felt window fields (H/S/V low + high), in layout order. */
+    private lateinit var brownFields: List<EditText>
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_calibration)
@@ -41,6 +46,12 @@ class CalibrationActivity : AppCompatActivity() {
 
         frame = findViewById(R.id.calib_frame)
         preview = findViewById(R.id.calib_preview)
+        brownFields = listOf(
+            R.id.brown_h_lo, R.id.brown_h_hi,
+            R.id.brown_s_lo, R.id.brown_s_hi,
+            R.id.brown_v_lo, R.id.brown_v_hi
+        ).map { findViewById<EditText>(it) }
+        fillBrownFields(store.getGameProfile())
         val handleIds = listOf(
             R.id.handle_tl, R.id.handle_tr, R.id.handle_br, R.id.handle_bl
         )
@@ -148,6 +159,37 @@ class CalibrationActivity : AppCompatActivity() {
         }
     }
 
+    /** Prefill the brown-window fields from the stored profile. */
+    private fun fillBrownFields(profile: GameProfile) {
+        val values = listOf(
+            profile.brownHLo, profile.brownHHi,
+            profile.brownSLo, profile.brownSHi,
+            profile.brownVLo, profile.brownVHi
+        )
+        for ((field, value) in brownFields.zip(values)) {
+            field.setText(value.toInt().toString())
+        }
+    }
+
+    /** Read the brown-window fields; null when any value is missing or
+     * out of range (the profile constructor validates the ranges). */
+    private fun readBrownFields(): Pair<DoubleArray, DoubleArray>? {
+        val values = brownFields.map { it.text.toString().toDoubleOrNull() ?: return null }
+        return try {
+            GameProfile.DEFAULT.copy(
+                brownHLo = values[0], brownHHi = values[1],
+                brownSLo = values[2], brownSHi = values[3],
+                brownVLo = values[4], brownVHi = values[5]
+            )
+            Pair(
+                doubleArrayOf(values[0], values[2], values[4]),
+                doubleArrayOf(values[1], values[3], values[5])
+            )
+        } catch (_: IllegalArgumentException) {
+            null
+        }
+    }
+
     /** Run the table detector on the current frame and move the handles. */
     private fun redetect() {
         val bmp = frameBitmap
@@ -166,7 +208,7 @@ class CalibrationActivity : AppCompatActivity() {
             val hsv = Mat()
             Imgproc.cvtColor(rgba, bgr, Imgproc.COLOR_RGBA2BGR)
             Imgproc.cvtColor(bgr, hsv, Imgproc.COLOR_BGR2HSV)
-            val table = TableDetector().detect(hsv)
+            val table = TableDetector().detect(hsv, store.getGameProfile())
             if (table == null) {
                 Toast.makeText(this, R.string.calib_not_found, Toast.LENGTH_SHORT).show()
                 return
@@ -182,6 +224,12 @@ class CalibrationActivity : AppCompatActivity() {
     }
 
     private fun save() {
+        val brown = readBrownFields()
+        if (brown == null) {
+            Toast.makeText(this, R.string.calib_brown_invalid, Toast.LENGTH_SHORT).show()
+            return
+        }
+        store.setBrownFeltWindow(brown.first, brown.second)
         val corners = readHandles()
         store.setTableCorners(corners)
         Toast.makeText(this, R.string.calib_saved, Toast.LENGTH_SHORT).show()

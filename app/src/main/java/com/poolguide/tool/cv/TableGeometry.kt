@@ -93,6 +93,11 @@ data class DetectionResult(
      * (5 s at the 15 FPS cap). The overlay draws nothing until this is
      * set. A calibration override counts as locked immediately. */
     val tableLocked: Boolean = false,
+    /** True when [table] is the ratio fallback (v1.0.4, Bloro lead),
+     * not a detection: the rect is a guess from the frame size. The
+     * status line says so, and the detector retries so a real
+     * detection replaces the guess as soon as one succeeds. */
+    val tableFromFallback: Boolean = false,
     /** Human-readable status for the diagnostic preview. */
     val status: String
 ) {
