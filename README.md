@@ -49,7 +49,7 @@ screen. Nothing about the game is changed.**
    game versions vary; the first-run calibration exists for that. Brown felt
    is detected with a tightly fitted window (the wooden rail is nearly the
    same hue) — it works on the synthetic tables, and the window is now
-   recalibratable per game version from the Calibrate screen (HSV fields)
+   recalibratable per game version from the Calibrate screen (sliders)
    if a real brown table needs it. The bank-shot cushion correction is
    fitted to the synthetic harness data, where it measures zero; real-table
    cushion behaviour is unmeasured.
@@ -89,6 +89,15 @@ screen. Nothing about the game is changed.**
    is fitted to synthetic data, so real-table cushion behaviour is
    unmeasured. What you practise here is the aim geometry of direct,
    bank, combo, and kiss shots, not the exact outcome on a real table.
+9. **The calibration screen is a tuning aid, not a guarantee.** Since
+   v1.0.8 the Calibrate screen has sliders for the brown felt window
+   and the pocket/ball thresholds, a felt-mask preview, and a live
+   status line ("Table found with these values" / "Table not found
+   with these values — mask covers X% of the frame"). The mask shows
+   what the current window matches on the preview frame, and the
+   status reports what the preview frame shows — neither promises the
+   live pipeline will lock on a real table. The defaults are
+   unchanged, and calibration is stored per game version.
 
 ## How it works
 
