@@ -52,10 +52,19 @@ import com.poolguide.tool.geometry.Vec2
  * ball (the ball the game's guideline points at — the ball the
  * cue strikes), and every other ball is a candidate second ball
  * (the ball that pots), ranked by the second shot's cut angle.
- * A combo never displaces any other shot: two balls and two cuts
- * compound real-table error more than any single-ball shot. The
- * kiss fallback is only tried after the combo fails too: a kiss
- * is the last resort of all, and it never displaces a combo.
+ * Since v1.0.25 each combo/kiss family is a ranked list
+ * ([ShotSolver.allCombos], [ShotSolver.allKisses]) and the shown
+ * shot is the first CLEAR one in cut order (see
+ * [PathBlock.firstClearCombo], [PathBlock.firstClearKiss]): a
+ * blocked easiest combo or kiss no longer hides a makeable one,
+ * and when every combo or kiss is blocked the best stays and is
+ * flagged, as before. The re-ranking is WITHIN each family, not
+ * between them: a combo is still tried before a kiss, and neither
+ * displaces any single-ball shot. A combo never displaces any
+ * other shot: two balls and two cuts compound real-table error
+ * more than any single-ball shot. The kiss fallback is only
+ * tried after the combo fails too: a kiss is the last resort of
+ * all, and it never displaces a combo.
  */
 sealed interface FallbackShot {
     data class Bank(val solution: ShotSolver.BankSolution) : FallbackShot
@@ -167,18 +176,30 @@ fun solveFallback(
     // No two-rail kick either: try combos, ranked by the second
     // shot's cut angle (easiest pot first). The picked target is
     // the first ball; every other ball is a candidate second ball.
-    // A combo is only shown when no single-ball shot solves — two
-    // balls and two cuts compound real-table error more than any
-    // one-ball shot.
-    val combo = ShotSolver.bestCombo(cue, target, others, pockets, ballRadiusPx)
-    if (combo != null) return FallbackShot.Combo(combo)
+    // The shown combo is its first CLEAR one in cut order
+    // (v1.0.25 re-ranking): a blocked easiest combo no longer
+    // hides a makeable one, and when every combo is blocked the
+    // best stays and is flagged, as before. [others] is the
+    // blocker list here: every ball except the cue and the first
+    // ball, which travel the path (each candidate's own second
+    // ball is removed inside firstClearCombo, because it sits at
+    // the start of its own target line). A combo is only shown
+    // when no single-ball shot solves. Two balls and two cuts
+    // compound real-table error more than any one-ball shot.
+    val allCombos = ShotSolver.allCombos(cue, target, others, pockets, ballRadiusPx)
+    val shownCombo = PathBlock.firstClearCombo(allCombos, others, ballRadiusPx)
+        ?: allCombos.firstOrNull()
+    if (shownCombo != null) return FallbackShot.Combo(shownCombo)
 
     // No combo either: try kisses, ranked by the second shot's cut
-    // angle (easiest pot first). A kiss is the last resort of all:
-    // it is only shown when it is the only shot left, and it never
-    // displaces a combo.
-    val kiss = ShotSolver.bestKiss(cue, target, others, pockets, ballRadiusPx)
-    if (kiss != null) return FallbackShot.Kiss(kiss)
+    // angle (easiest pot first). The shown kiss is its first CLEAR
+    // one in cut order (v1.0.25 re-ranking), same rule as the combo
+    // above. A kiss is the last resort of all: it is only shown
+    // when it is the only shot left, and it never displaces a combo.
+    val allKisses = ShotSolver.allKisses(cue, target, others, pockets, ballRadiusPx)
+    val shownKiss = PathBlock.firstClearKiss(allKisses, others, ballRadiusPx)
+        ?: allKisses.firstOrNull()
+    if (shownKiss != null) return FallbackShot.Kiss(shownKiss)
 
     return FallbackShot.None
 }

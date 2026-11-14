@@ -47,9 +47,15 @@ import kotlin.math.sqrt
  * still tried before the two-rail kick (a two-rail kick
  * compounds real-table error twice, so it stays the last resort
  * before combo, as before). The re-ranking is WITHIN each
- * family, not between them. Combo and kiss shots are still
- * flag-only: their fallbacks return a single best shot, not a
- * ranked list, so there is nothing to re-rank within the family.
+ * family, not between them. v1.0.25 re-ranks COMBO and KISS shots
+ * the same way ([firstClearCombo], [firstClearKiss]): when no
+ * two-rail shot solves either, the shown combo or kiss is the
+ * first clear one in cut order. The re-ranking is WITHIN each
+ * family, not between them: a combo is still tried before a kiss,
+ * and neither displaces any single-ball shot. Each candidate's
+ * own second ball is removed from its blocker list (it sits at
+ * the start of its own target line); another candidate's second
+ * ball stays, because it is a real ball on the table.
  * v1.0.24 FLAGS combo and kiss shots too ([blockedBy] overloads
  * below): the potting chain has two struck balls, so the check
  * has its own definition per family: the cue's path, the
@@ -226,6 +232,58 @@ object PathBlock {
     ): ShotSolver.TwoRailKickSolution? {
         require(ballRadiusPx > 0) { "ballRadiusPx must be positive" }
         return kicks.firstOrNull { blockedBy(it, blockers, ballRadiusPx) == null }
+    }
+
+    /** First CLEAR combo in [combos] (v1.0.25): the first combo
+     * whose potting chain no other ball sits on, in the given
+     * order. The caller passes the cut-ranked
+     * [ShotSolver.allCombos] list, so this is the easiest
+     * makeable combo. Returns null when every combo is blocked
+     * (the caller then keeps the best and flags it) or when
+     * [combos] is empty. [blockers] is every ball EXCEPT the cue
+     * and the first ball (the pipeline's `others` list, which
+     * includes the candidate second balls): each candidate's own
+     * second ball is removed here, because it sits at the start
+     * of its own target line and would flag its own path (see
+     * [blockedBy] for combos and comboBlockedBy in LiveFallback).
+     * Another candidate's second ball is NOT removed: it is a
+     * real ball on the table, and it blocks the chain exactly
+     * like any other ball when it sits on it. */
+    fun firstClearCombo(
+        combos: List<ShotSolver.ComboSolution>,
+        blockers: List<Vec2>,
+        ballRadiusPx: Double
+    ): ShotSolver.ComboSolution? {
+        require(ballRadiusPx > 0) { "ballRadiusPx must be positive" }
+        return combos.firstOrNull { combo ->
+            val second = combo.secondShot.targetLine.start
+            blockedBy(combo, blockers.filter { it != second }, ballRadiusPx) == null
+        }
+    }
+
+    /** First CLEAR kiss in [kisses] (v1.0.25): the first kiss whose
+     * potting chain no other ball sits on, in the given order. The
+     * caller passes the cut-ranked [ShotSolver.allKisses] list, so
+     * this is the easiest makeable kiss. Returns null when every
+     * kiss is blocked (the caller then keeps the best and flags it)
+     * or when [kisses] is empty. Same blocker rule as
+     * [firstClearCombo]: each candidate's own second ball is
+     * removed (it sits at the start of its own target line), and
+     * another candidate's second ball stays, because it is a real
+     * ball on the table. The kissed ball is never in [blockers]
+     * (the pipeline's `others` list excludes it), and the kissed
+     * ball's own departure is not on the potting chain (see
+     * [blockedBy] for kisses and kissBlockedBy in LiveFallback). */
+    fun firstClearKiss(
+        kisses: List<ShotSolver.KissSolution>,
+        blockers: List<Vec2>,
+        ballRadiusPx: Double
+    ): ShotSolver.KissSolution? {
+        require(ballRadiusPx > 0) { "ballRadiusPx must be positive" }
+        return kisses.firstOrNull { kiss ->
+            val second = kiss.secondShot.targetLine.start
+            blockedBy(kiss, blockers.filter { it != second }, ballRadiusPx) == null
+        }
     }
 
     /** One-rail bank: the cue travels the aim line, the target

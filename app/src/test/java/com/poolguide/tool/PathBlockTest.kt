@@ -711,4 +711,171 @@ class PathBlockTest {
             PathBlock.blockedBy(kiss, listOf(chainKissSecond), r)
         )
     }
+
+    // ---- combo / kiss re-ranking (v1.0.25) ----
+    //
+    // Layouts verified against the real solver with kotlinc before
+    // the tests were written (see probe25/Probe25d.kt and
+    // probe25/Probe25l.kt). The combo pair (cue (100,150), first
+    // ball (105,132)) pots through two second balls into different
+    // pockets: (130,110) cuts 40.55 into the top-middle pocket,
+    // (100,90) cuts 53.93 into the top-left pocket, and (130,110)
+    // also pots 59.95 into the top-right pocket. The kiss pair
+    // (cue (55,58), first ball (60,40)) pots through (300,50) at
+    // 26.58 and (340,60) at 67.23, both into the top-middle
+    // pocket. Blockers sit on solved second-leg midpoints, so
+    // they hold for whatever the best solution is.
+
+    private val rankComboCue = Vec2(100.0, 150.0)
+    private val rankComboFirst = Vec2(105.0, 132.0)
+    private val rankComboBestSecond = Vec2(130.0, 110.0)
+    private val rankComboAltSecond = Vec2(100.0, 90.0)
+    private val rankKissCue = Vec2(55.0, 58.0)
+    private val rankKissFirst = Vec2(60.0, 40.0)
+    private val rankKissBestSecond = Vec2(300.0, 50.0)
+    private val rankKissAltSecond = Vec2(340.0, 60.0)
+
+    private fun allCombos25() = ShotSolver.allCombos(
+        rankComboCue, rankComboFirst,
+        listOf(rankComboBestSecond, rankComboAltSecond), pockets, r
+    )
+
+    private fun allKisses25() = ShotSolver.allKisses(
+        rankKissCue, rankKissFirst,
+        listOf(rankKissBestSecond, rankKissAltSecond), pockets, r
+    )
+
+    @Test
+    fun allCombos_ranksBySecondCutAndBestComboDelegates() {
+        val combos = allCombos25()
+        // Three entries: the best second ball pots into two
+        // pockets, so it appears twice, once per pocket.
+        assertEquals(3, combos.size)
+        assertEquals(40.55, combos[0].secondShot.cutAngleDegrees, 0.1)
+        assertEquals(Vec2(360.0, 20.0), combos[0].secondShot.targetLine.end)
+        assertEquals(53.93, combos[1].secondShot.cutAngleDegrees, 0.1)
+        assertEquals(Vec2(40.0, 20.0), combos[1].secondShot.targetLine.end)
+        assertEquals(59.95, combos[2].secondShot.cutAngleDegrees, 0.1)
+        assertEquals(Vec2(680.0, 20.0), combos[2].secondShot.targetLine.end)
+        // bestCombo is the first entry of the ranked list.
+        assertEquals(
+            combos[0],
+            ShotSolver.bestCombo(
+                rankComboCue, rankComboFirst,
+                listOf(rankComboBestSecond, rankComboAltSecond), pockets, r
+            )
+        )
+    }
+
+    @Test
+    fun firstClearCombo_returnsNextClearComboWhenBestIsBlocked() {
+        val combos = allCombos25()
+        // No blocker: the best combo is shown, and the other
+        // candidate's second ball does not block its chain (each
+        // candidate's own second ball is removed, the other stays,
+        // and it sits clear of this chain).
+        assertEquals(
+            combos[0],
+            PathBlock.firstClearCombo(
+                combos, listOf(rankComboBestSecond, rankComboAltSecond), r
+            )
+        )
+        assertNull(PathBlock.blockedBy(combos[0], listOf(rankComboAltSecond), r))
+        // Blocker (245,65) sits on the best combo's second-leg
+        // midpoint: the shown combo is the next clear one, the
+        // (100,90) combo at 53.93 into the top-left pocket.
+        val shown = PathBlock.firstClearCombo(
+            combos,
+            listOf(rankComboBestSecond, rankComboAltSecond, Vec2(245.0, 65.0)),
+            r
+        )
+        assertEquals(combos[1], shown)
+        assertEquals(53.93, shown!!.secondShot.cutAngleDegrees, 0.1)
+        assertEquals(Vec2(40.0, 20.0), shown.secondShot.targetLine.end)
+    }
+
+    @Test
+    fun firstClearCombo_returnsNullWhenEveryComboIsBlocked() {
+        val combos = allCombos25()
+        // A blocker on every combo's second-leg midpoint: (245,65)
+        // on the best, (70,55) on the alt, (405,65) on the third.
+        val mids = combos.map { combo ->
+            val leg = combo.secondShot.targetLine
+            (leg.start + leg.end) * 0.5
+        }
+        assertEquals(
+            listOf(Vec2(245.0, 65.0), Vec2(70.0, 55.0), Vec2(405.0, 65.0)),
+            mids
+        )
+        assertNull(
+            PathBlock.firstClearCombo(
+                combos, listOf(rankComboBestSecond, rankComboAltSecond) + mids, r
+            )
+        )
+        assertNull(PathBlock.firstClearCombo(emptyList(), emptyList(), r))
+    }
+
+    @Test
+    fun allKisses_ranksBySecondCutAndBestKissDelegates() {
+        val kisses = allKisses25()
+        assertEquals(2, kisses.size)
+        assertEquals(26.58, kisses[0].secondShot.cutAngleDegrees, 0.1)
+        assertEquals(Vec2(360.0, 20.0), kisses[0].secondShot.targetLine.end)
+        assertEquals(67.23, kisses[1].secondShot.cutAngleDegrees, 0.1)
+        assertEquals(Vec2(360.0, 20.0), kisses[1].secondShot.targetLine.end)
+        // bestKiss is the first entry of the ranked list.
+        assertEquals(
+            kisses[0],
+            ShotSolver.bestKiss(
+                rankKissCue, rankKissFirst,
+                listOf(rankKissBestSecond, rankKissAltSecond), pockets, r
+            )
+        )
+    }
+
+    @Test
+    fun firstClearKiss_returnsNextClearKissWhenBestIsBlocked() {
+        val kisses = allKisses25()
+        // No blocker: the best kiss is shown, and the other
+        // candidate's second ball does not block its chain.
+        assertEquals(
+            kisses[0],
+            PathBlock.firstClearKiss(
+                kisses, listOf(rankKissBestSecond, rankKissAltSecond), r
+            )
+        )
+        assertNull(PathBlock.blockedBy(kisses[0], listOf(rankKissAltSecond), r))
+        // Blocker (330,35) sits on the best kiss's second-leg
+        // midpoint: the shown kiss is the next clear one, the
+        // (340,60) kiss at 67.23 into the top-middle pocket.
+        val shown = PathBlock.firstClearKiss(
+            kisses,
+            listOf(rankKissBestSecond, rankKissAltSecond, Vec2(330.0, 35.0)),
+            r
+        )
+        assertEquals(kisses[1], shown)
+        assertEquals(67.23, shown!!.secondShot.cutAngleDegrees, 0.1)
+        assertEquals(Vec2(360.0, 20.0), shown.secondShot.targetLine.end)
+    }
+
+    @Test
+    fun firstClearKiss_returnsNullWhenEveryKissIsBlocked() {
+        val kisses = allKisses25()
+        // A blocker on every kiss's second-leg midpoint: (330,35)
+        // on the best, (350,40) on the alt.
+        val mids = kisses.map { kiss ->
+            val leg = kiss.secondShot.targetLine
+            (leg.start + leg.end) * 0.5
+        }
+        assertEquals(
+            listOf(Vec2(330.0, 35.0), Vec2(350.0, 40.0)),
+            mids
+        )
+        assertNull(
+            PathBlock.firstClearKiss(
+                kisses, listOf(rankKissBestSecond, rankKissAltSecond) + mids, r
+            )
+        )
+        assertNull(PathBlock.firstClearKiss(emptyList(), emptyList(), r))
+    }
 }

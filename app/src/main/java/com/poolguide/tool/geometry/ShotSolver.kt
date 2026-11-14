@@ -207,9 +207,36 @@ object ShotSolver {
     )
 
     /**
+     * Every reachable combo across every second ball and every pocket:
+     * cue -> [first] -> [second] -> pocket, ranked by the SECOND
+     * shot's cut angle (easiest pot first), the same ranking
+     * [bestCombo] uses. The first leg's cut is not ranked: it is
+     * the setup, the pot is the second leg. The sort is stable, so
+     * equal keys keep second-ball/pocket order. The live pipeline
+     * re-ranks combos the way v1.0.21 re-ranked direct shots (see
+     * [PathBlock.firstClearCombo]).
+     */
+    fun allCombos(
+        cue: Vec2,
+        first: Vec2,
+        seconds: List<Vec2>,
+        pockets: List<Vec2>,
+        ballRadiusPx: Double
+    ): List<ComboSolution> {
+        val solved = seconds.flatMap { second ->
+            pockets.mapNotNull { solveCombo(cue, first, second, it, ballRadiusPx) }
+        }
+        return solved.sortedWith(Comparator { a, b ->
+            cutOrder(
+                a.secondShot.cutAngleDegrees, b.secondShot.cutAngleDegrees
+            )
+        })
+    }
+
+    /**
      * Best combo across every second ball and every pocket: cue ->
      * [first] -> [second] -> pocket, ranked by the SECOND shot's cut
-     * angle (easiest pot first) — the same ranking practice mode
+     * angle (easiest pot first), the same ranking practice mode
      * uses (PracticeState.solveCombo). The first leg's cut is not
      * ranked: it is the setup, the pot is the second leg. Returns
      * null when no second ball pots into any pocket.
@@ -228,26 +255,39 @@ object ShotSolver {
         seconds: List<Vec2>,
         pockets: List<Vec2>,
         ballRadiusPx: Double
-    ): ComboSolution? {
-        var best: ComboSolution? = null
-        var bestSecondCut = Double.MAX_VALUE
-        for (second in seconds) {
-            for (pocket in pockets) {
-                val combo = solveCombo(cue, first, second, pocket, ballRadiusPx)
-                    ?: continue
-                if (combo.secondShot.cutAngleDegrees < bestSecondCut) {
-                    best = combo
-                    bestSecondCut = combo.secondShot.cutAngleDegrees
-                }
-            }
+    ): ComboSolution? = allCombos(cue, first, seconds, pockets, ballRadiusPx)
+        .firstOrNull()
+
+    /**
+     * Every reachable kiss across every second ball and every pocket:
+     * cue kisses [kissed] thin and deflects onto [second] -> pocket,
+     * ranked by the SECOND shot's cut angle (easiest pot first),
+     * the same ranking [bestKiss] uses. The sort is stable, so equal
+     * keys keep second-ball/pocket order. The live pipeline re-ranks
+     * kisses the way v1.0.21 re-ranked direct shots (see
+     * [PathBlock.firstClearKiss]).
+     */
+    fun allKisses(
+        cue: Vec2,
+        kissed: Vec2,
+        seconds: List<Vec2>,
+        pockets: List<Vec2>,
+        ballRadiusPx: Double
+    ): List<KissSolution> {
+        val solved = seconds.flatMap { second ->
+            pockets.mapNotNull { solveKiss(cue, kissed, second, it, ballRadiusPx) }
         }
-        return best
+        return solved.sortedWith(Comparator { a, b ->
+            cutOrder(
+                a.secondShot.cutAngleDegrees, b.secondShot.cutAngleDegrees
+            )
+        })
     }
 
     /**
      * Best kiss across every second ball and every pocket: cue kisses
      * [kissed] thin and deflects onto [second] -> pocket, ranked by
-     * the SECOND shot's cut angle (easiest pot first) — the same
+     * the SECOND shot's cut angle (easiest pot first), the same
      * ranking practice mode uses (PracticeState.solveKiss).
      *
      * Live-overlay ranking (v1.0.13): a kiss is the last resort of
@@ -263,21 +303,8 @@ object ShotSolver {
         seconds: List<Vec2>,
         pockets: List<Vec2>,
         ballRadiusPx: Double
-    ): KissSolution? {
-        var best: KissSolution? = null
-        var bestSecondCut = Double.MAX_VALUE
-        for (second in seconds) {
-            for (pocket in pockets) {
-                val kiss = solveKiss(cue, kissed, second, pocket, ballRadiusPx)
-                    ?: continue
-                if (kiss.secondShot.cutAngleDegrees < bestSecondCut) {
-                    best = kiss
-                    bestSecondCut = kiss.secondShot.cutAngleDegrees
-                }
-            }
-        }
-        return best
-    }
+    ): KissSolution? = allKisses(cue, kissed, seconds, pockets, ballRadiusPx)
+        .firstOrNull()
 
     /** Result of solving a kiss shot: the cue kisses off the first ball
      * (thin cut) and its deflection carries it into the second ball's
