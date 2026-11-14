@@ -40,16 +40,46 @@ class CalibrationStore(context: Context) {
     /** Per-version calibration profile (aimcall lead): pocket inset,
      * pocket radius, ball radius at the working resolution. Stored as
      * "inset,radius,ballRadius" under game_profile_<version>; unknown
-     * versions fall back to the defaults stamped with that version. */
+     * versions fall back to the defaults stamped with that version.
+     * The brown felt window lives under a separate key (below) so the
+     * 3-part profile string stays backward compatible. */
     fun getGameProfile(version: String = gameVersion): GameProfile {
         val raw = prefs.getString(keyForProfile(version), null) ?: return GameProfile.forVersion(version)
+            .withBrownWindow(version)
         val parts = raw.split(",").mapNotNull { it.toDoubleOrNull() }
-        if (parts.size != 3) return GameProfile.forVersion(version)
+        if (parts.size != 3) return GameProfile.forVersion(version).withBrownWindow(version)
         return try {
-            GameProfile(version, parts[0], parts[1], parts[2])
+            GameProfile(version, parts[0], parts[1], parts[2]).withBrownWindow(version)
         } catch (_: IllegalArgumentException) {
-            GameProfile.forVersion(version)
+            GameProfile.forVersion(version).withBrownWindow(version)
         }
+    }
+
+    /** This profile with the stored brown felt window applied, when one
+     * exists for [version]; otherwise unchanged. */
+    private fun GameProfile.withBrownWindow(version: String): GameProfile {
+        val brown = GameProfile.parseBrownWindow(
+            prefs.getString(keyForBrown(version), null)
+        ) ?: return this
+        return try {
+            copy(
+                brownHLo = brown[0], brownSLo = brown[1], brownVLo = brown[2],
+                brownHHi = brown[3], brownSHi = brown[4], brownVHi = brown[5]
+            )
+        } catch (_: IllegalArgumentException) {
+            this
+        }
+    }
+
+    /** Store a brown felt HSV window for [version]. Stored separately
+     * from the 3-part profile string (see [getGameProfile]). */
+    fun setBrownFeltWindow(lower: DoubleArray, upper: DoubleArray, version: String = gameVersion) {
+        val raw = GameProfile.serializeBrownWindow(lower, upper)
+        prefs.edit().putString(keyForBrown(version), raw).apply()
+    }
+
+    fun clearBrownFeltWindow(version: String = gameVersion) {
+        prefs.edit().remove(keyForBrown(version)).apply()
     }
 
     fun setGameProfile(profile: GameProfile) {
@@ -87,6 +117,8 @@ class CalibrationStore(context: Context) {
     private fun keyFor(version: String) = "table_corners_$version"
 
     private fun keyForProfile(version: String) = "game_profile_$version"
+
+    private fun keyForBrown(version: String) = "brown_felt_$version"
 
     companion object {
         const val PREFS = "poolguide"

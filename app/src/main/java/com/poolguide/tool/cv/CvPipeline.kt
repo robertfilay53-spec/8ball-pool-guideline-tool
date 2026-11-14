@@ -70,6 +70,8 @@ class CvPipeline(
     private var workingHeight = 405
     private var frameIndex = 0L
     private var table: TableRect? = null
+    /** True when [table] is the ratio fallback, not a detection. */
+    private var tableIsFallback = false
     private var framesSinceTableCheck = Int.MAX_VALUE
 
     /** Manual table corners from calibration (normalised 0-1), or null. */
@@ -97,6 +99,7 @@ class CvPipeline(
 
     fun reset() {
         table = null
+        tableIsFallback = false
         ballDetector.reset()
         guidelineDetector.reset()
         tableLock.reset()
@@ -118,16 +121,33 @@ class CvPipeline(
         if (blackResult != null) return blackResult
 
         // Table: calibration override wins; else auto-detect on schedule.
-        table = tableOverrideNormalized?.let { normalizedToTable(it) }
-            ?: run {
-                if (table == null || framesSinceTableCheck >= CvConfig.TABLE_REDETECT_EVERY_N_FRAMES) {
-                    framesSinceTableCheck = 0
-                    tableDetector.detect(hsv)
-                } else {
-                    framesSinceTableCheck++
-                    table
-                }
+        // Ratio fallback (v1.0.4, Bloro lead): when detection finds no
+        // table at all, guess the rect from the frame size instead of
+        // reporting nothing. The guess is labelled in the result and
+        // the detector retries on schedule, so a real detection replaces
+        // it as soon as one succeeds.
+        val detected: TableRect?
+        val tableFromFallback: Boolean
+        when {
+            tableOverrideNormalized != null -> {
+                detected = normalizedToTable(tableOverrideNormalized)
+                tableFromFallback = false
             }
+            table == null || framesSinceTableCheck >= CvConfig.TABLE_REDETECT_EVERY_N_FRAMES -> {
+                framesSinceTableCheck = 0
+                val found = tableDetector.detect(hsv, gameProfile)
+                detected = found
+                    ?: RatioTableGeometry.fallbackTable(workingWidth, workingHeight)
+                tableFromFallback = found == null
+            }
+            else -> {
+                framesSinceTableCheck++
+                detected = table
+                tableFromFallback = tableIsFallback
+            }
+        }
+        table = detected
+        tableIsFallback = tableFromFallback
 
         val runHough = frameIndex % CvConfig.HOUGH_CIRCLES_EVERY_N_FRAMES == 0L
         val pocketRadiusPx = table?.let { it.width * gameProfile.pocketRadiusFraction } ?: 12.0
@@ -182,7 +202,9 @@ class CvPipeline(
             bank = outcome.bank,
             allShots = outcome.allShots,
             tableLocked = locked,
-            status = outcome.status
+            tableFromFallback = tableFromFallback,
+            status = if (tableFromFallback) outcome.status + " (table: ratio fallback)"
+            else outcome.status
         )
     }
 
