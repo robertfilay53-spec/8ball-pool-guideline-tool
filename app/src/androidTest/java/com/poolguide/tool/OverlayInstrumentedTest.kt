@@ -286,6 +286,18 @@ class OverlayInstrumentedTest {
         assertEquals(313.48193812482685, frozen.direct.ghostPoint.x, 1e-9)
         assertEquals(73.91304347826087, frozen.railContact.x, 1e-9)
 
+        // Drag the cue anchor 20 px down (working coords): the bank
+        // is re-solved from the corrected cue; the ghost and the
+        // contact stay where the solver puts them.
+        instrumentation.runOnMainSync {
+            manager.applyAnchorDrag(Anchor.CUE, Vec2(0.0, 20.0))
+        }
+        val cueEdited = manager.editedBank!!
+        assertEquals(450.0, cueEdited.direct.aimLine.start.x, 0.0)
+        assertEquals(340.0, cueEdited.direct.aimLine.start.y, 0.0)
+        assertEquals(313.48193812482685, cueEdited.direct.ghostPoint.x, 1e-9)
+        assertEquals(73.91304347826087, cueEdited.railContact.x, 1e-9)
+
         // Drag the ghost anchor 2 px right (working coords): the aim
         // line follows, the contact moves along the rail, the pocket
         // stays the same.
