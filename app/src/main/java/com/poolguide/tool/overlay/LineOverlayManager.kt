@@ -71,6 +71,9 @@ class LineOverlayManager(
     private var bubbleView: View? = null
     private var hideButton: Button? = null
     private var framesWithoutGuideline = 0
+    /** Jitter gate + interpolation (v1.0.3, Bloro lead): the best
+     * shot's lines ease toward new detections instead of snapping. */
+    private val smoother = LineSmoother()
 
     /** Test-only: how many line windows are currently shown. */
     @androidx.annotation.VisibleForTesting
@@ -93,6 +96,15 @@ class LineOverlayManager(
             framesWithoutGuideline = 0
         }
 
+        // Table-lock gate (v1.0.3, Bloro lead): draw nothing until the
+        // table rect has been stable for 5 s. A new table, a moved
+        // table, or a lost table all clear the lock in the pipeline.
+        if (!result.tableLocked) {
+            smoother.reset()
+            removeLineWindows()
+            return
+        }
+
         val hide = store.guidesHidden ||
             result.isCaptureBlack ||
             framesWithoutGuideline > NO_GUIDELINE_HIDE_AFTER_FRAMES
@@ -109,7 +121,10 @@ class LineOverlayManager(
         applyLines(lines)
     }
 
-    /** Build the lines to draw, mapped from working to screen coordinates. */
+    /** Build the lines to draw, mapped from working to screen coordinates.
+     * The best shot's lines go through the jitter smoother (screen
+     * coordinates, Bloro's 40 px gate); candidates and the pocket ring
+     * are drawn as detected. */
     private fun buildDrawLines(result: DetectionResult): List<DrawLine> {
         val sx = result.scaleToScreenX
         val sy = result.scaleToScreenY
@@ -135,18 +150,17 @@ class LineOverlayManager(
                     )
                 }
             }
-            out += DrawLine(
+            // Jitter gate + interpolation: the best shot's lines ease
+            // toward new detections instead of snapping each frame.
+            val (aim, target, deflection) = smoother.smooth(
                 Segment(map(shot.aimLine.start), map(shot.aimLine.end)),
-                AIM_COLOR, AIM_WIDTH_PX
-            )
-            out += DrawLine(
                 Segment(map(shot.targetLine.start), map(shot.targetLine.end)),
-                TARGET_COLOR, LINE_WIDTH_PX
-            )
-            out += DrawLine(
                 Segment(map(shot.deflectionLine.start), map(shot.deflectionLine.end)),
-                DEFLECT_COLOR, LINE_WIDTH_PX
+                result.status
             )
+            out += DrawLine(aim, AIM_COLOR, AIM_WIDTH_PX)
+            out += DrawLine(target, TARGET_COLOR, LINE_WIDTH_PX)
+            out += DrawLine(deflection, DEFLECT_COLOR, LINE_WIDTH_PX)
             // Pocket ring at the target pocket.
             val pocket = shot.targetLine.end
             out += DrawLine(
@@ -154,16 +168,15 @@ class LineOverlayManager(
                 POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = 18f
             )
         } else if (bank != null && store.bankLinesEnabled) {
-            out += DrawLine(
+            val (aim, seg1, seg2) = smoother.smooth(
                 Segment(map(bank.direct.aimLine.start), map(bank.direct.aimLine.end)),
-                AIM_COLOR, AIM_WIDTH_PX
+                Segment(map(bank.bankPath[0].start), map(bank.bankPath[0].end)),
+                Segment(map(bank.bankPath[1].start), map(bank.bankPath[1].end)),
+                result.status
             )
-            for (seg in bank.bankPath) {
-                out += DrawLine(
-                    Segment(map(seg.start), map(seg.end)),
-                    BANK_COLOR, LINE_WIDTH_PX
-                )
-            }
+            out += DrawLine(aim, AIM_COLOR, AIM_WIDTH_PX)
+            out += DrawLine(seg1, BANK_COLOR, LINE_WIDTH_PX)
+            out += DrawLine(seg2, BANK_COLOR, LINE_WIDTH_PX)
             val pocket = bank.bankPath.last().end
             out += DrawLine(
                 Segment(map(pocket), map(pocket)),
@@ -332,6 +345,7 @@ class LineOverlayManager(
     }
 
     fun removeAll() {
+        smoother.reset()
         removeLineWindows()
         bubbleView?.let {
             try {

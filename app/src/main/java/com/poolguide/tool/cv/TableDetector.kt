@@ -41,6 +41,7 @@ class TableDetector {
     fun detect(hsv: Mat): TableRect? {
         return detectWith(hsv, CvConfig.FELT_GREEN_LOWER, CvConfig.FELT_GREEN_UPPER)
             ?: detectWith(hsv, CvConfig.FELT_BLUE_LOWER, CvConfig.FELT_BLUE_UPPER)
+            ?: detectWith(hsv, CvConfig.FELT_BROWN_LOWER, CvConfig.FELT_BROWN_UPPER)
     }
 
     private fun detectWith(hsv: Mat, lower: DoubleArray, upper: DoubleArray): TableRect? {

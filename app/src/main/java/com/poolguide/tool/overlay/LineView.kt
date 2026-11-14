@@ -29,6 +29,16 @@ class LineView(context: Context) : View(context) {
         strokeJoin = Paint.Join.ROUND
     }
 
+    /** Halo underlay (v1.0.3, Bloro lead): a wide, faint stroke of the
+     * same colour under the bright core, so the line stays readable on
+     * bright felt. Alpha 40/255, width 2.2x the core. */
+    private val haloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+        alpha = HALO_ALPHA
+    }
+
     /** Set the line to draw, in this view's LOCAL coordinates. */
     fun setLine(start: PointF, end: PointF, color: Int, widthPx: Float) {
         mode = Mode.LINE
@@ -36,6 +46,8 @@ class LineView(context: Context) : View(context) {
         this.end = end
         paint.color = color
         paint.strokeWidth = widthPx
+        haloPaint.color = color
+        haloPaint.strokeWidth = widthPx * HALO_WIDTH_FACTOR
         invalidate()
     }
 
@@ -46,6 +58,8 @@ class LineView(context: Context) : View(context) {
         this.ringRadius = radius
         paint.color = color
         paint.strokeWidth = widthPx
+        haloPaint.color = color
+        haloPaint.strokeWidth = widthPx * HALO_WIDTH_FACTOR
         invalidate()
     }
 
@@ -53,6 +67,11 @@ class LineView(context: Context) : View(context) {
         super.onDraw(canvas)
         when (mode) {
             Mode.LINE -> {
+                // Double-pass halo rendering: wide faint underlay, then
+                // the thin bright core. The window padding (10 px)
+                // fits the halo: the widest core is 5 px, so the halo
+                // extends 5.5 px each side.
+                canvas.drawLine(start.x, start.y, end.x, end.y, haloPaint)
                 canvas.drawLine(start.x, start.y, end.x, end.y, paint)
                 // Dot at the far end (e.g. the ghost-ball point).
                 val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -62,8 +81,16 @@ class LineView(context: Context) : View(context) {
                 canvas.drawCircle(end.x, end.y, paint.strokeWidth * 0.9f, dotPaint)
             }
             Mode.RING -> {
+                canvas.drawCircle(start.x, start.y, ringRadius, haloPaint)
                 canvas.drawCircle(start.x, start.y, ringRadius, paint)
             }
         }
+    }
+
+    companion object {
+        /** Halo stroke width as a multiple of the core stroke width. */
+        const val HALO_WIDTH_FACTOR = 2.2f
+        /** Halo alpha (0-255): Bloro's wide pass uses alpha 40. */
+        const val HALO_ALPHA = 40
     }
 }

@@ -58,6 +58,7 @@ class CvPipeline(
     private val tableDetector = TableDetector()
     private val ballDetector = BallDetector()
     private val guidelineDetector = GuidelineDetector()
+    private val tableLock = TableLock()
 
     private val small = Mat()
     private val bgr = Mat()
@@ -98,6 +99,7 @@ class CvPipeline(
         table = null
         ballDetector.reset()
         guidelineDetector.reset()
+        tableLock.reset()
         framesSinceTableCheck = Int.MAX_VALUE
     }
 
@@ -129,10 +131,18 @@ class CvPipeline(
 
         val runHough = frameIndex % CvConfig.HOUGH_CIRCLES_EVERY_N_FRAMES == 0L
         val pocketRadiusPx = table?.let { it.width * gameProfile.pocketRadiusFraction } ?: 12.0
-        val balls = ballDetector.detect(
-            hsv, gray, table, table?.pockets(gameProfile) ?: emptyList(), runHough, frameIndex,
-            tableDetector.feltHsvMean, pocketRadiusPx
-        )
+        // v1.0.3: no-table gate — with no table the pockets have no
+        // exclusion list and the 6 pockets come back as balls (7 false
+        // positives on the old harness tables). Nothing is a ball until
+        // a table exists.
+        val balls = if (table == null) {
+            emptyList()
+        } else {
+            ballDetector.detect(
+                hsv, gray, table, table?.pockets(gameProfile) ?: emptyList(), runHough, frameIndex,
+                tableDetector.feltHsvMean, pocketRadiusPx
+            )
+        }
         val cue = balls.firstOrNull { it.isCue }
 
         // Guideline: detect every 2nd frame inside the table ROI; between
@@ -146,6 +156,15 @@ class CvPipeline(
 
         val pockets = table?.pockets(gameProfile) ?: emptyList()
         val outcome = solveFor(cue, balls, pockets, guideline)
+
+        // Table-lock gate (v1.0.3): the overlay draws nothing until the
+        // table rect has been stable for 5 s. A calibration override
+        // counts as locked immediately — the user placed the corners.
+        val locked = if (tableOverrideNormalized != null && table != null) {
+            true
+        } else {
+            tableLock.update(table)
+        }
 
         return DetectionResult(
             frameIndex = frameIndex,
@@ -162,6 +181,7 @@ class CvPipeline(
             shot = outcome.shot,
             bank = outcome.bank,
             allShots = outcome.allShots,
+            tableLocked = locked,
             status = outcome.status
         )
     }
@@ -230,8 +250,12 @@ class CvPipeline(
         pockets: List<Vec2>,
         guideline: List<GuidelineSegment>
     ): SolveOutcome {
-        if (cue == null) return SolveOutcome(null, null, emptyList(), "Cue ball not found")
+        // Table first: with the v1.0.3 no-table gate no balls are
+        // reported when there is no table, so a missing table must say
+        // so — checking the cue first would report "Cue ball not found"
+        // for a frame with no table at all.
         if (pockets.isEmpty()) return SolveOutcome(null, null, emptyList(), "Table not found")
+        if (cue == null) return SolveOutcome(null, null, emptyList(), "Cue ball not found")
         val target = pickTarget(cue, balls, guideline)
             ?: return SolveOutcome(null, null, emptyList(), "No target ball in line")
         val radius = (cue.radiusPx + target.radiusPx) / 2.0

@@ -393,21 +393,93 @@ object ShotSolver {
      * direct shot against the mirrored pocket. Returns null when the bank
      * path does not actually cross the rail segment (checked by the caller
      * against the table bounds) or the direct solve fails.
+     *
+     * Cushion correction (v1.0.3, Bloro form): the ideal mirror assumes
+     * a perfect reflection; the real cushion does not reflect perfectly.
+     * [correction] is a polynomial in the incident angle (degrees,
+     * between the ideal outgoing direction and the rail) that adjusts
+     * the reflected angle. With the fitted coefficients the correction
+     * is zero and the ideal bank is returned unchanged. With a non-zero
+     * correction the contact point is re-solved by bisection along the
+     * rail so the corrected outgoing ray still reaches the pocket, and
+     * the aim is re-solved against the corrected contact. When the
+     * correction cannot be satisfied (no sign change in the bracket,
+     * or the corrected aim is impossible), the ideal bank is returned:
+     * a slightly-off bank line is better than no bank line.
      */
     fun solveBank(
         cue: Vec2,
         target: Vec2,
         pocket: Vec2,
         rail: Rail,
-        ballRadiusPx: Double
+        ballRadiusPx: Double,
+        correction: CushionCorrection = CushionCorrection.FITTED
     ): BankSolution? {
         val mirrored = mirrorPointAcrossRail(pocket, rail)
         val direct = solveShot(cue, target, mirrored, ballRadiusPx) ?: return null
         val contact = railContactPoint(target, mirrored, rail) ?: return null
-        return BankSolution(
+        val ideal = BankSolution(
             direct = direct,
             railContact = contact,
             bankPath = listOf(Segment(target, contact), Segment(contact, pocket)),
+            mirroredPocket = mirrored
+        )
+
+        // Incident angle: between the ideal outgoing direction and the rail.
+        val railDir = rail.normal.perp()
+        val outgoingIdeal = reflectDirection(contact - target, rail)
+        val incidentAngle = angleBetween(outgoingIdeal, railDir)
+        val adjust = correction.correct(incidentAngle)
+        if (kotlin.math.abs(adjust) < 1e-9) return ideal
+
+        // Re-solve the contact: find s along the rail where the corrected
+        // outgoing ray (ideal reflection rotated by the correction)
+        // passes through the pocket. Bisection on the signed cross
+        // product, same 24-step pattern as the kiss refinement.
+        val s0 = (contact - rail.point).dot(railDir)
+        fun residual(s: Double): Double {
+            val c = rail.point + railDir * s
+            val incoming = (c - target).normalized()
+            if (incoming.norm() < 1e-9) return Double.NaN
+            val outIdeal = reflectDirection(incoming, rail)
+            val outCorrected = rotate(outIdeal, adjust)
+            val toPocket = pocket - c
+            // Signed perpendicular distance of the pocket from the ray.
+            return toPocket.x * outCorrected.y - toPocket.y * outCorrected.x
+        }
+        val bracket = 150.0
+        var lo = s0 - bracket
+        var hi = s0 + bracket
+        var fLo = residual(lo)
+        val fHi = residual(hi)
+        if (fLo.isNaN() || fHi.isNaN() || fLo * fHi > 0.0) return ideal
+        repeat(KISS_REFINE_STEPS) {
+            val mid = (lo + hi) / 2.0
+            val fMid = residual(mid)
+            if (fMid.isNaN()) return ideal
+            if ((fMid >= 0.0) == (fLo >= 0.0)) {
+                lo = mid
+                fLo = fMid
+            } else {
+                hi = mid
+            }
+        }
+        val correctedContact = rail.point + railDir * ((lo + hi) / 2.0)
+        // The corrected ray must head toward the pocket, not away.
+        val outCheck = run {
+            val incoming = (correctedContact - target).normalized()
+            rotate(reflectDirection(incoming, rail), adjust)
+        }
+        if ((pocket - correctedContact).dot(outCheck) <= 0.0) return ideal
+        val correctedDirect = solveShot(cue, target, correctedContact, ballRadiusPx)
+            ?: return ideal
+        return BankSolution(
+            direct = correctedDirect,
+            railContact = correctedContact,
+            bankPath = listOf(
+                Segment(target, correctedContact),
+                Segment(correctedContact, pocket)
+            ),
             mirroredPocket = mirrored
         )
     }

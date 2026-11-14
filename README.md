@@ -46,7 +46,12 @@ screen. Nothing about the game is changed.**
 4. **Detection is approximate.** Standard ghost-ball geometry, no spin, no
    friction throw, no cushion compression. Cut angles above 80 degrees are
    flagged as thin cuts with very low margin. Table skins, resolutions, and
-   game versions vary; the first-run calibration exists for that.
+   game versions vary; the first-run calibration exists for that. Brown felt
+   is detected with a tightly fitted window (the wooden rail is nearly the
+   same hue) — it works on the synthetic tables but may need recalibration
+   on a real brown table. The bank-shot cushion correction is fitted to the
+   synthetic harness data, where it measures zero; real-table cushion
+   behaviour is unmeasured.
 
 ## How it works
 
@@ -73,6 +78,19 @@ Android 14+ a mediaProjection-type foreground service without a token throws
 `SecurityException` and crashes the process (the v1.0.0 demo bug), so the
 split makes that impossible by construction. Stopping either service stops
 both, so the lines never outlive the capture.
+
+Stability work (v1.0.3, learned from decoding the commercial tools):
+the overlay draws nothing until the table rect has been stable for 5 s
+(table-lock gate); the best shot's lines ease toward new detections
+instead of snapping (40 px jitter gate + interpolation); every line is
+drawn twice — a wide faint halo under a thin bright core — so it stays
+readable on bright felt; bank shots carry a cushion-correction polynomial
+whose form comes from Bloro but whose coefficients are re-fitted to our
+own harness data (the fit is zero: after fixing the pocket model, no
+systematic angle error is left to correct). The CV harness (15 synthetic
+tables, `../cv-harness/RESULTS.md`) measures the v1.0.3 pipeline at
+15/15 tables, 85/85 balls with 0 false positives, 15/15 shots, mean
+cut-angle error 0.32 deg (v1.0.1 was 13/15, 76/85, 11/15, 1.46 deg).
 
 - **OpenCV**: Maven AAR `org.opencv:opencv:4.10.0` (4.9+ supports Android
   15's 16 KB page size). Fallback documented in `app/build.gradle.kts`:

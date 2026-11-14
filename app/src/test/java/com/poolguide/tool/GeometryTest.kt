@@ -386,7 +386,9 @@ class TableGeometryTest {
         )
         val pockets = table.pockets()
         assertEquals(6, pockets.size)
-        val inset = 200.0 * 0.015
+        // v1.0.3: the inset is fitted from ground truth — the pockets
+        // sit exactly on the corners (inset 0), not 1.5% inside.
+        val inset = 200.0 * com.poolguide.tool.cv.CvConfig.POCKET_INSET_FRACTION
         assertEquals(Vec2(inset, inset), pockets[0])
         assertEquals(Vec2(200.0 - inset, inset), pockets[1])
         assertEquals(Vec2(200.0 - inset, 100.0 - inset), pockets[2])
