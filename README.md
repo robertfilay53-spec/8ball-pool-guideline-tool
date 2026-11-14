@@ -3,8 +3,9 @@
 A companion helper for 8 Ball Pool (Miniclip). It watches the game on your
 screen and draws aim lines over it: the cue-ball aim line, the target ball's
 path to the pocket, and the cue ball's deflection after impact, plus one-rail
-bank shots when no direct shot exists, and two-rail banks when no one-rail
-bank solves.
+bank shots when no direct shot exists, two-rail banks when no one-rail
+bank solves, and one-rail kick shots (cue ball off a rail first) when the
+kick's cut angle beats the best one-rail bank's.
 
 **It is a separate app. You install the original 8 Ball Pool from the Play
 Store (or APKPure) and this tool separately. The two work together on your
@@ -51,9 +52,9 @@ screen. Nothing about the game is changed.**
    is detected with a tightly fitted window (the wooden rail is nearly the
    same hue) — it works on the synthetic tables, and the window is now
    recalibratable per game version from the Calibrate screen (sliders)
-   if a real brown table needs it. The bank-shot cushion correction is
-   fitted to the synthetic harness data, where it measures zero; real-table
-   cushion behaviour is unmeasured.
+   if a real brown table needs it. The bank- and kick-shot cushion
+   correction is fitted to the synthetic harness data, where it
+   measures zero; real-table cushion behaviour is unmeasured.
 5. **EDIT mode's anchor handles are touchable on purpose.** The Edit button
    on the floating bubble freezes the current shot and shows two draggable
    handles (cue + ghost) so you can correct a mis-detection by hand. Those
@@ -84,12 +85,12 @@ screen. Nothing about the game is changed.**
    pick. Nothing is uploaded and nothing leaves the device unless you
    choose to share the file. The log holds only the last 500 events.
 8. **Practice mode is geometry only.** Practice mode now has Direct,
-   Bank, Combo, and Kiss shots (same solver as the live overlay), but
+   Bank, Combo, Kiss, and Kick shots (same solver as the live overlay), but
    it is a drawing aid, not a physics simulator: no spin, no friction
-   throw, no cushion compression, and the bank-shot cushion correction
-   is fitted to synthetic data, so real-table cushion behaviour is
-   unmeasured. What you practise here is the aim geometry of direct,
-   bank, combo, and kiss shots, not the exact outcome on a real table.
+   throw, no cushion compression, and the bank- and kick-shot cushion
+   correction is fitted to synthetic data, so real-table cushion behaviour
+   is unmeasured. What you practise here is the aim geometry of direct,
+   bank, combo, kiss, and kick shots, not the exact outcome on a real table.
 9. **The calibration screen is a tuning aid, not a guarantee.** Since
    v1.0.8 the Calibrate screen has sliders for the brown felt window
    and the pocket/ball thresholds, a felt-mask preview, and a live
@@ -112,6 +113,18 @@ screen. Nothing about the game is changed.**
     behaviour is unmeasured, and it is unmeasured twice over on a
     two-rail bank. What you practise here is the aim geometry, not
     the exact outcome on a real table.
+11. **Kick shots are geometry only, and they never displace a direct
+    shot.** Since v1.0.10 the tool also draws one-rail kick shots (cue
+    ball -> rail -> target -> pocket, magenta rendering: the cue's aim
+    in green, the kicked cue ball in magenta, the target line in
+    yellow — a bank stays cyan, so the two are never confusable). In
+    the live overlay a kick is only the best shot when no direct shot
+    solves; it is ranked against the best one-rail bank by the same
+    number, the direct cut angle, so the smaller cut wins and a tie
+    goes to the bank. The cushion correction at the rail is fitted to
+    synthetic data, where it measures zero; real-table cushion
+    behaviour is unmeasured. What you practise here is the aim
+    geometry, not the exact outcome on a real table.
 
 ## How it works
 
@@ -125,8 +138,8 @@ MediaProjection + VirtualDisplay (960x540, foreground service)
      -> the game's own white guideline: bilateral filter -> Canny (50, 150)
         -> HoughLinesP (30/15/8) -> verifier -> robust refit -> LineTracker
   -> shot solver (ghost ball, cut angle, tangent, mirror-pocket banks
-     (one- and two-rail), combo + kiss shots; every reachable pocket
-     ranked, best first)
+     (one- and two-rail), mirror-ghost kicks (one-rail), combo + kiss
+     shots; every reachable pocket ranked, best first)
   -> one small TYPE_APPLICATION_OVERLAY window per line (best shot in
      full colour, other candidates faint — PoolAimAssist UX)
 ```

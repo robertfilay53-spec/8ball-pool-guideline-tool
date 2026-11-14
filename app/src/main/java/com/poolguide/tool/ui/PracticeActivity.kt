@@ -45,6 +45,9 @@ class PracticeActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btn_mode_kiss).setOnClickListener {
             setMode(PracticeState.PracticeMode.KISS)
         }
+        findViewById<Button>(R.id.btn_mode_kick).setOnClickListener {
+            setMode(PracticeState.PracticeMode.KICK)
+        }
         findViewById<Button>(R.id.btn_practice_reset).setOnClickListener {
             state.reset()
             refresh()
@@ -142,6 +145,22 @@ class PracticeActivity : AppCompatActivity() {
                         R.string.practice_kiss,
                         kiss.kissShot.cutAngleDegrees,
                         kiss.secondShot.cutAngleDegrees
+                    )
+                }
+            }
+            is PracticeState.PracticeSolution.Kick -> {
+                val kick = solution.solution
+                if (kick.direct.isThinCut) {
+                    getString(
+                        R.string.practice_kick_thin,
+                        solution.railName,
+                        kick.direct.cutAngleDegrees
+                    )
+                } else {
+                    getString(
+                        R.string.practice_kick,
+                        solution.railName,
+                        kick.direct.cutAngleDegrees
                     )
                 }
             }

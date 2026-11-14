@@ -36,6 +36,13 @@ import kotlin.math.abs
  *   cut angle, easiest pot first.
  * - [PracticeMode.KISS]: cue kisses the middle ball thin and deflects
  *   onto the target, which then goes to a pocket.
+ * - [PracticeMode.KICK]: cue -> one rail -> target -> pocket. The
+ *   kick is ranked by the direct cut angle, easiest pot first, across
+ *   all pockets and all four rails. A kick to a pocket whose ghost
+ *   sits on the rail itself is degenerate (the mirror is the ghost),
+ *   so those are skipped; the rail contact must also lie inside the
+ *   rail span, four ball radii clear of the corners, and not on the
+ *   pocket — the same three guards as the bank solve.
  *
  * Default layouts are verified against the solver (see PracticeStateTest):
  * the combo default solves to the top-right pocket (first cut 6.4 deg,
@@ -47,13 +54,16 @@ import kotlin.math.abs
  * target (600, 320)) solves off the bottom then right rails to the
  * top-middle pocket (cut 12.6 deg, contacts (623.5, 340.0) and
  * (680.0, 292.0)); the best one-rail bank there is 67.9 deg, so the
- * two-rail bank wins by the margin rule.
+ * two-rail bank wins by the margin rule. The kick default reuses the
+ * bank default's balls (cue (120, 80), target (480, 300)) and solves
+ * off the right rail to the bottom-middle pocket (cut 2.3 deg, contact
+ * (680.0, 241.5)) — the same two balls, a different shot.
  */
 class PracticeState(
     private val table: TableRect,
     private val ballRadiusPx: Double
 ) {
-    enum class PracticeMode { DIRECT, BANK, COMBO, KISS }
+    enum class PracticeMode { DIRECT, BANK, COMBO, KISS, KICK }
 
     /** The solved shot for the current mode, or null if there is none. */
     sealed interface PracticeSolution {
@@ -72,6 +82,12 @@ class PracticeState(
         ) : PracticeSolution
         data class Combo(val solution: ShotSolver.ComboSolution) : PracticeSolution
         data class Kiss(val solution: ShotSolver.KissSolution) : PracticeSolution
+        /** One-rail kick (v1.0.10): cue -> rail -> target -> pocket. */
+        data class Kick(
+            val solution: ShotSolver.KickSolution,
+            /** Which rail the kick runs off ("top", "bottom", "left", "right"). */
+            val railName: String
+        ) : PracticeSolution
     }
 
     companion object {
@@ -99,9 +115,9 @@ class PracticeState(
         private set
 
     /** Balls on the table in this mode (the middle ball is not drawn
-     * or selectable in DIRECT/BANK mode). */
+     * or selectable in DIRECT/BANK/KICK mode). */
     fun balls(): List<PracticeBall> = when (mode) {
-        PracticeMode.DIRECT, PracticeMode.BANK -> listOf(cue, target)
+        PracticeMode.DIRECT, PracticeMode.BANK, PracticeMode.KICK -> listOf(cue, target)
         PracticeMode.COMBO, PracticeMode.KISS -> listOf(cue, target, middle)
     }
 
@@ -158,6 +174,15 @@ class PracticeState(
                 target = PracticeBall(1, Vec2(480.0, 300.0), false)
                 middle = PracticeBall(2, Vec2(320.0, 180.0), false)
             }
+            PracticeMode.KICK -> {
+                // Verified against the solver before the change: kick
+                // off the right rail to the bottom-middle pocket, cut
+                // 2.3 deg, contact (680.0, 241.5). Same balls as the
+                // bank default — a different shot from the same layout.
+                cue = PracticeBall(0, Vec2(120.0, 80.0), true)
+                target = PracticeBall(1, Vec2(480.0, 300.0), false)
+                middle = PracticeBall(2, Vec2(320.0, 180.0), false)
+            }
             PracticeMode.COMBO -> {
                 middle = PracticeBall(2, Vec2(320.0, 180.0), false)
                 target = PracticeBall(1, Vec2(440.0, 180.0), false)
@@ -176,6 +201,7 @@ class PracticeState(
         PracticeMode.BANK -> solveBestBank()
         PracticeMode.COMBO -> solveCombo()?.let { PracticeSolution.Combo(it) }
         PracticeMode.KISS -> solveKiss()?.let { PracticeSolution.Kiss(it) }
+        PracticeMode.KICK -> solveKick()?.let { PracticeSolution.Kick(it.first, it.second) }
     }
 
     /** BANK mode: the best bank. One-rail banks rank first; a
@@ -293,6 +319,37 @@ class PracticeState(
             }
         }
         return best?.let { it to bestRails }
+    }
+
+    /** One-rail kick (v1.0.10): cue -> one rail -> target -> best
+     * pocket, ranked by the direct cut angle (easiest pot first).
+     * Same three guards as [solveBank]: a pocket whose ghost sits
+     * on the rail is skipped for that rail (the solver returns null
+     * there), the contact must lie inside its rail span, four ball
+     * radii clear of the corners, and it must not sit on the pocket.
+     * Returns the kick plus the rail it runs off, or null when no
+     * kick is possible. */
+    fun solveKick(): Pair<ShotSolver.KickSolution, String>? {
+        if (cue.center.distanceTo(target.center) < ballRadiusPx * 2 + 0.5) return null
+        val rails = railsOf()
+        var best: ShotSolver.KickSolution? = null
+        var bestRail = ""
+        var bestCut = Double.MAX_VALUE
+        for (pocket in table.pockets()) {
+            for ((index, rail) in rails.withIndex()) {
+                val kick = ShotSolver.solveKick(
+                    cue.center, target.center, pocket, rail, ballRadiusPx
+                ) ?: continue
+                val contact = kick.railContact
+                if (!bankContactIsValid(contact, index, pocket)) continue
+                if (kick.direct.cutAngleDegrees < bestCut) {
+                    best = kick
+                    bestRail = railNames[index]
+                    bestCut = kick.direct.cutAngleDegrees
+                }
+            }
+        }
+        return best?.let { it to bestRail }
     }
 
     /** The v1.0.7 corner guard (same numbers as the live pipeline's

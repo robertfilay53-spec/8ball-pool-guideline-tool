@@ -88,6 +88,13 @@ data class DetectionResult(
      * after one-rail banks — a two-rail bank never displaces a
      * direct shot or a one-rail bank in the live overlay. */
     val bank2: ShotSolver.TwoRailBankSolution? = null,
+    /** Best one-rail kick (v1.0.10), set only when no direct shot
+     * solves and the kick's cut angle beats the best one-rail bank's:
+     * a kick and a one-rail bank are both one-rail shots ranked by
+     * the same number (the direct cut angle), so the smaller cut
+     * wins and a tie goes to the bank, the established fallback. A
+     * kick never displaces a direct shot. */
+    val kick: ShotSolver.KickSolution? = null,
     /** Every reachable direct shot, best first (allShots ranking).
      * Empty when no direct shot exists. The overlay draws the non-best
      * entries faint when "Show all shots" is on; [shot] is always
