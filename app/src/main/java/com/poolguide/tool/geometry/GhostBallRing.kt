@@ -3,7 +3,7 @@ package com.poolguide.tool.geometry
 import kotlin.math.abs
 
 /**
- * Ghost-ball ring (v1.0.26). Pure Kotlin, no Android dependency,
+ * Ghost-ball ring (v1.0.26; second-leg ring v1.0.27). Pure Kotlin, no Android dependency,
  * fully unit-testable on the JVM.
  *
  * Until now the live overlay drew the aim line ending at an invisible
@@ -18,13 +18,18 @@ import kotlin.math.abs
  * aims the cue ball at a visible circle that kisses the target, not
  * at empty felt.
  *
- * One ring per shown shot, on the FIRST leg's ghost only: the point
- * the CUE ball must reach. For a combo or kiss the second leg's ghost
- * is the first ball's arrival point, and its aim line already ends
- * there; only the cue's arrival gets a ring. Like the pocket ring and
- * the rail-contact markers, the ring uses the solution's own ghost
- * point unsmoothed, so it never drifts from the point it marks the
- * way a smoothed line end could.
+ * One ring per shown shot, on the FIRST leg's ghost: the point
+ * the CUE ball must reach. Since v1.0.27 a combo or kiss draws a
+ * second ring, in the same aim green, on the SECOND leg's ghost:
+ * for a combo that is the first ball's arrival point (it is also
+ * the first leg's target line end, the transfer point between the
+ * two balls), and for a kiss it is the point the cue ball must
+ * reach after the kiss to pot the second ball. Practice mode
+ * already draws a ghost circle for each leg (PracticeView.drawShot
+ * per leg); the live overlay now agrees with it. Like the pocket
+ * ring and the rail-contact markers, a ring uses the solution's
+ * own ghost point unsmoothed, so it never drifts from the point
+ * it marks the way a smoothed line end could.
  *
  * The centre is always the solution's ghostPoint, never the aim
  * line's end. For a direct shot or a bank the two are the same

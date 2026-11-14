@@ -691,7 +691,8 @@ class LineOverlayManager(
      * mode, where the drawn shot is the frozen manual aim, not the
      * live detection the flag belongs to. The ghost-ball ring
      * (v1.0.26) sits on the shown shot's ghost point, in the aim
-     * green. The best shot only, never a candidate. */
+     * green, and a combo or kiss draws a second ring on the second
+     * leg's ghost (v1.0.27). The best shot only, never a candidate. */
     private fun buildDrawLines(result: DetectionResult): DrawnOverlay {
         val sx = result.scaleToScreenX
         val sy = result.scaleToScreenY
@@ -957,6 +958,11 @@ class LineOverlayManager(
             // Ghost-ball ring (v1.0.26): the cue ball's arrival point
             // (first leg's ghost only).
             out += ghostRing(combo.firstShot, result, ::map)
+            // Second-leg ghost ring (v1.0.27): the first ball's
+            // arrival point (the transfer point between the two
+            // balls), the same circle practice draws for the
+            // second leg. Same aim green, same radius.
+            out += ghostRing(combo.secondShot, result, ::map)
         } else if (result.kiss != null && store.bankLinesEnabled) {
             // Kiss (v1.0.13): cue kisses the first ball thin and its
             // deflection carries it into the second ball's ghost
@@ -1006,6 +1012,11 @@ class LineOverlayManager(
             // Ghost-ball ring (v1.0.26): the cue ball's arrival point
             // (kiss leg's ghost only).
             out += ghostRing(kiss.kissShot, result, ::map)
+            // Second-leg ghost ring (v1.0.27): the point the cue
+            // ball must reach after the kiss to pot the second
+            // ball, the same circle practice draws for the second
+            // leg. Same aim green, same radius.
+            out += ghostRing(kiss.secondShot, result, ::map)
         }
         return DrawnOverlay(
             out,
