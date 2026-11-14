@@ -16,10 +16,11 @@ import kotlin.math.abs
  *
  * Fast path (every frame): HSV inRange + findContours per colour family,
  * minEnclosingCircle gives centre + radius + colour in one pass.
- * Slow path (every 3rd frame): HoughCircles (param2 15, swept Nov 14)
- * as a fallback for the white cue ball / black 8-ball, for stripe balls
- * (whose white band splits the colour into two caps that fail the
- * circularity check), and for colours the HSV pass misses.
+ * Slow path (every 3rd frame): HoughCircles (param2 12, no median blur;
+ * swept Nov 14, v1.0.3) as a fallback for the white cue ball / black
+ * 8-ball, for stripe balls (whose white band splits the colour into
+ * two caps that fail the circularity check), and for colours the HSV
+ * pass misses.
  *
  * Stripe vs solid: the centre pixel of a stripe ball is white (the number
  * band); a solid ball's centre pixel is its own colour.
@@ -81,15 +82,23 @@ class BallDetector {
         } else {
             70.0
         }
+        // v1.0.3: same felt-relative tightening for orange on a brown
+        // felt (felt H~15 sits inside the orange window): the orange
+        // ball is far more saturated (S 255) than the cloth (S 139).
+        val orangeSLow = if (feltH in 10.0..25.0) {
+            (feltS + 25.0).coerceIn(150.0, 235.0)
+        } else {
+            100.0
+        }
         return listOf(
             Triple(BallColor.RED, doubleArrayOf(0.0, 100.0, 70.0), doubleArrayOf(10.0, 255.0, 255.0)),
             Triple(BallColor.RED, doubleArrayOf(160.0, 100.0, 70.0), doubleArrayOf(179.0, 255.0, 255.0)),
-            Triple(BallColor.ORANGE, doubleArrayOf(10.0, 100.0, 70.0), doubleArrayOf(20.0, 255.0, 255.0)),
+            Triple(BallColor.ORANGE, doubleArrayOf(10.0, orangeSLow, 70.0), doubleArrayOf(20.0, 255.0, 255.0)),
             Triple(BallColor.YELLOW, doubleArrayOf(20.0, 100.0, 70.0), doubleArrayOf(35.0, 255.0, 255.0)),
             Triple(BallColor.BLUE, doubleArrayOf(90.0, blueSLow, blueVLow), doubleArrayOf(130.0, 255.0, 255.0)),
             Triple(BallColor.PURPLE, doubleArrayOf(130.0, 80.0, 50.0), doubleArrayOf(160.0, 255.0, 255.0)),
             Triple(BallColor.GREEN, doubleArrayOf(55.0, greenSLow, 40.0), doubleArrayOf(85.0, 255.0, 255.0)),
-            Triple(BallColor.WHITE, doubleArrayOf(0.0, 0.0, 200.0), doubleArrayOf(180.0, 40.0, 255.0)),
+            Triple(BallColor.WHITE, doubleArrayOf(0.0, 0.0, CvConfig.WHITE_V_FLOOR), doubleArrayOf(180.0, 40.0, 255.0)),
             Triple(BallColor.BLACK, doubleArrayOf(0.0, 0.0, 0.0), doubleArrayOf(180.0, 255.0, 60.0))
         )
     }
@@ -134,9 +143,16 @@ class BallDetector {
         }
 
         if (runHough) {
-            Imgproc.medianBlur(gray, grayBlurred, CvConfig.MEDIAN_BLUR_KSIZE)
+            // v1.0.3: no median blur (MEDIAN_BLUR_KSIZE 0) — the blur
+            // smears the stripe band and Hough loses stripe balls.
+            val houghSrc = if (CvConfig.MEDIAN_BLUR_KSIZE <= 0) {
+                gray
+            } else {
+                Imgproc.medianBlur(gray, grayBlurred, CvConfig.MEDIAN_BLUR_KSIZE)
+                grayBlurred
+            }
             Imgproc.HoughCircles(
-                grayBlurred, circles, Imgproc.HOUGH_GRADIENT,
+                houghSrc, circles, Imgproc.HOUGH_GRADIENT,
                 CvConfig.HOUGH_CIRCLES_DP,
                 CvConfig.HOUGH_CIRCLES_MIN_DIST,
                 CvConfig.HOUGH_CIRCLES_PARAM1,
@@ -209,12 +225,14 @@ class BallDetector {
      * True when [p] is a pocket, not a ball. Disc-overlap test: a ball's
      * disc can never overlap a pocket's disc (a ball that close would
      * have dropped in), so any candidate whose disc touches the pocket
-     * disc — plus 3 px of detection noise — is the pocket itself, or a
-     * circle fitted to the pocket rim by Hough.
+     * disc is the pocket itself, or a circle fitted to the pocket rim
+     * by Hough. The margin is [CvConfig.POCKET_EXCLUSION_MARGIN_PX]
+     * (0 since v1.0.3: the old +3 px ate real balls 22.5 px from a
+     * pocket once the pocket model was fixed to inset 0).
      */
     private fun isPocket(p: Vec2, radius: Double, pockets: List<Vec2>, pocketRadiusPx: Double): Boolean {
         for (pocket in pockets) {
-            if (p.distanceTo(pocket) < pocketRadiusPx + radius + 3.0) return true
+            if (p.distanceTo(pocket) < pocketRadiusPx + radius + CvConfig.POCKET_EXCLUSION_MARGIN_PX) return true
         }
         return false
     }
@@ -237,7 +255,7 @@ class BallDetector {
         val v = px[2]
         return when {
             v < 60 -> BallColor.BLACK
-            s < 40 && v > 200 -> BallColor.WHITE
+            s < 40 && v > CvConfig.WHITE_V_FLOOR -> BallColor.WHITE
             h < 10 || h >= 160 -> BallColor.RED
             h < 20 -> BallColor.ORANGE
             h < 35 -> BallColor.YELLOW
@@ -253,6 +271,6 @@ class BallDetector {
         if (color == BallColor.WHITE || color == BallColor.BLACK) return false
         val px = hsv.get(p.y.toInt().coerceIn(0, hsv.rows() - 1), p.x.toInt().coerceIn(0, hsv.cols() - 1))
             ?: return false
-        return px[1] < 60 && px[2] > 180
+        return px[1] < 60 && px[2] > CvConfig.STRIPE_V_FLOOR
     }
 }

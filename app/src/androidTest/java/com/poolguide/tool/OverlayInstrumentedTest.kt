@@ -58,6 +58,9 @@ class OverlayInstrumentedTest {
             shot = shot,
             bank = null,
             allShots = all,
+            // v1.0.3: the overlay draws nothing until the table is
+            // locked; the fabricated result must say it is.
+            tableLocked = true,
             status = "Shot to pocket"
         )
     }
@@ -101,6 +104,33 @@ class OverlayInstrumentedTest {
 
         instrumentation.runOnMainSync { manager.removeAll() }
         assertEquals(0, manager.lineWindowCount)
+    }
+
+    @Test
+    fun tableLockGate_hidesLinesUntilLocked() {
+        val ctx = appContext()
+        assertTrue(
+            "overlay permission must be granted for this test",
+            Settings.canDrawOverlays(ctx)
+        )
+        val store = CalibrationStore(ctx).apply { guidesHidden = false }
+        val manager = LineOverlayManager(ctx, store)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+
+        // Unlocked table: no windows at all, even with a solved shot.
+        val unlocked = shotResult().copy(tableLocked = false)
+        instrumentation.runOnMainSync { manager.update(unlocked) }
+        assertEquals("unlocked table must draw no lines", 0, manager.lineWindowCount)
+
+        // Locked table: the same result draws all 8 windows.
+        instrumentation.runOnMainSync { manager.update(shotResult()) }
+        assertEquals("locked table must draw lines", 8, manager.lineWindowCount)
+
+        // Losing the lock hides them again (table moved / lost).
+        instrumentation.runOnMainSync { manager.update(unlocked) }
+        assertEquals("lost lock must hide lines again", 0, manager.lineWindowCount)
+
+        instrumentation.runOnMainSync { manager.removeAll() }
     }
 
     @Test

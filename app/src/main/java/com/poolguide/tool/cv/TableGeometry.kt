@@ -88,6 +88,11 @@ data class DetectionResult(
      * entries faint when "Show all shots" is on; [shot] is always
      * allShots.firstOrNull(). */
     val allShots: List<ShotSolver.ShotSolution> = emptyList(),
+    /** Table-lock gate (v1.0.3, Bloro lead): true once the detected
+     * table rect has stayed within 2 px for 75 consecutive frames
+     * (5 s at the 15 FPS cap). The overlay draws nothing until this is
+     * set. A calibration override counts as locked immediately. */
+    val tableLocked: Boolean = false,
     /** Human-readable status for the diagnostic preview. */
     val status: String
 ) {

@@ -102,4 +102,19 @@ class CvPipelineInstrumentedTest {
         assertTrue("black frame must be reported", result.isCaptureBlack)
         assertTrue("black frame must have no shot", result.shot == null)
     }
+
+    @Test
+    fun tableLock_engagesAfter75StableFrames() {
+        val mat = loadDemoImage("demo_table_green.png")
+        val pipeline = CvPipeline(1280, 720)
+        var result = pipeline.process(mat)
+        repeat(5) { result = pipeline.process(mat) }
+        // 6 frames in: the table is found but not locked yet.
+        assertNotNull("table not found", result.table)
+        assertFalse("table must not lock before 75 stable frames", result.tableLocked)
+        // Same image, same detection: the lock engages at frame 75.
+        repeat(69) { result = pipeline.process(mat) }
+        assertTrue("table must lock after 75 stable frames", result.tableLocked)
+        assertNotNull("locked table must still solve the shot", result.shot)
+    }
 }
