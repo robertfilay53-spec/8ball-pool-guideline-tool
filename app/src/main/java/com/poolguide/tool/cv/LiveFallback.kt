@@ -1,5 +1,6 @@
 package com.poolguide.tool.cv
 
+import com.poolguide.tool.geometry.PathBlock
 import com.poolguide.tool.geometry.Rail
 import com.poolguide.tool.geometry.ShotSolver
 import com.poolguide.tool.geometry.Vec2
@@ -19,7 +20,13 @@ import kotlin.math.abs
  * number — the direct cut angle of the underlying solve, the
  * codebase's established difficulty proxy — so the smaller cut
  * wins, and a tie goes to the bank, the established fallback. A
- * kick never displaces a direct shot. The two-rail fallback
+ * kick never displaces a direct shot. Since v1.0.22 each
+ * one-rail family is a ranked list ([ShotSolver.allBanks],
+ * [ShotSolver.allKicks]) and the shown shot is the first CLEAR
+ * one in cut order, so the bank-vs-kick comparison is between
+ * the two first-clear shots: the easiest makeable one-rail shot
+ * wins, and when every bank or kick is blocked the best stays
+ * and is flagged, as before. The two-rail fallback
  * applies the v1.0.7 corner guards to BOTH contacts (the one-rail
  * bank fallback does not apply them, unchanged from v1.0.3); the
  * kick fallback applies them to its one contact, for the same
@@ -72,47 +79,42 @@ fun solveFallback(
 ): FallbackShot {
     val rails = railsOf(table)
 
-    // No direct shot: the best one-rail bank and the best one-rail
+    // No direct shot: every one-rail bank and every one-rail
     // kick, each ranked by the direct cut angle (easiest pot
     // first), across all pockets and all four rails. The kick
     // contact must pass the corner guards (same numbers as
     // PracticeState): inside the rail span, four ball radii clear
-    // of the corners, and not on the pocket.
-    var bestBank: ShotSolver.BankSolution? = null
-    var bestBankCut = Double.MAX_VALUE
-    for (pocket in pockets) {
-        for (rail in rails) {
-            val bank = ShotSolver.solveBank(cue, target, pocket, rail, ballRadiusPx)
-                ?: continue
-            if (bank.direct.cutAngleDegrees < bestBankCut) {
-                bestBank = bank
-                bestBankCut = bank.direct.cutAngleDegrees
-            }
-        }
+    // of the corners, and not on the pocket. The shown shot of
+    // each family is its first CLEAR one in cut order (v1.0.22
+    // re-ranking): a blocked easiest bank or kick no longer hides
+    // a makeable one, and when every bank or kick is blocked the
+    // best stays and is flagged, as before. [others] is the
+    // blocker list here: every ball except the cue and the target,
+    // which travel the path.
+    val allBanks = ShotSolver.allBanks(cue, target, pockets, rails, ballRadiusPx)
+    val shownBank = PathBlock.firstClearBank(allBanks, others, ballRadiusPx)
+        ?: allBanks.firstOrNull()
+    val allKicks = ShotSolver.allKicks(
+        cue, target, pockets, rails, ballRadiusPx
+    ) { contact, index, pocket ->
+        bankContactIsValid(contact, index, table, pocket, ballRadiusPx)
     }
-    var bestKick: ShotSolver.KickSolution? = null
-    var bestKickCut = Double.MAX_VALUE
-    for (pocket in pockets) {
-        for ((index, rail) in rails.withIndex()) {
-            val kick = ShotSolver.solveKick(cue, target, pocket, rail, ballRadiusPx)
-                ?: continue
-            if (!bankContactIsValid(kick.railContact, index, table, pocket, ballRadiusPx)) continue
-            if (kick.direct.cutAngleDegrees < bestKickCut) {
-                bestKick = kick
-                bestKickCut = kick.direct.cutAngleDegrees
-            }
-        }
-    }
+    val shownKick = PathBlock.firstClearKick(allKicks, others, ballRadiusPx)
+        ?: allKicks.firstOrNull()
     // Smaller cut wins; a tie goes to the bank, the established
     // fallback (the cut angles are equal, so either shot is as
-    // makeable as the other). Neither solving falls through to
+    // makeable as the other). The comparison is between the two
+    // first-clear shots, not the two best: the easiest MAKEABLE
+    // one-rail shot wins, so a blocked best bank can no longer
+    // beat a clear kick, and a blocked best kick can no longer
+    // beat a clear bank. Neither solving falls through to
     // the two-rail search below.
     when (ShotSolver.pickOneRailFallback(
-        bestBankCut.takeIf { bestBank != null },
-        bestKickCut.takeIf { bestKick != null }
+        shownBank?.direct?.cutAngleDegrees,
+        shownKick?.direct?.cutAngleDegrees
     )) {
-        ShotSolver.OneRailFallback.KICK -> return FallbackShot.Kick(bestKick!!)
-        ShotSolver.OneRailFallback.BANK -> return FallbackShot.Bank(bestBank!!)
+        ShotSolver.OneRailFallback.KICK -> return FallbackShot.Kick(shownKick!!)
+        ShotSolver.OneRailFallback.BANK -> return FallbackShot.Bank(shownBank!!)
         ShotSolver.OneRailFallback.NONE -> Unit
     }
 

@@ -121,16 +121,20 @@ class LiveFallbackTest {
     fun `a kick still wins when a combo also solves`() {
         // Cue further below the frozen middle ball: the kick cuts
         // 0.6 degrees, and a combo exists too (second ball at
-        // (135, 30), second cut 89.0 degrees) — the kick must still
-        // win; a combo never displaces it.
+        // (225, 30), second cut 79.3 degrees). The kick must still
+        // win; a combo never displaces it. The second ball sits
+        // clear of the best kick's path: at (135, 30) it blocked
+        // the best kick's target line, and since v1.0.22 the
+        // fallback shows the first CLEAR kick, so that layout
+        // now falls through to the bank instead.
         val kickCue = Vec2(200.0, 100.0)
         val kickMiddle = Vec2(200.0, 30.0)
-        val second = Vec2(135.0, 30.0)
+        val second = Vec2(225.0, 30.0)
         val combo = ShotSolver.bestCombo(
             kickCue, kickMiddle, listOf(second), pockets, r
         )
         assertNotNull(combo)
-        assertEquals(89.04, combo!!.secondShot.cutAngleDegrees, 0.1)
+        assertEquals(79.30, combo!!.secondShot.cutAngleDegrees, 0.1)
         val result = solveFallback(
             kickCue, kickMiddle, listOf(second), pockets, table, r
         )
@@ -161,6 +165,136 @@ class LiveFallbackTest {
             ShotSolver.bestKiss(
                 cue, middle, listOf(Vec2(300.0, 200.0)), pockets, r
             )
+        )
+    }
+
+    // ---- one-rail re-ranking (v1.0.22) ----
+    //
+    // Layouts verified against the real solver with kotlinc before
+    // the tests were written (see probe22/): the target sits frozen
+    // near the top rail with the cue below it, so no direct shot
+    // solves and the one-rail families are the only option.
+
+    @Test
+    fun `blocked best bank gives way to the next clear bank`() {
+        // Cue (60,70) -> target (60,30): no direct shot; banks
+        // 6.30 / 66.68 / 88.71, no kicks at all. A ball at
+        // (54.5,100) sits on the best bank's second leg, so the
+        // fallback shows the 66.68 bank into the bottom-middle
+        // pocket, unflagged, not the blocked 6.30 one.
+        val bankCue = Vec2(60.0, 70.0)
+        val bankTarget = Vec2(60.0, 30.0)
+        val blocker = Vec2(54.5, 100.0)
+        assertTrue(ShotSolver.allShots(bankCue, bankTarget, pockets, r).isEmpty())
+        val banks = ShotSolver.allBanks(
+            bankCue, bankTarget, pockets, railsOf(table), r
+        )
+        assertEquals(6.30, banks.first().direct.cutAngleDegrees, 0.1)
+        val result = solveFallback(
+            bankCue, bankTarget, listOf(blocker), pockets, table, r
+        )
+        assertTrue(result is FallbackShot.Bank)
+        val bank = (result as FallbackShot.Bank).solution
+        assertEquals(66.68, bank.direct.cutAngleDegrees, 0.1)
+        assertVec(Vec2(69.1, 20.0), bank.railContact)
+        assertVec(Vec2(47.9, 43.3), bank.direct.ghostPoint)
+        assertNull(
+            com.poolguide.tool.geometry.PathBlock.blockedBy(
+                bank, listOf(blocker), r
+            )
+        )
+    }
+
+    @Test
+    fun `blocked best kick gives way to the next clear kick`() {
+        // Cue (120,60) -> target (100,60): no direct shot; kicks
+        // 2.48 / 4.53 / 10.03. A ball at (114.8,40) sits on the
+        // best kick's path, so the fallback shows the 4.53 kick
+        // off the left rail into the top-right pocket, unflagged.
+        val kickCue = Vec2(120.0, 60.0)
+        val kickTarget = Vec2(100.0, 60.0)
+        val blocker = Vec2(114.8, 40.0)
+        assertTrue(ShotSolver.allShots(kickCue, kickTarget, pockets, r).isEmpty())
+        val kicks = ShotSolver.allKicks(
+            kickCue, kickTarget, pockets, railsOf(table), r
+        ) { contact, index, pocket ->
+            bankContactIsValid(contact, index, table, pocket, r)
+        }
+        assertEquals(2.48, kicks.first().direct.cutAngleDegrees, 0.1)
+        val result = solveFallback(
+            kickCue, kickTarget, listOf(blocker), pockets, table, r
+        )
+        assertTrue(result is FallbackShot.Kick)
+        val kick = (result as FallbackShot.Kick).solution
+        assertEquals(4.53, kick.direct.cutAngleDegrees, 0.1)
+        assertVec(Vec2(40.0, 60.8), kick.railContact)
+        assertVec(Vec2(82.0, 61.2), kick.direct.ghostPoint)
+        assertNull(
+            com.poolguide.tool.geometry.PathBlock.blockedBy(
+                kick, listOf(blocker), r
+            )
+        )
+    }
+
+    @Test
+    fun `family choice compares first-clear cuts, not best cuts`() {
+        // Cue (60,65) -> target (60,40): no direct shot. The best
+        // bank cuts 11.92 and the best kick 44.43, so the OLD
+        // comparison (best cuts) would have picked the bank, but
+        // a ball at (54.1,100) blocks the best bank, and its next
+        // clear bank cuts 87.42, worse than the clear 44.43 kick.
+        // The fallback must show the kick, unflagged.
+        val cue2 = Vec2(60.0, 65.0)
+        val target2 = Vec2(60.0, 40.0)
+        val blocker = Vec2(54.1, 100.0)
+        assertTrue(ShotSolver.allShots(cue2, target2, pockets, r).isEmpty())
+        val banks = ShotSolver.allBanks(
+            cue2, target2, pockets, railsOf(table), r
+        )
+        val kicks = ShotSolver.allKicks(
+            cue2, target2, pockets, railsOf(table), r
+        ) { contact, index, pocket ->
+            bankContactIsValid(contact, index, table, pocket, r)
+        }
+        assertEquals(11.92, banks.first().direct.cutAngleDegrees, 0.1)
+        assertEquals(44.43, kicks.first().direct.cutAngleDegrees, 0.1)
+        val result = solveFallback(
+            cue2, target2, listOf(blocker), pockets, table, r
+        )
+        assertTrue(result is FallbackShot.Kick)
+        val kick = (result as FallbackShot.Kick).solution
+        assertEquals(44.43, kick.direct.cutAngleDegrees, 0.1)
+        assertVec(Vec2(680.0, 58.8), kick.railContact)
+        assertVec(Vec2(72.7, 52.7), kick.direct.ghostPoint)
+        assertNull(
+            com.poolguide.tool.geometry.PathBlock.blockedBy(
+                kick, listOf(blocker), r
+            )
+        )
+    }
+
+    @Test
+    fun `all-blocked one-rail shots keep the best and flag it`() {
+        // Same bank layout as the re-rank test, but a ball on the
+        // second leg of EVERY bank (midpoints (49.7,180),
+        // (214.5,180), (379.4,180)): no bank is clear and no kick
+        // solves, so the fallback keeps the best bank (6.30) and
+        // the pipeline flags it via the blocker on its path.
+        val bankCue = Vec2(60.0, 70.0)
+        val bankTarget = Vec2(60.0, 30.0)
+        val blockers = listOf(
+            Vec2(49.7, 180.0), Vec2(214.5, 180.0), Vec2(379.4, 180.0)
+        )
+        assertTrue(ShotSolver.allShots(bankCue, bankTarget, pockets, r).isEmpty())
+        val result = solveFallback(
+            bankCue, bankTarget, blockers, pockets, table, r
+        )
+        assertTrue(result is FallbackShot.Bank)
+        val bank = (result as FallbackShot.Bank).solution
+        assertEquals(6.30, bank.direct.cutAngleDegrees, 0.1)
+        assertEquals(
+            Vec2(49.7, 180.0),
+            com.poolguide.tool.geometry.PathBlock.blockedBy(bank, blockers, r)
         )
     }
 }

@@ -329,12 +329,11 @@ class CvPipeline(
      * direct cut angle of the underlying solve, the codebase's
      * established difficulty proxy — so the smaller cut wins, and a
      * tie goes to the bank, the established fallback. A kick never
-     * displaces a direct shot. The bank fallback is now best-by-cut
-     * (it used to return the first bank in pocket/rail order);
-     * practice mode already ranked banks by cut, so the live overlay
-     * now shows the easiest bank, not the first one found — and the
-     * bank-vs-kick comparison is between the two best shots, not
-     * between a first-found bank and a best kick.
+     * displaces a direct shot. The one-rail families are re-ranked
+     * the same way (v1.0.22): the bank-vs-kick comparison is
+     * between the two first-clear shots, so the easiest makeable
+     * one-rail shot wins, and when every bank or kick is blocked
+     * the best stays and is flagged.
      */
     private fun solveFor(
         cue: Ball?,
