@@ -172,6 +172,75 @@ class PracticeStateTest {
         assertTrue(s.solve() is PracticeState.PracticeSolution.Direct)
     }
 
+    // ---- v1.0.9: two-rail banks ----
+
+    @Test
+    fun `two-rail layout solves as Bank2 off the bottom then right rails`() {
+        // Swept layout, verified against the solver with kotlinc
+        // before the test was written: cue (580, 300), target
+        // (600, 320). The two-rail bank runs bottom then right to
+        // the top-middle pocket at cut 12.6 deg; the best one-rail
+        // bank there is 67.9 deg, so the two-rail bank wins by the
+        // 30-degree margin rule.
+        val s = state()
+        s.setMode(PracticeState.PracticeMode.BANK)
+        s.moveBall(0, Vec2(580.0, 300.0))
+        s.moveBall(1, Vec2(600.0, 320.0))
+        val solution = s.solve()
+        assertTrue(solution is PracticeState.PracticeSolution.Bank2)
+        val bank2 = solution as PracticeState.PracticeSolution.Bank2
+        assertEquals("bottom" to "right", bank2.railNames)
+        assertTrue(bank2.solution.direct.cutAngleDegrees > 11.0)
+        assertTrue(bank2.solution.direct.cutAngleDegrees < 14.0)
+        assertEquals(623.5, bank2.solution.railContacts[0].x, 0.5)
+        assertEquals(340.0, bank2.solution.railContacts[0].y, 0.0)
+        assertEquals(680.0, bank2.solution.railContacts[1].x, 0.0)
+        assertEquals(292.0, bank2.solution.railContacts[1].y, 0.5)
+        assertEquals(3, bank2.solution.bankPath.size)
+        assertEquals(360.0, bank2.solution.bankPath.last().end.x, 0.0)
+        assertEquals(20.0, bank2.solution.bankPath.last().end.y, 0.0)
+        assertTrue(!bank2.solution.direct.isThinCut)
+    }
+
+    @Test
+    fun `bank default still solves as Bank, not Bank2`() {
+        // The v1.0.7 default has a one-rail cut of 30.8 deg and a
+        // two-rail cut of 3.4 deg: the 30-degree margin keeps the
+        // one-rail bank as the recommended bank.
+        val s = state()
+        s.setMode(PracticeState.PracticeMode.BANK)
+        val solution = s.solve()
+        assertTrue(solution is PracticeState.PracticeSolution.Bank)
+        val bank = solution as PracticeState.PracticeSolution.Bank
+        assertEquals("bottom", bank.railName)
+        assertTrue(bank.solution.direct.cutAngleDegrees > 29.0)
+        assertTrue(bank.solution.direct.cutAngleDegrees < 32.0)
+    }
+
+    @Test
+    fun `two-rail bank with both contacts in the pocket jaws is rejected`() {
+        // Target tucked in the top-left corner: every two-rail bank
+        // has a contact inside a pocket's jaws (within four ball
+        // radii of a corner), so the corner guards reject them all.
+        // Verified against the solver with kotlinc before the test
+        // was written: no guard-passing two-rail bank exists here.
+        val s = state()
+        s.setMode(PracticeState.PracticeMode.BANK)
+        s.moveBall(0, Vec2(100.0, 80.0))
+        s.moveBall(1, Vec2(60.0, 40.0))
+        assertNull(s.solveBank2())
+        assertNull(s.solve())
+    }
+
+    @Test
+    fun `two-rail overlapping balls have no shot`() {
+        val s = state()
+        s.setMode(PracticeState.PracticeMode.BANK)
+        s.moveBall(0, Vec2(580.0, 300.0))
+        s.moveBall(1, Vec2(580.0, 300.0))
+        assertNull(s.solveBank2())
+    }
+
     // ---- v1.0.6: combo mode ----
 
     @Test

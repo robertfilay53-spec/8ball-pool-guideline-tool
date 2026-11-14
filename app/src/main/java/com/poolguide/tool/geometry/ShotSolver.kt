@@ -1,5 +1,6 @@
 package com.poolguide.tool.geometry
 
+import kotlin.math.abs
 import kotlin.math.acos
 
 /**
@@ -320,6 +321,19 @@ object ShotSolver {
         val mirroredPocket: Vec2
     )
 
+    /** Result of solving a two-rail bank shot. */
+    data class TwoRailBankSolution(
+        val direct: ShotSolution,
+        /** Where the target ball meets the cushions, in path order:
+         * [0] is the first rail hit, [1] the second. */
+        val railContacts: List<Vec2>,
+        /** Target ball path: target -> rail 1 contact -> rail 2 contact
+         * -> pocket (three segments). */
+        val bankPath: List<Segment>,
+        /** The doubly mirrored pocket used for the geometry. */
+        val mirroredPocket: Vec2
+    )
+
     /**
      * Solve a direct shot. Returns null when the shot is impossible:
      * cut angle > 90 degrees (ghost point behind the target relative to the
@@ -482,6 +496,137 @@ object ShotSolver {
             ),
             mirroredPocket = mirrored
         )
+    }
+
+    /**
+     * Solve a two-rail bank: mirror the pocket across the LAST rail
+     * first ([rail2]), then across the FIRST rail ([rail1]), and solve
+     * a direct shot against the doubly mirrored pocket. The straight
+     * line target -> doubly mirrored pocket unfolds the two-reflection
+     * path: it crosses [rail1] at the first contact, and the segment
+     * from that contact to the once-mirrored pocket crosses [rail2]
+     * at the second contact. Returns null when the rails are the same,
+     * when the pocket sits on either rail (it would mirror to itself),
+     * when either contact is not on its segment, when the contacts
+     * coincide (both at the same corner), or when the direct solve
+     * fails.
+     *
+     * Cushion correction (same form as the one-rail bank, Bloro lead):
+     * the correction is applied at EACH rail contact, the second
+     * contact re-solved first (its target is the pocket), then the
+     * first (its target is the corrected second contact). With the
+     * fitted coefficients the correction is zero and the ideal bank
+     * is returned unchanged. When a correction cannot be satisfied,
+     * the ideal bank is returned: a slightly-off bank line is better
+     * than no bank line.
+     */
+    fun solveTwoRailBank(
+        cue: Vec2,
+        target: Vec2,
+        pocket: Vec2,
+        rail1: Rail,
+        rail2: Rail,
+        ballRadiusPx: Double,
+        correction: CushionCorrection = CushionCorrection.FITTED
+    ): TwoRailBankSolution? {
+        if (rail1 == rail2) return null
+        // A pocket on either rail mirrors to itself: degenerate.
+        if (abs((pocket - rail1.point).dot(rail1.normal)) < 1.0) return null
+        if (abs((pocket - rail2.point).dot(rail2.normal)) < 1.0) return null
+        val mirroredOnce = mirrorPointAcrossRail(pocket, rail2)
+        val mirrored = mirrorPointAcrossRail(mirroredOnce, rail1)
+        val direct = solveShot(cue, target, mirrored, ballRadiusPx) ?: return null
+        val contact1 = railContactPoint(target, mirrored, rail1) ?: return null
+        val contact2 = railContactPoint(contact1, mirroredOnce, rail2) ?: return null
+        if (contact1.distanceTo(contact2) < 1e-6) return null
+        val ideal = TwoRailBankSolution(
+            direct = direct,
+            railContacts = listOf(contact1, contact2),
+            bankPath = listOf(
+                Segment(target, contact1),
+                Segment(contact1, contact2),
+                Segment(contact2, pocket)
+            ),
+            mirroredPocket = mirrored
+        )
+
+        // Incident angles: between each ideal outgoing direction and
+        // its rail, same definition as the one-rail bank.
+        val rail1Dir = rail1.normal.perp()
+        val rail2Dir = rail2.normal.perp()
+        val out1 = reflectDirection(contact1 - target, rail1)
+        val out2 = reflectDirection(contact2 - contact1, rail2)
+        val adjust1 = correction.correct(angleBetween(out1, rail1Dir))
+        val adjust2 = correction.correct(angleBetween(out2, rail2Dir))
+        if (abs(adjust1) < 1e-9 && abs(adjust2) < 1e-9) return ideal
+
+        val corrected2 = correctedContact(rail2, contact1, pocket, contact2, adjust2)
+            ?: return ideal
+        val corrected1 = correctedContact(rail1, target, corrected2, contact1, adjust1)
+            ?: return ideal
+        val correctedDirect = solveShot(cue, target, corrected1, ballRadiusPx)
+            ?: return ideal
+        return TwoRailBankSolution(
+            direct = correctedDirect,
+            railContacts = listOf(corrected1, corrected2),
+            bankPath = listOf(
+                Segment(target, corrected1),
+                Segment(corrected1, corrected2),
+                Segment(corrected2, pocket)
+            ),
+            mirroredPocket = mirrored
+        )
+    }
+
+    /**
+     * Re-solve one rail contact under a cushion correction: find s
+     * along the rail where the corrected outgoing ray (ideal reflection
+     * rotated by [adjust] degrees) passes through [to]. Returns null
+     * when the correction cannot be satisfied (no sign change in the
+     * bracket, or the corrected ray heads away from [to]). Same
+     * 24-step bisection pattern as the kiss refinement and the
+     * one-rail bank correction.
+     */
+    private fun correctedContact(
+        rail: Rail,
+        from: Vec2,
+        to: Vec2,
+        idealContact: Vec2,
+        adjust: Double
+    ): Vec2? {
+        val railDir = rail.normal.perp()
+        fun residual(s: Double): Double {
+            val c = rail.point + railDir * s
+            val incoming = (c - from).normalized()
+            if (incoming.norm() < 1e-9) return Double.NaN
+            val outCorrected = rotate(reflectDirection(incoming, rail), adjust)
+            val toTarget = to - c
+            return toTarget.x * outCorrected.y - toTarget.y * outCorrected.x
+        }
+        val s0 = (idealContact - rail.point).dot(railDir)
+        val bracket = 150.0
+        var lo = s0 - bracket
+        var hi = s0 + bracket
+        var fLo = residual(lo)
+        val fHi = residual(hi)
+        if (fLo.isNaN() || fHi.isNaN() || fLo * fHi > 0.0) return null
+        repeat(KISS_REFINE_STEPS) {
+            val mid = (lo + hi) / 2.0
+            val fMid = residual(mid)
+            if (fMid.isNaN()) return null
+            if ((fMid >= 0.0) == (fLo >= 0.0)) {
+                lo = mid
+                fLo = fMid
+            } else {
+                hi = mid
+            }
+        }
+        val corrected = rail.point + railDir * ((lo + hi) / 2.0)
+        // The corrected ray must head toward the target, not away.
+        val incoming = (corrected - from).normalized()
+        val out = rotate(reflectDirection(incoming, rail), adjust)
+        if ((to - corrected).dot(out) <= 0.0) return null
+        return corrected
     }
 
     /**

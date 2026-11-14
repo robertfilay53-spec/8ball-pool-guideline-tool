@@ -45,6 +45,41 @@ class PracticeInstrumentedTest {
     }
 
     @Test
+    fun practice_twoRailBankLayoutSolvesAsBank2() {
+        ActivityScenario.launch(PracticeActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val state = activity.practiceView.state
+                assertNotNull("practice state must exist", state)
+
+                // BANK mode, balls moved to the swept two-rail layout
+                // (verified against the solver with kotlinc before
+                // the test was written): cue (580, 300), target
+                // (600, 320) — bottom then right rails to the
+                // top-middle pocket, cut 12.6 deg.
+                activity.findViewById<android.widget.Button>(R.id.btn_mode_bank)
+                    .performClick()
+                assertEquals(PracticeState.PracticeMode.BANK, state!!.mode)
+                state.moveBall(0, com.poolguide.tool.geometry.Vec2(580.0, 300.0))
+                state.moveBall(1, com.poolguide.tool.geometry.Vec2(600.0, 320.0))
+                val solution = state.solve()
+                assertTrue(
+                    "two-rail layout must solve as Bank2",
+                    solution is PracticeState.PracticeSolution.Bank2
+                )
+                val bank2 = solution as PracticeState.PracticeSolution.Bank2
+                assertEquals(
+                    "bottom" to "right",
+                    bank2.railNames
+                )
+                assertEquals(3, bank2.solution.bankPath.size)
+                // Drawing the Bank2 solution exercises drawBank with
+                // the three-segment path (both rail contacts visible).
+                activity.practiceView.invalidate()
+            }
+        }
+    }
+
+    @Test
     fun practice_modesSolveBankComboAndKiss() {
         ActivityScenario.launch(PracticeActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->

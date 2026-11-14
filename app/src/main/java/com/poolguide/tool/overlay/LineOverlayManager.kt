@@ -435,16 +435,41 @@ class LineOverlayManager(
                 POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = 18f
             )
         } else if (bank != null && store.bankLinesEnabled) {
-            val (aim, seg1, seg2) = smoother.smooth(
-                Segment(map(bank.direct.aimLine.start), map(bank.direct.aimLine.end)),
-                Segment(map(bank.bankPath[0].start), map(bank.bankPath[0].end)),
-                Segment(map(bank.bankPath[1].start), map(bank.bankPath[1].end)),
+            val smoothed = smoother.smoothList(
+                listOf(
+                    Segment(map(bank.direct.aimLine.start), map(bank.direct.aimLine.end)),
+                    Segment(map(bank.bankPath[0].start), map(bank.bankPath[0].end)),
+                    Segment(map(bank.bankPath[1].start), map(bank.bankPath[1].end))
+                ),
                 result.status
             )
-            out += DrawLine(aim, AIM_COLOR, AIM_WIDTH_PX)
-            out += DrawLine(seg1, BANK_COLOR, LINE_WIDTH_PX)
-            out += DrawLine(seg2, BANK_COLOR, LINE_WIDTH_PX)
+            out += DrawLine(smoothed[0], AIM_COLOR, AIM_WIDTH_PX)
+            out += DrawLine(smoothed[1], BANK_COLOR, LINE_WIDTH_PX)
+            out += DrawLine(smoothed[2], BANK_COLOR, LINE_WIDTH_PX)
             val pocket = bank.bankPath.last().end
+            out += DrawLine(
+                Segment(map(pocket), map(pocket)),
+                POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = 18f
+            )
+        } else if (result.bank2 != null && store.bankLinesEnabled) {
+            // Two-rail bank (v1.0.9): same cyan rendering as a
+            // one-rail bank, with all three path segments so both
+            // rail contacts are visible.
+            val bank2 = result.bank2
+            val smoothed = smoother.smoothList(
+                listOf(
+                    Segment(map(bank2.direct.aimLine.start), map(bank2.direct.aimLine.end)),
+                    Segment(map(bank2.bankPath[0].start), map(bank2.bankPath[0].end)),
+                    Segment(map(bank2.bankPath[1].start), map(bank2.bankPath[1].end)),
+                    Segment(map(bank2.bankPath[2].start), map(bank2.bankPath[2].end))
+                ),
+                result.status
+            )
+            out += DrawLine(smoothed[0], AIM_COLOR, AIM_WIDTH_PX)
+            out += DrawLine(smoothed[1], BANK_COLOR, LINE_WIDTH_PX)
+            out += DrawLine(smoothed[2], BANK_COLOR, LINE_WIDTH_PX)
+            out += DrawLine(smoothed[3], BANK_COLOR, LINE_WIDTH_PX)
+            val pocket = bank2.bankPath.last().end
             out += DrawLine(
                 Segment(map(pocket), map(pocket)),
                 POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = 18f

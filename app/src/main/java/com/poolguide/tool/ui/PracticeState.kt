@@ -20,6 +20,16 @@ import kotlin.math.abs
  *   itself is degenerate (the mirror is the pocket), so those are
  *   skipped; the rail contact must also lie inside the rail span,
  *   four ball radii clear of the corners, and not on the pocket.
+ *   Two-rail banks (v1.0.9) are ranked after one-rail banks: a
+ *   two-rail bank only wins when its cut angle is smaller than the
+ *   best one-rail cut by more than [TWO_RAIL_CUT_MARGIN_DEGREES].
+ *   Each extra cushion compounds real-table error (the cushion
+ *   correction is fitted to synthetic data, real-table behaviour
+ *   unmeasured), so a two-rail bank must be clearly easier to be
+ *   the recommended bank. The margin is 30 degrees: the v1.0.7
+ *   bank default has a one-rail cut of 30.8 deg and a two-rail cut
+ *   of 3.4 deg, so a smaller margin would flip that layout to a
+ *   two-rail bank.
  * - [PracticeMode.COMBO]: cue -> middle (first ball) -> target
  *   (second ball) -> pocket. The first ball must reach the second
  *   ball's ghost point; the solver ranks pockets by the second shot's
@@ -33,7 +43,11 @@ import kotlin.math.abs
  * pocket (kiss cut 72.2 deg, second cut 27.2 deg), and the bank default
  * solves off the bottom rail to the top-right pocket (cut 30.8 deg,
  * contact (502.2, 340.0)). Switching mode re-lays out the balls to
- * that mode's default.
+ * that mode's default. The two-rail test layout (cue (580, 300),
+ * target (600, 320)) solves off the bottom then right rails to the
+ * top-middle pocket (cut 12.6 deg, contacts (623.5, 340.0) and
+ * (680.0, 292.0)); the best one-rail bank there is 67.9 deg, so the
+ * two-rail bank wins by the margin rule.
  */
 class PracticeState(
     private val table: TableRect,
@@ -49,8 +63,22 @@ class PracticeState(
             /** Which rail the bank runs off ("top", "bottom", "left", "right"). */
             val railName: String
         ) : PracticeSolution
+        /** Two-rail bank (v1.0.9): cue -> target -> rail 1 -> rail 2
+         * -> pocket. */
+        data class Bank2(
+            val solution: ShotSolver.TwoRailBankSolution,
+            /** Which rails the bank runs off, in path order. */
+            val railNames: Pair<String, String>
+        ) : PracticeSolution
         data class Combo(val solution: ShotSolver.ComboSolution) : PracticeSolution
         data class Kiss(val solution: ShotSolver.KissSolution) : PracticeSolution
+    }
+
+    companion object {
+        /** A two-rail bank must beat the best one-rail bank by more
+         * than this many degrees of cut angle to be the recommended
+         * bank in BANK mode (see the class KDoc). */
+        const val TWO_RAIL_CUT_MARGIN_DEGREES = 30.0
     }
 
     data class PracticeBall(val id: Int, var center: Vec2, val isCue: Boolean)
@@ -145,9 +173,27 @@ class PracticeState(
     /** Solve the shot for the current mode. */
     fun solve(): PracticeSolution? = when (mode) {
         PracticeMode.DIRECT -> solveDirect()?.let { PracticeSolution.Direct(it) }
-        PracticeMode.BANK -> solveBank()?.let { PracticeSolution.Bank(it.first, it.second) }
+        PracticeMode.BANK -> solveBestBank()
         PracticeMode.COMBO -> solveCombo()?.let { PracticeSolution.Combo(it) }
         PracticeMode.KISS -> solveKiss()?.let { PracticeSolution.Kiss(it) }
+    }
+
+    /** BANK mode: the best bank. One-rail banks rank first; a
+     * two-rail bank only wins when its cut angle beats the best
+     * one-rail cut by more than [TWO_RAIL_CUT_MARGIN_DEGREES]
+     * (a two-rail bank must be clearly easier — see the class KDoc).
+     * Either kind wins outright when the other does not exist. */
+    private fun solveBestBank(): PracticeSolution? {
+        val oneRail = solveBank()
+        val twoRail = solveBank2()
+        val oneCut = oneRail?.first?.direct?.cutAngleDegrees ?: Double.MAX_VALUE
+        val twoCut = twoRail?.first?.direct?.cutAngleDegrees
+            ?.plus(TWO_RAIL_CUT_MARGIN_DEGREES) ?: Double.MAX_VALUE
+        return if (twoCut < oneCut) {
+            twoRail?.let { PracticeSolution.Bank2(it.first, it.second) }
+        } else {
+            oneRail?.let { PracticeSolution.Bank(it.first, it.second) }
+        }
     }
 
     /** Direct shot: cue -> target -> best pocket (smallest cut). */
@@ -213,8 +259,56 @@ class PracticeState(
         return best?.let { it to bestRail }
     }
 
-    /** Combo: cue -> middle -> target -> best pocket, ranked by the
-     * second shot's cut angle (easiest pot first). */
+    /** Two-rail bank (v1.0.9): cue -> target -> rail 1 -> rail 2 ->
+     * best pocket, ranked by the direct cut angle (easiest pot
+     * first). Same three guards as [solveBank], applied to BOTH
+     * contacts: a pocket on either rail is skipped for that pair,
+     * each contact must lie inside its rail span, four ball radii
+     * clear of the corners, and neither contact may sit on the
+     * pocket. Returns the bank plus the two rail names in path
+     * order, or null when no two-rail bank is possible. */
+    fun solveBank2(): Pair<ShotSolver.TwoRailBankSolution, Pair<String, String>>? {
+        if (cue.center.distanceTo(target.center) < ballRadiusPx * 2 + 0.5) return null
+        val rails = railsOf()
+        var best: ShotSolver.TwoRailBankSolution? = null
+        var bestRails = "" to ""
+        var bestCut = Double.MAX_VALUE
+        for (pocket in table.pockets()) {
+            for ((index1, rail1) in rails.withIndex()) {
+                for ((index2, rail2) in rails.withIndex()) {
+                    if (index1 == index2) continue
+                    if (abs((pocket - rail1.point).dot(rail1.normal)) < 1.0) continue
+                    if (abs((pocket - rail2.point).dot(rail2.normal)) < 1.0) continue
+                    val bank = ShotSolver.solveTwoRailBank(
+                        cue.center, target.center, pocket, rail1, rail2, ballRadiusPx
+                    ) ?: continue
+                    if (!bankContactIsValid(bank.railContacts[0], index1, pocket)) continue
+                    if (!bankContactIsValid(bank.railContacts[1], index2, pocket)) continue
+                    if (bank.direct.cutAngleDegrees < bestCut) {
+                        best = bank
+                        bestRails = railNames[index1] to railNames[index2]
+                        bestCut = bank.direct.cutAngleDegrees
+                    }
+                }
+            }
+        }
+        return best?.let { it to bestRails }
+    }
+
+    /** The v1.0.7 corner guard (same numbers as the live pipeline's
+     * CvPipeline.bankContactIsValid): the contact must lie inside its
+     * rail span, four ball radii clear of the corners, and not on the
+     * pocket. [railIndex] follows railsOf() order: 0 top, 1 bottom,
+     * 2 left, 3 right. */
+    private fun bankContactIsValid(contact: Vec2, railIndex: Int, pocket: Vec2): Boolean {
+        val along = if (railIndex < 2) contact.x else contact.y
+        val lo = if (railIndex < 2) table.topLeft.x + 4 * ballRadiusPx
+            else table.topLeft.y + 4 * ballRadiusPx
+        val hi = if (railIndex < 2) table.topRight.x - 4 * ballRadiusPx
+            else table.bottomLeft.y - 4 * ballRadiusPx
+        if (along < lo || along > hi) return false
+        return contact.distanceTo(pocket) >= 2 * ballRadiusPx
+    }
     fun solveCombo(): ShotSolver.ComboSolution? {
         if (cue.center.distanceTo(middle.center) < ballRadiusPx * 2 + 0.5) return null
         if (middle.center.distanceTo(target.center) < ballRadiusPx * 2 + 0.5) return null

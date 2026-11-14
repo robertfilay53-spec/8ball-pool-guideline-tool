@@ -3,7 +3,8 @@
 A companion helper for 8 Ball Pool (Miniclip). It watches the game on your
 screen and draws aim lines over it: the cue-ball aim line, the target ball's
 path to the pocket, and the cue ball's deflection after impact, plus one-rail
-bank shots when no direct shot exists.
+bank shots when no direct shot exists, and two-rail banks when no one-rail
+bank solves.
 
 **It is a separate app. You install the original 8 Ball Pool from the Play
 Store (or APKPure) and this tool separately. The two work together on your
@@ -98,6 +99,19 @@ screen. Nothing about the game is changed.**
    status reports what the preview frame shows — neither promises the
    live pipeline will lock on a real table. The defaults are
    unchanged, and calibration is stored per game version.
+10. **Two-rail banks are geometry only, and they are the last resort.**
+    Since v1.0.9 the tool also draws two-rail banks (target -> rail
+    -> rail -> pocket, same cyan rendering, both contacts shown).
+    In the live overlay a two-rail bank is only the best shot when
+    no direct shot and no one-rail bank solves. A two-rail bank
+    never displaces a simpler shot. In practice BANK mode a two-rail
+    bank only wins when its cut angle beats the best one-rail bank
+    by more than 30 degrees (each extra cushion compounds
+    real-table error). The cushion correction at each rail is fitted
+    to synthetic data, where it measures zero; real-table cushion
+    behaviour is unmeasured, and it is unmeasured twice over on a
+    two-rail bank. What you practise here is the aim geometry, not
+    the exact outcome on a real table.
 
 ## How it works
 
@@ -110,8 +124,9 @@ MediaProjection + VirtualDisplay (960x540, foreground service)
         ball the same hue as the cloth is still separated from it)
      -> the game's own white guideline: bilateral filter -> Canny (50, 150)
         -> HoughLinesP (30/15/8) -> verifier -> robust refit -> LineTracker
-  -> shot solver (ghost ball, cut angle, tangent, mirror-pocket banks,
-     combo + kiss shots; every reachable pocket ranked, best first)
+  -> shot solver (ghost ball, cut angle, tangent, mirror-pocket banks
+     (one- and two-rail), combo + kiss shots; every reachable pocket
+     ranked, best first)
   -> one small TYPE_APPLICATION_OVERLAY window per line (best shot in
      full colour, other candidates faint — PoolAimAssist UX)
 ```

@@ -83,6 +83,11 @@ data class DetectionResult(
     val guideline: List<GuidelineSegment>,
     val shot: ShotSolver.ShotSolution?,
     val bank: ShotSolver.BankSolution?,
+    /** Best two-rail bank (v1.0.9), set only when no direct shot and
+     * no one-rail bank solves: the last-resort best shot. Ranked
+     * after one-rail banks — a two-rail bank never displaces a
+     * direct shot or a one-rail bank in the live overlay. */
+    val bank2: ShotSolver.TwoRailBankSolution? = null,
     /** Every reachable direct shot, best first (allShots ranking).
      * Empty when no direct shot exists. The overlay draws the non-best
      * entries faint when "Show all shots" is on; [shot] is always
