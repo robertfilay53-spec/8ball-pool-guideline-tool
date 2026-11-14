@@ -59,10 +59,16 @@ screen. Nothing about the game is changed.**
    measures zero; real-table cushion behaviour is unmeasured. A
    stripe ball's white number band can also read as a second white
    ball: on the blue demo table it is detected at the stripe ball's
-   centre and picked as the cue (the first white ball wins), so the
-   solved shot there is phantom-cue -> real-cue, not the depicted
-   shot — found while testing v1.0.19, and cue identification is its
-   own later slice.
+   centre, and before v1.0.20 the first-white pick took it as the cue,
+   so the solved shot there was phantom-cue -> real-cue, not the
+   depicted shot. Since v1.0.20 the cue is picked by group
+   (CuePicker): the band's disc samples STRIPE while the real cue
+   samples CUE, so the real cue wins. The band phantom itself is
+   still detected (it IS the stripe ball, just mis-coloured) and is
+   tagged STRIPE. If the real cue's group ever reads UNKNOWN
+   (occluded, or cut off by the frame edge) the pick falls back to
+   the first white ball, and a phantom listed first can win that
+   fallback — EDIT mode exists to correct a mis-detection by hand.
 5. **EDIT mode's anchor handles are touchable on purpose.** The Edit button
    on the floating bubble freezes the current shot and shows two draggable
    handles (cue + ghost) so you can correct a mis-detection by hand. Those
@@ -286,6 +292,13 @@ screen. Nothing about the game is changed.**
     the one-diameter boundary, and EDIT mode never shows the flag
     (the frozen shot is the player's manual aim, not the live
     detection the flag belongs to).
+
+21. **The cue ball is picked by group, not by colour.** Since v1.0.20
+    the pipeline picks the ball the group classifier calls CUE; the
+    old first-white-colour pick took a stripe ball's white number
+    band as the cue on the blue demo table (see item 4). The band
+    phantom is still detected and tagged STRIPE. If no ball carries
+    the CUE group the pick falls back to the first white ball.
 
 ## How it works
 

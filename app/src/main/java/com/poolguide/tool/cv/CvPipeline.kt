@@ -174,7 +174,8 @@ class CvPipeline(
                 tableDetector.feltHsvMean, pocketRadiusPx
             )
         }
-        val cue = balls.firstOrNull { it.isCue }
+        // v1.0.20: cue by group, not by colour — see CuePicker.
+        val cue = CuePicker.pickCue(balls)
 
         // Guideline: detect every 2nd frame inside the table ROI; between
         // detection frames the last tracked segments are reused.

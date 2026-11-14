@@ -5,6 +5,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.poolguide.tool.cv.CvPipeline
 import com.poolguide.tool.cv.OpenCvInit
+import com.poolguide.tool.geometry.BallGroup
 import com.poolguide.tool.geometry.Vec2
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -118,15 +119,48 @@ class CvPipelineInstrumentedTest {
         assertNotNull("blue table not found", result.table)
         assertNotNull("blue cue ball not found", result.cueBall)
         assertNotNull("no shot on blue table: ${result.status}", result.shot)
-        // v1.0.19: NO blockedBy assertion here. The blue demo
-        // table's cue detection picks the red 11-ball's white number
-        // band as the cue (a second white ball at ~(506,253)), so
-        // the solved shot is phantom-cue -> real-cue, not the
-        // depicted shot — a pre-existing detection quirk, not a
-        // blocked-path miss (the replica reproduces it exactly: the
-        // phantom-cue shot is genuinely unblocked). The flag itself
-        // is proven by the green table above. Fixing cue
-        // identification is its own slice, not this one.
+        // v1.0.20: the cue is the REAL cue ball, not the red 11-ball's
+        // white number band. The band detects as a WHITE ball at the
+        // stripe ball's centre ~(506,253) but its disc samples STRIPE,
+        // while the real cue at ~(168,281) samples CUE — the
+        // group-first pick (CuePicker) takes the real cue.
+        val cue = result.cueBall!!
+        assertTrue(
+            "cue must be the real cue ball, not the stripe band: ${cue.center}",
+            cue.center.distanceTo(Vec2(168.5, 281.5)) < 10.0
+        )
+        assertEquals(BallGroup.CUE, cue.group)
+        // The band phantom is still detected (it IS the 11-ball, just
+        // mis-coloured) but it is tagged STRIPE, never picked as cue.
+        val phantom = result.balls.firstOrNull {
+            it.center.distanceTo(Vec2(506.5, 253.5)) < 10.0
+        }
+        assertNotNull("stripe band phantom must still be detected", phantom)
+        assertEquals(BallGroup.STRIPE, phantom!!.group)
+        // The depicted shot is now real-cue -> red solid -> top-right
+        // pocket, cut ~16.8 deg (harness replica, probe20) — AND it
+        // is flagged blocked: the green ball at (281.0, 196.6) sits
+        // 12.6 px off the aim line, inside the one-diameter threshold
+        // 2r = 17.1 px, so it is genuinely on the path. (An earlier
+        // version of this test asserted the path clear from a probe
+        // that read a key the harness replica never computes — the
+        // replica has no blocked-path check — and CI proved it wrong:
+        // blockedBy was the green ball. The flag, not a clear path,
+        // is the correct expectation, and the blue table now proves
+        // the flag on the real depicted shot, not just the green
+        // table's 1-px-off case.)
+        val shot = result.shot!!
+        assertTrue(
+            "blue cut angle must be ~16.8 deg, got ${shot.cutAngleDegrees}",
+            kotlin.math.abs(shot.cutAngleDegrees - 16.75) < 2.0
+        )
+        assertNotNull("blue shot must be flagged blocked", result.blockedBy)
+        val blocker = result.blockedBy!!
+        assertTrue(
+            "blocker is not the green ball: $blocker",
+            blocker.distanceTo(Vec2(281.0, 196.6)) < 10.0
+        )
+        assertTrue("status must say the path is blocked", result.status.contains("path blocked"))
     }
 
     @Test
