@@ -427,12 +427,17 @@ detection fails, which never happens on the 15 harness tables.
   table ROI, Mat objects reused, detection on a background HandlerThread,
   never `bitmapToMat` per frame. Aim-fit error measured on the synthetic
   demo tables with a Python replica of the detector (`tools/measure_aim_fit.py`):
-  **green 0.31 deg, blue 0.04 deg** at full resolution (16 px ball radius),
-  against Scugalug's ~0.25 deg target. Note: the demo images draw the
-  guideline as a chord from cue-edge to target-edge, which itself deviates
-  3.01 deg (green) / 2.05 deg (blue) from the true aim ray — a fixture
-  fidelity note, not a detector error; the guideline should be redrawn as
-  the true aim ray in a later cycle.
+  **green 0.13 deg, blue 0.03 deg** at full resolution (16 px ball radius),
+  against Scugalug's ~0.25 deg target. Since v1.0.28 the demo images draw
+  the guideline as the true aim ray (cue -> ghost point, ending at the
+  foot of the perpendicular from the target centre, 2 px clear of the
+  target ball), so the fit is measured against the aim itself: before
+  v1.0.28 the images drew a chord from cue-edge to target-edge that sat
+  3.01 deg (green) / 2.05 deg (blue) off the true aim, and the detector
+  faithfully fitted the chord (0.31 / 0.04 deg off it) while the solved
+  aim sat 2.71 / 2.01 deg off. The blue table's green 6-ball moved
+  along the solved aim line in the same change, so the red ball still
+  wins the target pick and the depicted shot stays flagged blocked.
 - **Android 10-15 checklist** (all implemented in `CaptureService` /
   `OverlayService` / `MainActivity`): `FOREGROUND_SERVICE_MEDIA_PROJECTION`
   declared (12+); `POST_NOTIFICATIONS` requested at runtime (13+); the

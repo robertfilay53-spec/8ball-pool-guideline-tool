@@ -93,9 +93,21 @@ def make_table(path, felt, cue, target, pocket, extra_balls):
     ex, ey = cue[0] - ax * 170, cue[1] - ay * 170
     draw.line([sx, sy, ex, ey], fill=(150, 100, 50), width=7)
 
-    # the game's own white guideline: cue edge -> just before the target
+    # the game's own white guideline: a segment of the TRUE aim ray
+    # (cue -> ghost point), from the cue ball's edge to the foot of
+    # the perpendicular from the target centre onto the ray, pulled
+    # back along the ray so it stays 2 px clear of the target ball.
+    # (v1.0.28: the old chord ran cue-edge -> target-edge and sat
+    # 3.01 deg (green) / 2.05 deg (blue) off the true aim ray, so the
+    # detector was measured against a line that was not the aim.)
     gx0, gy0 = cue[0] + ax * (BALL_R + 2), cue[1] + ay * (BALL_R + 2)
-    gx1, gy1 = tx - ax * (BALL_R + 2), ty - ay * (BALL_R + 2)
+    foot_dist = (tx - cue[0]) * ax + (ty - cue[1]) * ay
+    fx, fy = cue[0] + ax * foot_dist, cue[1] + ay * foot_dist
+    foot_perp = math.hypot(tx - fx, ty - fy)
+    end_dist = foot_dist
+    if foot_perp < BALL_R + 2:
+        end_dist = foot_dist - math.sqrt((BALL_R + 2) ** 2 - foot_perp ** 2)
+    gx1, gy1 = cue[0] + ax * end_dist, cue[1] + ay * end_dist
     draw.line([gx0, gy0, gx1, gy1], fill=(255, 255, 255), width=3)
     # ghost-ball marker (small white circle at G)
     draw.ellipse([gx - 5, gy - 5, gx + 5, gy + 5], outline=(255, 255, 255), width=2)
@@ -170,13 +182,22 @@ make_table(os.path.join(OUT, "demo_table_green_bank_rerank.png"),
 # geometrically unreachable (cut ~141 deg, the solver correctly rejects
 # it); the shot solves via the top-right pocket instead (cut ~17 deg,
 # the smallest cut). The test only asserts that a shot solves.
+# The green 6-ball sits on the SOLVED shot's aim line (12.6 px off it
+# at working res, inside the one-diameter blocked threshold), so the
+# depicted shot is flagged blocked. (v1.0.28: it moved from (500,350)
+# to (635,266), 160 px along the solved aim line: once the guideline
+# became the true aim ray, the old spot scored better than the red
+# ball in the target pick (green 24.7 vs red 26.1) and would have
+# flipped the target. The move keeps it exactly as far off the
+# solved aim line, so it still blocks the depicted shot, while the
+# red ball now wins the pick by ~9 points.)
 blue_balls = [
     (950, 300, "yellow", False, 1),
     (600, 420, "blue", False, 2),
     (450, 180, "orange", False, 5),
     (1000, 500, "purple", False, 4),
     (700, 540, "black", False, 8),
-    (500, 350, "green", False, 6),
+    (635, 266, "green", False, 6),
     (1100, 200, "yellow", True, 9),
     (350, 300, "blue", True, 10),
     (900, 450, "red", True, 11),
