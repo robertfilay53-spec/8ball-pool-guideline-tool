@@ -11,9 +11,11 @@ import com.poolguide.tool.data.CalibrationStore
 import com.poolguide.tool.geometry.Segment
 import com.poolguide.tool.geometry.ShotSolver
 import com.poolguide.tool.geometry.Vec2
+import com.poolguide.tool.overlay.Anchor
 import com.poolguide.tool.overlay.LineOverlayManager
 import com.poolguide.tool.overlay.OverlayService
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -129,6 +131,82 @@ class OverlayInstrumentedTest {
         // Losing the lock hides them again (table moved / lost).
         instrumentation.runOnMainSync { manager.update(unlocked) }
         assertEquals("lost lock must hide lines again", 0, manager.lineWindowCount)
+
+        instrumentation.runOnMainSync { manager.removeAll() }
+    }
+
+    @Test
+    fun editMode_freezesShotShowsHandlesAndSurvivesGuidelineLoss() {
+        val ctx = appContext()
+        assertTrue(
+            "overlay permission must be granted for this test",
+            Settings.canDrawOverlays(ctx)
+        )
+        val store = CalibrationStore(ctx).apply {
+            guidesHidden = false
+            showAllShots = true
+        }
+        val manager = LineOverlayManager(ctx, store)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+
+        // Live mode: best shot + 2 faint candidates = 8 windows.
+        instrumentation.runOnMainSync { manager.update(shotResult()) }
+        assertEquals(8, manager.lineWindowCount)
+        assertEquals(0, manager.handleWindowCount)
+        assertFalse(manager.isEditMode)
+
+        // Enter edit mode: best shot only (4 windows) + 2 handles.
+        instrumentation.runOnMainSync { manager.toggleEditMode() }
+        assertTrue(manager.isEditMode)
+        assertEquals(4, manager.lineWindowCount)
+        assertEquals(2, manager.handleWindowCount)
+
+        // Drag the ghost anchor 10 px right (working coords): the
+        // corrected aim line follows; the pocket stays the same.
+        val frozen = shotResult().shot!!
+        instrumentation.runOnMainSync {
+            manager.applyAnchorDrag(Anchor.GHOST, Vec2(10.0, 0.0))
+        }
+        val edited = manager.editedShot!!
+        assertEquals(frozen.ghostPoint.x + 10.0, edited.ghostPoint.x, 0.0)
+        assertEquals(frozen.targetLine.end.x, edited.targetLine.end.x, 0.0)
+        assertEquals(frozen.targetLine.end.y, edited.targetLine.end.y, 0.0)
+        assertEquals(4, manager.lineWindowCount)
+
+        // Edit mode keeps drawing even with no guideline (the user is
+        // editing precisely because detection missed): 20 frames with
+        // no guideline must not hide the lines.
+        val noGuideline = shotResult().copy(guideline = emptyList())
+        repeat(20) { instrumentation.runOnMainSync { manager.update(noGuideline) } }
+        assertEquals(4, manager.lineWindowCount)
+        assertEquals(2, manager.handleWindowCount)
+
+        // Leaving edit mode resumes live detection (8 windows again).
+        instrumentation.runOnMainSync { manager.toggleEditMode() }
+        assertFalse(manager.isEditMode)
+        assertEquals(0, manager.handleWindowCount)
+        instrumentation.runOnMainSync { manager.update(shotResult()) }
+        assertEquals(8, manager.lineWindowCount)
+
+        instrumentation.runOnMainSync { manager.removeAll() }
+    }
+
+    @Test
+    fun editMode_withNoShotDoesNothing() {
+        val ctx = appContext()
+        assertTrue(
+            "overlay permission must be granted for this test",
+            Settings.canDrawOverlays(ctx)
+        )
+        val store = CalibrationStore(ctx).apply { guidesHidden = false }
+        val manager = LineOverlayManager(ctx, store)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+
+        // No update() call yet, so there is no shot to edit.
+        instrumentation.runOnMainSync { manager.toggleEditMode() }
+        assertFalse(manager.isEditMode)
+        assertEquals(0, manager.handleWindowCount)
+        assertEquals(0, manager.lineWindowCount)
 
         instrumentation.runOnMainSync { manager.removeAll() }
     }

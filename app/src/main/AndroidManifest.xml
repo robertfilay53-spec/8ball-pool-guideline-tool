@@ -46,6 +46,11 @@
             android:exported="false"
             android:label="@string/calibration_title" />
 
+        <activity
+            android:name=".ui.PracticeActivity"
+            android:exported="false"
+            android:label="@string/practice_title" />
+
         <service
             android:name=".capture.CaptureService"
             android:exported="false"
