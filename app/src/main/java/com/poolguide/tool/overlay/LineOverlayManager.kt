@@ -646,6 +646,86 @@ class LineOverlayManager(
                 Segment(map(pocket), map(pocket)),
                 POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = 18f
             )
+        } else if (result.combo != null && store.bankLinesEnabled) {
+            // Combo (v1.0.13): cue -> first ball -> second ball ->
+            // pocket, drawn exactly the way practice mode draws it:
+            // each leg is a direct shot in the standard colours
+            // (green aim, yellow target, white deflection) — there
+            // is no combo colour, in practice or here. The first
+            // leg's target line ends at the intermediate ghost
+            // point, not a pocket, so the pocket ring sits only on
+            // the second leg's pocket. One cut-angle label per leg,
+            // in the aim green (practice mode's colour for combo
+            // legs), each with its own thin-cut warning. Six
+            // smoothed segments, so a combo never lerps into any
+            // other shot. This branch sits after the two-rail kick:
+            // a combo is only shown when it is the only shot left
+            // before a kiss.
+            val combo = result.combo
+            val smoothed = smoother.smoothList(
+                listOf(
+                    Segment(map(combo.firstShot.aimLine.start), map(combo.firstShot.aimLine.end)),
+                    Segment(map(combo.firstShot.targetLine.start), map(combo.firstShot.targetLine.end)),
+                    Segment(map(combo.firstShot.deflectionLine.start), map(combo.firstShot.deflectionLine.end)),
+                    Segment(map(combo.secondShot.aimLine.start), map(combo.secondShot.aimLine.end)),
+                    Segment(map(combo.secondShot.targetLine.start), map(combo.secondShot.targetLine.end)),
+                    Segment(map(combo.secondShot.deflectionLine.start), map(combo.secondShot.deflectionLine.end))
+                ),
+                result.status
+            )
+            out += DrawLine(smoothed[0], AIM_COLOR, AIM_WIDTH_PX)
+            out += DrawLine(smoothed[1], TARGET_COLOR, LINE_WIDTH_PX)
+            out += DrawLine(smoothed[2], DEFLECT_COLOR, LINE_WIDTH_PX)
+            out += DrawLine(smoothed[3], AIM_COLOR, AIM_WIDTH_PX)
+            out += DrawLine(smoothed[4], TARGET_COLOR, LINE_WIDTH_PX)
+            out += DrawLine(smoothed[5], DEFLECT_COLOR, LINE_WIDTH_PX)
+            labels = labelsFor(combo.firstShot, smoothed[0], result, AIM_COLOR) +
+                labelsFor(combo.secondShot, smoothed[3], result, AIM_COLOR)
+            val pocket = combo.secondShot.targetLine.end
+            out += DrawLine(
+                Segment(map(pocket), map(pocket)),
+                POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = 18f
+            )
+        } else if (result.kiss != null && store.bankLinesEnabled) {
+            // Kiss (v1.0.13): cue kisses the first ball thin and its
+            // deflection carries it into the second ball's ghost
+            // point, potting the second ball — drawn exactly the way
+            // practice mode draws it: each leg is a direct shot in
+            // the standard colours (green aim, yellow target, white
+            // deflection). The kiss leg's target line is the kissed
+            // ball's departure line (it pots nothing); its
+            // deflection is the refined cue direction toward the
+            // second ghost. The pocket ring sits only on the second
+            // leg's pocket. One cut-angle label per leg, in the aim
+            // green, each with its own thin-cut warning. Six
+            // smoothed segments, so a kiss never lerps into any
+            // other shot. This branch sits last: a kiss is only
+            // shown when it is the only shot left, after the combo.
+            val kiss = result.kiss
+            val smoothed = smoother.smoothList(
+                listOf(
+                    Segment(map(kiss.kissShot.aimLine.start), map(kiss.kissShot.aimLine.end)),
+                    Segment(map(kiss.kissShot.targetLine.start), map(kiss.kissShot.targetLine.end)),
+                    Segment(map(kiss.kissShot.deflectionLine.start), map(kiss.kissShot.deflectionLine.end)),
+                    Segment(map(kiss.secondShot.aimLine.start), map(kiss.secondShot.aimLine.end)),
+                    Segment(map(kiss.secondShot.targetLine.start), map(kiss.secondShot.targetLine.end)),
+                    Segment(map(kiss.secondShot.deflectionLine.start), map(kiss.secondShot.deflectionLine.end))
+                ),
+                result.status
+            )
+            out += DrawLine(smoothed[0], AIM_COLOR, AIM_WIDTH_PX)
+            out += DrawLine(smoothed[1], TARGET_COLOR, LINE_WIDTH_PX)
+            out += DrawLine(smoothed[2], DEFLECT_COLOR, LINE_WIDTH_PX)
+            out += DrawLine(smoothed[3], AIM_COLOR, AIM_WIDTH_PX)
+            out += DrawLine(smoothed[4], TARGET_COLOR, LINE_WIDTH_PX)
+            out += DrawLine(smoothed[5], DEFLECT_COLOR, LINE_WIDTH_PX)
+            labels = labelsFor(kiss.kissShot, smoothed[0], result, AIM_COLOR) +
+                labelsFor(kiss.secondShot, smoothed[3], result, AIM_COLOR)
+            val pocket = kiss.secondShot.targetLine.end
+            out += DrawLine(
+                Segment(map(pocket), map(pocket)),
+                POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = 18f
+            )
         }
         return DrawnOverlay(out, labels)
     }

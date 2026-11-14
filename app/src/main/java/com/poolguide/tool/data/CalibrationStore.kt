@@ -26,7 +26,9 @@ class CalibrationStore(context: Context) {
         get() = prefs.getBoolean(KEY_GUIDES_HIDDEN, false)
         set(value) = prefs.edit().putBoolean(KEY_GUIDES_HIDDEN, value).apply()
 
-    /** Draw one-rail bank and kick lines when no direct shot exists. */
+    /** Draw one-rail bank and kick lines when no direct shot exists
+     * (v1.0.13: also the two-rail bank/kick and combo/kiss fallback
+     * lines — every family the live overlay draws after direct). */
     var bankLinesEnabled: Boolean
         get() = prefs.getBoolean(KEY_BANK_ENABLED, true)
         set(value) = prefs.edit().putBoolean(KEY_BANK_ENABLED, value).apply()

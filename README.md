@@ -5,8 +5,9 @@ screen and draws aim lines over it: the cue-ball aim line, the target ball's
 path to the pocket, and the cue ball's deflection after impact, plus one-rail
 bank shots when no direct shot exists, two-rail banks when no one-rail
 bank solves, one-rail kick shots (cue ball off a rail first) when the
-kick's cut angle beats the best one-rail bank's, and two-rail kick shots
-when nothing else solves.
+kick's cut angle beats the best one-rail bank's, two-rail kick shots
+when nothing else solves, and combo and kiss shots as the last resort
+when no other family solves.
 
 **It is a separate app. You install the original 8 Ball Pool from the Play
 Store (or APKPure) and this tool separately. The two work together on your
@@ -152,6 +153,23 @@ screen. Nothing about the game is changed.**
     the detection and the physics leave out. Practice mode shows the
     same readout and warning for every mode (direct, bank, kick,
     combo, kiss), one label per leg.
+14. **Combo and kiss shots are the last resort, and they trigger
+    rarely.** Since v1.0.13 the live overlay also draws combo shots
+    (cue -> first ball -> second ball -> pocket) and kiss shots
+    (cue deflects off the first ball into the second ball, then
+    into the pocket) — but only when no direct shot, no one-rail
+    bank, no one-rail kick, no two-rail bank, and no two-rail kick
+    solves. A combo never displaces a simpler shot, and a kiss
+    never displaces a combo. On the practice table the earlier
+    families fail only when the cue sits nearly touching the target
+    ball near a corner pocket (about 19 px apart) — on a real table
+    that configuration is rare, so most of the time the overlay
+    shows a simpler shot and the combo/kiss fallback never appears.
+    Both are geometry only, like the other fallback families: no
+    spin, no throw, no cushion compression, and the second leg's cut
+    inherits whatever error the first leg's detection carries. Each
+    leg gets its own cut-angle readout, and a leg over 80 degrees
+    gets the thin-cut warning.
 
 ## How it works
 

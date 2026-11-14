@@ -1,7 +1,6 @@
 package com.poolguide.tool.cv
 
 import com.poolguide.tool.data.GameProfile
-import com.poolguide.tool.geometry.Rail
 import com.poolguide.tool.geometry.Segment
 import com.poolguide.tool.geometry.ShotSolver
 import com.poolguide.tool.geometry.Vec2
@@ -12,7 +11,6 @@ import org.opencv.core.Mat
 import org.opencv.core.Rect
 import org.opencv.core.Size
 import org.opencv.imgproc.Imgproc
-import kotlin.math.abs
 
 /** Loads OpenCV once. Tries the AAR's initLocal() first, then a direct
  * System.loadLibrary("opencv_java4") fallback. */
@@ -217,6 +215,8 @@ class CvPipeline(
             bank2 = outcome.bank2,
             kick = outcome.kick,
             kick2 = outcome.kick2,
+            combo = outcome.combo,
+            kiss = outcome.kiss,
             allShots = outcome.allShots,
             tableLocked = locked,
             tableFromFallback = tableFromFallback,
@@ -272,9 +272,10 @@ class CvPipeline(
         }
     }
 
-    /** One frame's solve: best direct shot, every candidate shot, a
-     * one-rail bank fallback, a one-rail kick fallback, a two-rail
-     * bank fallback, a two-rail kick fallback, and the status line. */
+    /** One frame's solve: best direct shot, every candidate shot, and
+     * the fallback chain (one-rail bank, one-rail kick, two-rail
+     * bank, two-rail kick, combo, kiss — see [solveFallback]) plus
+     * the status line. */
     private data class SolveOutcome(
         val shot: ShotSolver.ShotSolution?,
         val bank: ShotSolver.BankSolution?,
@@ -289,41 +290,39 @@ class CvPipeline(
         /** Best two-rail kick (v1.0.11), set only when no direct
          * shot, no one-rail bank, no one-rail kick, and no two-rail
          * bank solves: the last resort. */
-        val kick2: ShotSolver.TwoRailKickSolution? = null
+        val kick2: ShotSolver.TwoRailKickSolution? = null,
+        /** Best combo (v1.0.13), set only when no direct shot, no
+         * one-rail bank, no one-rail kick, no two-rail bank, and no
+         * two-rail kick solves: the last resort before a kiss. A
+         * combo never displaces any other shot in the live overlay. */
+        val combo: ShotSolver.ComboSolution? = null,
+        /** Best kiss (v1.0.13), set only when no combo solves
+         * either: the last resort of all. A kiss never displaces
+         * a combo. */
+        val kiss: ShotSolver.KissSolution? = null
     )
 
     /**
      * Pick the target ball (nearest ball along the guideline ray from the cue
      * ball; nearest ball overall when no guideline is visible) and the pocket
-     * with the smallest cut angle, then solve. Falls back to a one-rail bank
-     * or a one-rail kick when no direct shot is possible, to a two-rail
-     * bank when neither one-rail shot solves, and to a two-rail kick
-     * when nothing else solves.
+     * with the smallest cut angle, then solve. Falls back through the
+     * chain in [solveFallback] when no direct shot is possible: one-rail
+     * bank or kick, two-rail bank, two-rail kick, combo, then kiss.
      *
      * Ranking (best shot stays honest): direct first, then the better of
      * the one-rail bank and the one-rail kick, then two-rail banks as a
-     * last resort, then two-rail kicks as the last resort after that.
-     * A bank and a kick are both one-rail shots ranked by the same
-     * number — the direct cut angle of the underlying solve, the
-     * codebase's established difficulty proxy — so the smaller cut
-     * wins, and a tie goes to the bank, the established fallback. A
-     * kick never displaces a direct shot. The bank fallback is now
-     * best-by-cut (it used to return the first bank in pocket/rail
-     * order); practice mode already ranked banks by cut, so the live
-     * overlay now shows the easiest bank, not the first one found —
-     * and the bank-vs-kick comparison is between the two best shots,
-     * not between a first-found bank and a best kick. The two-rail
-     * fallback applies the v1.0.7 corner guards to BOTH contacts (the
-     * one-rail bank fallback does not apply them, unchanged from
-     * v1.0.3); the kick fallback applies them to its one contact, for
-     * the same reason — a contact inside a pocket's jaws or on the
-     * pocket is not a clean rail shot, and a fallback shot is already
-     * the least reliable shot the tool shows. The two-rail kick
-     * fallback (v1.0.11) applies the same guards to BOTH of its
-     * contacts, for the same reason — and it is only tried after the
-     * two-rail bank search comes back empty, because a two-rail kick
-     * compounds real-table error twice (two cushion contacts, each
-     * fitted to synthetic data, real-table behaviour unmeasured).
+     * last resort, then two-rail kicks as the last resort after that,
+     * then combos, then kisses as the last resort of all. A bank and
+     * a kick are both one-rail shots ranked by the same number — the
+     * direct cut angle of the underlying solve, the codebase's
+     * established difficulty proxy — so the smaller cut wins, and a
+     * tie goes to the bank, the established fallback. A kick never
+     * displaces a direct shot. The bank fallback is now best-by-cut
+     * (it used to return the first bank in pocket/rail order);
+     * practice mode already ranked banks by cut, so the live overlay
+     * now shows the easiest bank, not the first one found — and the
+     * bank-vs-kick comparison is between the two best shots, not
+     * between a first-found bank and a best kick.
      */
     private fun solveFor(
         cue: Ball?,
@@ -352,137 +351,32 @@ class CvPipeline(
             return SolveOutcome(best, null, all, "Shot to pocket$warn")
         }
 
-        // No direct shot: the best one-rail bank and the best one-rail
-        // kick, each ranked by the direct cut angle (easiest pot
-        // first), across all pockets and all four rails. The kick
-        // contact must pass the corner guards (same numbers as
-        // PracticeState): inside the rail span, four ball radii clear
-        // of the corners, and not on the pocket.
+        // No direct shot: run the fallback chain (one-rail bank or
+        // kick, two-rail bank, two-rail kick, combo, kiss — best
+        // first, see solveFallback in LiveFallback.kt). The picked
+        // target is the first ball for a combo or kiss; every other
+        // ball is a candidate second ball (the ball that pots).
         val tableRect = table ?: return SolveOutcome(null, null, emptyList(), "No shot found")
-        val rails = railsOf(tableRect)
-        var bestBank: ShotSolver.BankSolution? = null
-        var bestBankCut = Double.MAX_VALUE
-        for (pocket in pockets) {
-            for (rail in rails) {
-                val bank = ShotSolver.solveBank(cue.center, target.center, pocket, rail, radius)
-                    ?: continue
-                if (bank.direct.cutAngleDegrees < bestBankCut) {
-                    bestBank = bank
-                    bestBankCut = bank.direct.cutAngleDegrees
-                }
-            }
-        }
-        var bestKick: ShotSolver.KickSolution? = null
-        var bestKickCut = Double.MAX_VALUE
-        for (pocket in pockets) {
-            for ((index, rail) in rails.withIndex()) {
-                val kick = ShotSolver.solveKick(cue.center, target.center, pocket, rail, radius)
-                    ?: continue
-                if (!bankContactIsValid(kick.railContact, index, tableRect, pocket, radius)) continue
-                if (kick.direct.cutAngleDegrees < bestKickCut) {
-                    bestKick = kick
-                    bestKickCut = kick.direct.cutAngleDegrees
-                }
-            }
-        }
-        // Smaller cut wins; a tie goes to the bank, the established
-        // fallback (the cut angles are equal, so either shot is as
-        // makeable as the other). Neither solving falls through to
-        // the two-rail search below.
-        when (ShotSolver.pickOneRailFallback(
-            bestBankCut.takeIf { bestBank != null },
-            bestKickCut.takeIf { bestKick != null }
+        val others = balls.filter { it.id != cue.id && it.id != target.id }
+            .map { it.center }
+        return when (val fallback = solveFallback(
+            cue.center, target.center, others, pockets, tableRect, radius
         )) {
-            ShotSolver.OneRailFallback.KICK ->
-                return SolveOutcome(null, null, emptyList(), "Kick shot (one rail) to pocket", kick = bestKick)
-            ShotSolver.OneRailFallback.BANK ->
-                return SolveOutcome(null, bestBank, emptyList(), "Bank shot (one rail) to pocket")
-            ShotSolver.OneRailFallback.NONE -> Unit
+            is FallbackShot.Bank ->
+                SolveOutcome(null, fallback.solution, emptyList(), "Bank shot (one rail) to pocket")
+            is FallbackShot.Kick ->
+                SolveOutcome(null, null, emptyList(), "Kick shot (one rail) to pocket", kick = fallback.solution)
+            is FallbackShot.Bank2 ->
+                SolveOutcome(null, null, emptyList(), "Bank shot (two rails) to pocket", bank2 = fallback.solution)
+            is FallbackShot.Kick2 ->
+                SolveOutcome(null, null, emptyList(), "Kick shot (two rails) to pocket", kick2 = fallback.solution)
+            is FallbackShot.Combo ->
+                SolveOutcome(null, null, emptyList(), "Combo shot to pocket", combo = fallback.solution)
+            is FallbackShot.Kiss ->
+                SolveOutcome(null, null, emptyList(), "Kiss shot to pocket", kiss = fallback.solution)
+            FallbackShot.None ->
+                SolveOutcome(null, null, emptyList(), "No shot found for this ball")
         }
-
-        // No one-rail bank or kick either: try two-rail banks, ranked by the
-        // direct cut angle (easiest pot first). Both contacts must
-        // pass the corner guards (same numbers as PracticeState):
-        // inside the rail span, four ball radii clear of the corners,
-        // and not on the pocket.
-        var bestTwoRail: ShotSolver.TwoRailBankSolution? = null
-        var bestTwoRailCut = Double.MAX_VALUE
-        for (pocket in pockets) {
-            for ((index1, rail1) in rails.withIndex()) {
-                for ((index2, rail2) in rails.withIndex()) {
-                    if (index1 == index2) continue
-                    if (abs((pocket - rail1.point).dot(rail1.normal)) < 1.0) continue
-                    if (abs((pocket - rail2.point).dot(rail2.normal)) < 1.0) continue
-                    val bank2 = ShotSolver.solveTwoRailBank(
-                        cue.center, target.center, pocket, rail1, rail2, radius
-                    ) ?: continue
-                    if (!bankContactIsValid(bank2.railContacts[0], index1, tableRect, pocket, radius)) continue
-                    if (!bankContactIsValid(bank2.railContacts[1], index2, tableRect, pocket, radius)) continue
-                    if (bank2.direct.cutAngleDegrees < bestTwoRailCut) {
-                        bestTwoRail = bank2
-                        bestTwoRailCut = bank2.direct.cutAngleDegrees
-                    }
-                }
-            }
-        }
-        if (bestTwoRail != null) {
-            return SolveOutcome(null, null, emptyList(), "Bank shot (two rails) to pocket", bank2 = bestTwoRail)
-        }
-
-        // No two-rail bank either: try two-rail kicks, ranked by the
-        // direct cut angle (easiest pot first). Both contacts must
-        // pass the corner guards (same numbers as PracticeState):
-        // inside the rail span, four ball radii clear of the corners,
-        // and not on the pocket. This is the last resort: a two-rail
-        // kick is only shown when it is the only shot left.
-        var bestTwoRailKick: ShotSolver.TwoRailKickSolution? = null
-        var bestTwoRailKickCut = Double.MAX_VALUE
-        for (pocket in pockets) {
-            for ((index1, rail1) in rails.withIndex()) {
-                for ((index2, rail2) in rails.withIndex()) {
-                    if (index1 == index2) continue
-                    // No pocket-on-rail skip here (unlike the bank
-                    // searches): a kick mirrors the ghost, never the
-                    // pocket, so a pocket on a rail is not
-                    // degenerate — the solver itself returns null
-                    // when the ghost sits on either rail.
-                    val kick2 = ShotSolver.solveTwoRailKick(
-                        cue.center, target.center, pocket, rail1, rail2, radius
-                    ) ?: continue
-                    if (!bankContactIsValid(kick2.railContacts[0], index1, tableRect, pocket, radius)) continue
-                    if (!bankContactIsValid(kick2.railContacts[1], index2, tableRect, pocket, radius)) continue
-                    if (kick2.direct.cutAngleDegrees < bestTwoRailKickCut) {
-                        bestTwoRailKick = kick2
-                        bestTwoRailKickCut = kick2.direct.cutAngleDegrees
-                    }
-                }
-            }
-        }
-        if (bestTwoRailKick != null) {
-            return SolveOutcome(null, null, emptyList(), "Kick shot (two rails) to pocket", kick2 = bestTwoRailKick)
-        }
-        return SolveOutcome(null, null, emptyList(), "No shot found for this ball")
-    }
-
-    /** The v1.0.7 corner guard, shared with PracticeState's bank
-     * solve (same numbers, same comment): the contact must lie inside
-     * its rail span, four ball radii clear of the corners, and not on
-     * the pocket. [railIndex] follows railsOf() order: 0 top, 1 bottom,
-     * 2 left, 3 right. */
-    private fun bankContactIsValid(
-        contact: Vec2,
-        railIndex: Int,
-        tableRect: TableRect,
-        pocket: Vec2,
-        ballRadiusPx: Double
-    ): Boolean {
-        val along = if (railIndex < 2) contact.x else contact.y
-        val lo = if (railIndex < 2) tableRect.topLeft.x + 4 * ballRadiusPx
-            else tableRect.topLeft.y + 4 * ballRadiusPx
-        val hi = if (railIndex < 2) tableRect.topRight.x - 4 * ballRadiusPx
-            else tableRect.bottomLeft.y - 4 * ballRadiusPx
-        if (along < lo || along > hi) return false
-        return contact.distanceTo(pocket) >= 2 * ballRadiusPx
     }
 
     private fun pickTarget(
@@ -519,12 +413,4 @@ class CvPipeline(
         }
         return best ?: others.minByOrNull { it.center.distanceTo(cue.center) }
     }
-
-    /** The four rails of the table rect, normals pointing into the table. */
-    private fun railsOf(t: TableRect): List<Rail> = listOf(
-        Rail(t.topLeft, Vec2(0.0, 1.0)),   // top rail, normal points down
-        Rail(t.bottomLeft, Vec2(0.0, -1.0)), // bottom rail, normal points up
-        Rail(t.topLeft, Vec2(1.0, 0.0)),   // left rail, normal points right
-        Rail(t.topRight, Vec2(-1.0, 0.0))  // right rail, normal points left
-    )
 }
