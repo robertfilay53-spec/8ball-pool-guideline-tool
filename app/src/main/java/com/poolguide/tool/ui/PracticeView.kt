@@ -10,6 +10,7 @@ import android.view.View
 import com.poolguide.tool.cv.TableRect
 import com.poolguide.tool.geometry.BallGroupTag
 import com.poolguide.tool.geometry.CutAngleLabel
+import com.poolguide.tool.geometry.PocketDistanceLabel
 import com.poolguide.tool.geometry.Segment
 import com.poolguide.tool.geometry.ShotSolver
 import com.poolguide.tool.geometry.Vec2
@@ -139,6 +140,15 @@ class PracticeView @JvmOverloads constructor(
         style = Paint.Style.FILL
         textAlign = Paint.Align.CENTER
     }
+    /** Pocket-distance readout text (v1.0.15): centred on its anchor,
+     * colour set per shot family at draw time, like the cut-angle
+     * label — the same total the live overlay shows, so practice and
+     * live agree. */
+    private val distanceTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFF00E676.toInt()
+        style = Paint.Style.FILL
+        textAlign = Paint.Align.CENTER
+    }
     /** Group-tag text (v1.0.14): centred on its anchor, colour set
      * per ball at draw time (white cue, blue middle, red target —
      * the ball's own paint colour). Text size is set from the view
@@ -209,6 +219,14 @@ class PracticeView @JvmOverloads constructor(
                 // No shot in this layout; the status line says so.
             }
         }
+        // Pocket-distance readout (v1.0.15): one label per solution,
+        // at the real pocket, in the shot family's colour.
+        val distance = distanceFor(solution)
+        if (distance != null) {
+            drawPocketDistance(
+                canvas, distance.path, distance.pocket, distance.arrival, distance.color
+            )
+        }
         // Balls.
         val ballR = (BALL_RADIUS_PX * scale).toFloat()
         for (ball in st.balls()) {
@@ -255,6 +273,98 @@ class PracticeView @JvmOverloads constructor(
                 )
             }
         }
+    }
+
+    /** The pocket-distance inputs for one practice solution
+     * (v1.0.15): the travelled path, the real pocket, the arrival
+     * segment, and the shot family's colour. Null when no shot
+     * solves. */
+    private data class DistanceSpec(
+        val path: List<Segment>,
+        val pocket: Vec2,
+        val arrival: Segment,
+        val color: Int
+    )
+
+    private fun distanceFor(
+        solution: PracticeState.PracticeSolution?
+    ): DistanceSpec? {
+        return when (solution) {
+            is PracticeState.PracticeSolution.Direct -> DistanceSpec(
+                PocketDistanceLabel.pathSegments(solution.shot),
+                solution.shot.targetLine.end,
+                solution.shot.targetLine,
+                aimPaint.color
+            )
+            is PracticeState.PracticeSolution.Bank -> DistanceSpec(
+                PocketDistanceLabel.pathSegments(solution.solution),
+                solution.solution.bankPath.last().end,
+                solution.solution.bankPath.last(),
+                bankPaint.color
+            )
+            is PracticeState.PracticeSolution.Bank2 -> DistanceSpec(
+                PocketDistanceLabel.pathSegments(solution.solution),
+                solution.solution.bankPath.last().end,
+                solution.solution.bankPath.last(),
+                bankPaint.color
+            )
+            is PracticeState.PracticeSolution.Kick -> DistanceSpec(
+                PocketDistanceLabel.pathSegments(solution.solution),
+                solution.solution.direct.targetLine.end,
+                solution.solution.direct.targetLine,
+                kickPaint.color
+            )
+            is PracticeState.PracticeSolution.Kick2 -> DistanceSpec(
+                PocketDistanceLabel.pathSegments(solution.solution),
+                solution.solution.direct.targetLine.end,
+                solution.solution.direct.targetLine,
+                kickPaint.color
+            )
+            is PracticeState.PracticeSolution.Combo -> DistanceSpec(
+                PocketDistanceLabel.pathSegments(solution.solution),
+                solution.solution.secondShot.targetLine.end,
+                solution.solution.secondShot.targetLine,
+                aimPaint.color
+            )
+            is PracticeState.PracticeSolution.Kiss -> DistanceSpec(
+                PocketDistanceLabel.pathSegments(solution.solution),
+                solution.solution.secondShot.targetLine.end,
+                solution.solution.secondShot.targetLine,
+                aimPaint.color
+            )
+            null -> null
+        }
+    }
+
+    /** Pocket-distance readout for one solved shot (v1.0.15), drawn
+     * in view coordinates: the total travelled path in ball
+     * diameters, just past the pocket ring on the arrival direction
+     * ([PocketDistanceLabel.labelAnchor]), in the shot family's
+     * colour. One label per solution, at the real pocket — combo
+     * first legs and kiss legs end at a ghost point, not a pocket,
+     * so they get no ring and no distance label of their own. */
+    private fun drawPocketDistance(
+        canvas: Canvas,
+        pathSegments: List<Segment>,
+        pocket: Vec2,
+        arrival: Segment,
+        labelColor: Int
+    ) {
+        val pocketV = toView(pocket)
+        val arrivalV = Segment(toView(arrival.start), toView(arrival.end))
+        val radiusViewPx = BALL_RADIUS_PX * scale
+        val ringViewPx = BALL_RADIUS_PX * 1.8 * scale
+        val anchor = PocketDistanceLabel.labelAnchor(
+            pocketV, arrivalV.end - arrivalV.start, radiusViewPx, ringViewPx
+        )
+        distanceTextPaint.color = labelColor
+        distanceTextPaint.textSize = (16.0 * scale).toFloat()
+        canvas.drawText(
+            PocketDistanceLabel.format(
+                PocketDistanceLabel.totalBallDiameters(pathSegments, BALL_RADIUS_PX)
+            ),
+            anchor.x.toFloat(), anchor.y.toFloat(), distanceTextPaint
+        )
     }
 
     /** The shot segments of a solution, in logical coordinates — the

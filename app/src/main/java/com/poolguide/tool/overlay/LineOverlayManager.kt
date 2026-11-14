@@ -21,6 +21,7 @@ import com.poolguide.tool.data.CalibrationStore
 import com.poolguide.tool.data.DiagnosticsLog
 import com.poolguide.tool.geometry.BallGroupTag
 import com.poolguide.tool.geometry.CutAngleLabel
+import com.poolguide.tool.geometry.PocketDistanceLabel
 import com.poolguide.tool.geometry.Segment
 import com.poolguide.tool.geometry.ShotSolver
 import com.poolguide.tool.geometry.Vec2
@@ -70,6 +71,9 @@ class LineOverlayManager(
          * white. */
         private const val KICK_COLOR = 0xFFFF4081.toInt() // magenta
         private const val POCKET_COLOR = 0xFFFF5252.toInt() // red ring
+        /** Pocket-ring radius (v1.0.15): the distance label anchors
+         * just past this ring, so the two share one constant. */
+        private const val RING_RADIUS_PX = 18f
         /** Thin-cut warning (v1.0.12): amber, distinct from every line
          * family (green aim, yellow target, white deflection, cyan
          * bank, magenta kick, red ring) so the warning is never
@@ -122,12 +126,16 @@ class LineOverlayManager(
 
     private val lineWindows = mutableListOf<LineWindow>()
     private val handleWindows = mutableListOf<HandleWindow>()
-    /** Cut-angle label windows (v1.0.12): one small TextView window per
-     * label, managed exactly like the line windows (reuse by index,
-     * removed with the lines) so a label can never outlive its shot.
-     * Kept separate from [lineWindows] on purpose: the existing
-     * line-window counts (4 for a direct shot, 8 with all shots) are
-     * pinned by instrumented tests and must not change. */
+    /** Cut-angle label windows (v1.0.12) + pocket-distance label
+     * (v1.0.15): one small TextView window per label, managed exactly
+     * like the line windows (reuse by index, removed with the lines)
+     * so a label can never outlive its shot. Kept separate from
+     * [lineWindows] on purpose: the existing line-window counts (4
+     * for a direct shot, 8 with all shots) are pinned by
+     * instrumented tests and must not change. The distance label IS
+     * a label, so it shares these windows: the pinned label counts
+     * move by +1 per shot (2 for a direct shot, 3 for a thin one) —
+     * see the instrumented tests. */
     private val labelWindows = mutableListOf<LabelWindow>()
     /** Group-tag windows (v1.0.14): one small TextView window per
      * detected ball ("C" cue, "8" eight, "S" solid, "ST" stripe,
@@ -162,7 +170,8 @@ class LineOverlayManager(
     val labelWindowCount: Int get() = labelWindows.size
 
     /** Test-only: the texts of the currently shown label windows, in
-     * window order (angle label first, thin-cut warning second). */
+     * window order (angle label first, thin-cut warning second,
+     * pocket-distance label last). */
     @androidx.annotation.VisibleForTesting
     val labelTexts: List<String> get() = labelWindows.map { it.view.text.toString() }
 
@@ -355,7 +364,8 @@ class LineOverlayManager(
      * pocket ring marks the (unchanged) target pocket. The cut-angle
      * label and thin-cut warning (v1.0.12) follow the frozen shot's
      * aim line and cue ball, in the aim green — EDIT mode draws a
-     * direct shot. */
+     * direct shot. The pocket-distance label (v1.0.15) sits beside
+     * the pocket ring, in the aim green. */
     private fun buildEditLines(
         shot: ShotSolver.ShotSolution,
         result: DetectionResult
@@ -377,12 +387,16 @@ class LineOverlayManager(
             ),
             DrawLine(
                 Segment(map(pocket), map(pocket)),
-                POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = 18f
+                POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = RING_RADIUS_PX
             )
         )
         return DrawnOverlay(
             lines = lines,
-            labels = labelsFor(shot, aim, result, AIM_COLOR),
+            labels = labelsFor(shot, aim, result, AIM_COLOR) +
+                distanceLabel(
+                    PocketDistanceLabel.pathSegments(shot),
+                    shot.targetLine.end, shot.targetLine, result, AIM_COLOR
+                ),
             tags = groupTags(result, lines.filter { !it.isRing }.map { it.segment })
         )
     }
@@ -422,6 +436,43 @@ class LineOverlayManager(
         BallColor.GREEN -> 0xFF00E676.toInt()
         BallColor.PURPLE -> 0xFFE040FB.toInt()
         BallColor.UNKNOWN -> 0xFFBDBDBD.toInt()
+    }
+
+    /** The pocket-distance label (v1.0.15) for one shot: the total
+     * travelled path in ball diameters, beside the pocket ring, in
+     * the shot family's colour. [pathSegments] are working
+     * coordinates, the same space as [pocket] and [arrival]; the
+     * anchor is computed in screen coordinates from the mapped
+     * pocket and the mapped arrival direction, so the text sits just
+     * past the ring and never on the target line. Appended AFTER the
+     * cut-angle labels, so the distance label is always last in
+     * window order. */
+    private fun distanceLabel(
+        pathSegments: List<Segment>,
+        pocket: Vec2,
+        arrival: Segment,
+        result: DetectionResult,
+        color: Int
+    ): DrawLabel {
+        val sx = result.scaleToScreenX
+        val sy = result.scaleToScreenY
+        val ballRadiusWorking = result.cueBall?.radiusPx ?: 9.0
+        val text = PocketDistanceLabel.format(
+            PocketDistanceLabel.totalBallDiameters(pathSegments, ballRadiusWorking)
+        )
+        val pocketScreen = Vec2(pocket.x * sx, pocket.y * sy)
+        val arrivalScreen = Segment(
+            Vec2(arrival.start.x * sx, arrival.start.y * sy),
+            Vec2(arrival.end.x * sx, arrival.end.y * sy)
+        )
+        val ballRadiusScreen = ballRadiusWorking * sx
+        val anchor = PocketDistanceLabel.labelAnchor(
+            pocketScreen,
+            arrivalScreen.end - arrivalScreen.start,
+            ballRadiusScreen,
+            RING_RADIUS_PX.toDouble()
+        )
+        return DrawLabel(text, color, anchor.x.toFloat(), anchor.y.toFloat())
     }
 
     /** The cut-angle label (+ thin-cut warning) for one shot, from a
@@ -564,7 +615,9 @@ class LineOverlayManager(
      * coordinates, Bloro's 40 px gate); candidates and the pocket ring
      * are drawn as detected. The cut-angle label (+ thin-cut warning,
      * v1.0.12) is built from the same smoothed aim segment as the
-     * lines, so it moves with them; only the best shot gets one. */
+     * lines, so it moves with them; only the best shot gets one. The
+     * pocket-distance label (v1.0.15) sits beside the pocket ring,
+     * last in window order, in the shot family's colour. */
     private fun buildDrawLines(result: DetectionResult): DrawnOverlay {
         val sx = result.scaleToScreenX
         val sy = result.scaleToScreenY
@@ -603,13 +656,19 @@ class LineOverlayManager(
             out += DrawLine(target, TARGET_COLOR, LINE_WIDTH_PX)
             out += DrawLine(deflection, DEFLECT_COLOR, LINE_WIDTH_PX)
             // Cut-angle label (v1.0.12): the best shot's angle, in the
-            // aim green, beside the smoothed aim line.
-            labels = labelsFor(shot, aim, result, AIM_COLOR)
+            // aim green, beside the smoothed aim line. Pocket-distance
+            // label (v1.0.15): the total path in ball diameters,
+            // beside the pocket ring, last in window order.
+            labels = labelsFor(shot, aim, result, AIM_COLOR) +
+                distanceLabel(
+                    PocketDistanceLabel.pathSegments(shot),
+                    shot.targetLine.end, shot.targetLine, result, AIM_COLOR
+                )
             // Pocket ring at the target pocket.
             val pocket = shot.targetLine.end
             out += DrawLine(
                 Segment(map(pocket), map(pocket)),
-                POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = 18f
+                POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = RING_RADIUS_PX
             )
         } else if (bank != null && store.bankLinesEnabled) {
             val smoothed = smoother.smoothList(
@@ -623,11 +682,15 @@ class LineOverlayManager(
             out += DrawLine(smoothed[0], AIM_COLOR, AIM_WIDTH_PX)
             out += DrawLine(smoothed[1], BANK_COLOR, LINE_WIDTH_PX)
             out += DrawLine(smoothed[2], BANK_COLOR, LINE_WIDTH_PX)
-            labels = labelsFor(bank.direct, smoothed[0], result, BANK_COLOR)
+            labels = labelsFor(bank.direct, smoothed[0], result, BANK_COLOR) +
+                distanceLabel(
+                    PocketDistanceLabel.pathSegments(bank),
+                    bank.bankPath.last().end, bank.bankPath.last(), result, BANK_COLOR
+                )
             val pocket = bank.bankPath.last().end
             out += DrawLine(
                 Segment(map(pocket), map(pocket)),
-                POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = 18f
+                POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = RING_RADIUS_PX
             )
         } else if (result.kick != null && store.bankLinesEnabled) {
             // One-rail kick (v1.0.10): the cue ball goes off the rail
@@ -652,11 +715,15 @@ class LineOverlayManager(
             out += DrawLine(smoothed[1], KICK_COLOR, LINE_WIDTH_PX)
             out += DrawLine(smoothed[2], TARGET_COLOR, LINE_WIDTH_PX)
             out += DrawLine(smoothed[3], DEFLECT_COLOR, LINE_WIDTH_PX)
-            labels = labelsFor(kick.direct, smoothed[0], result, KICK_COLOR)
+            labels = labelsFor(kick.direct, smoothed[0], result, KICK_COLOR) +
+                distanceLabel(
+                    PocketDistanceLabel.pathSegments(kick),
+                    kick.direct.targetLine.end, kick.direct.targetLine, result, KICK_COLOR
+                )
             val pocket = kick.direct.targetLine.end
             out += DrawLine(
                 Segment(map(pocket), map(pocket)),
-                POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = 18f
+                POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = RING_RADIUS_PX
             )
         } else if (result.bank2 != null && store.bankLinesEnabled) {
             // Two-rail bank (v1.0.9): same cyan rendering as a
@@ -676,11 +743,15 @@ class LineOverlayManager(
             out += DrawLine(smoothed[1], BANK_COLOR, LINE_WIDTH_PX)
             out += DrawLine(smoothed[2], BANK_COLOR, LINE_WIDTH_PX)
             out += DrawLine(smoothed[3], BANK_COLOR, LINE_WIDTH_PX)
-            labels = labelsFor(bank2.direct, smoothed[0], result, BANK_COLOR)
+            labels = labelsFor(bank2.direct, smoothed[0], result, BANK_COLOR) +
+                distanceLabel(
+                    PocketDistanceLabel.pathSegments(bank2),
+                    bank2.bankPath.last().end, bank2.bankPath.last(), result, BANK_COLOR
+                )
             val pocket = bank2.bankPath.last().end
             out += DrawLine(
                 Segment(map(pocket), map(pocket)),
-                POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = 18f
+                POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = RING_RADIUS_PX
             )
         } else if (result.kick2 != null && store.bankLinesEnabled) {
             // Two-rail kick (v1.0.11): the cue ball goes off two rails
@@ -709,11 +780,15 @@ class LineOverlayManager(
             out += DrawLine(smoothed[2], KICK_COLOR, LINE_WIDTH_PX)
             out += DrawLine(smoothed[3], TARGET_COLOR, LINE_WIDTH_PX)
             out += DrawLine(smoothed[4], DEFLECT_COLOR, LINE_WIDTH_PX)
-            labels = labelsFor(kick2.direct, smoothed[0], result, KICK_COLOR)
+            labels = labelsFor(kick2.direct, smoothed[0], result, KICK_COLOR) +
+                distanceLabel(
+                    PocketDistanceLabel.pathSegments(kick2),
+                    kick2.direct.targetLine.end, kick2.direct.targetLine, result, KICK_COLOR
+                )
             val pocket = kick2.direct.targetLine.end
             out += DrawLine(
                 Segment(map(pocket), map(pocket)),
-                POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = 18f
+                POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = RING_RADIUS_PX
             )
         } else if (result.combo != null && store.bankLinesEnabled) {
             // Combo (v1.0.13): cue -> first ball -> second ball ->
@@ -749,11 +824,16 @@ class LineOverlayManager(
             out += DrawLine(smoothed[4], TARGET_COLOR, LINE_WIDTH_PX)
             out += DrawLine(smoothed[5], DEFLECT_COLOR, LINE_WIDTH_PX)
             labels = labelsFor(combo.firstShot, smoothed[0], result, AIM_COLOR) +
-                labelsFor(combo.secondShot, smoothed[3], result, AIM_COLOR)
+                labelsFor(combo.secondShot, smoothed[3], result, AIM_COLOR) +
+                distanceLabel(
+                    PocketDistanceLabel.pathSegments(combo),
+                    combo.secondShot.targetLine.end, combo.secondShot.targetLine,
+                    result, AIM_COLOR
+                )
             val pocket = combo.secondShot.targetLine.end
             out += DrawLine(
                 Segment(map(pocket), map(pocket)),
-                POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = 18f
+                POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = RING_RADIUS_PX
             )
         } else if (result.kiss != null && store.bankLinesEnabled) {
             // Kiss (v1.0.13): cue kisses the first ball thin and its
@@ -789,11 +869,16 @@ class LineOverlayManager(
             out += DrawLine(smoothed[4], TARGET_COLOR, LINE_WIDTH_PX)
             out += DrawLine(smoothed[5], DEFLECT_COLOR, LINE_WIDTH_PX)
             labels = labelsFor(kiss.kissShot, smoothed[0], result, AIM_COLOR) +
-                labelsFor(kiss.secondShot, smoothed[3], result, AIM_COLOR)
+                labelsFor(kiss.secondShot, smoothed[3], result, AIM_COLOR) +
+                distanceLabel(
+                    PocketDistanceLabel.pathSegments(kiss),
+                    kiss.secondShot.targetLine.end, kiss.secondShot.targetLine,
+                    result, AIM_COLOR
+                )
             val pocket = kiss.secondShot.targetLine.end
             out += DrawLine(
                 Segment(map(pocket), map(pocket)),
-                POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = 18f
+                POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = RING_RADIUS_PX
             )
         }
         return DrawnOverlay(
