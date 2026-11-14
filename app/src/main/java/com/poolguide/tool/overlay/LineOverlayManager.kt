@@ -11,11 +11,13 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.TextView
 import android.widget.Toast
 import com.poolguide.tool.R
 import com.poolguide.tool.cv.DetectionResult
 import com.poolguide.tool.data.CalibrationStore
 import com.poolguide.tool.data.DiagnosticsLog
+import com.poolguide.tool.geometry.CutAngleLabel
 import com.poolguide.tool.geometry.Segment
 import com.poolguide.tool.geometry.ShotSolver
 import com.poolguide.tool.geometry.Vec2
@@ -65,6 +67,13 @@ class LineOverlayManager(
          * white. */
         private const val KICK_COLOR = 0xFFFF4081.toInt() // magenta
         private const val POCKET_COLOR = 0xFFFF5252.toInt() // red ring
+        /** Thin-cut warning (v1.0.12): amber, distinct from every line
+         * family (green aim, yellow target, white deflection, cyan
+         * bank, magenta kick, red ring) so the warning is never
+         * mistaken for a line. */
+        private const val WARNING_COLOR = 0xFFFFAB00.toInt() // amber
+        /** Cut-angle label text size. */
+        private const val LABEL_TEXT_SIZE_SP = 14f
         /** Non-best candidate shots (PoolAimAssist UX): thin, ~35% alpha
          * grey. The best shot keeps the full-colour lines — its yellow
          * target line is the highlight that marks the pick. */
@@ -103,8 +112,20 @@ class LineOverlayManager(
         val params: WindowManager.LayoutParams
     )
 
+    private data class LabelWindow(
+        val view: TextView,
+        val params: WindowManager.LayoutParams
+    )
+
     private val lineWindows = mutableListOf<LineWindow>()
     private val handleWindows = mutableListOf<HandleWindow>()
+    /** Cut-angle label windows (v1.0.12): one small TextView window per
+     * label, managed exactly like the line windows (reuse by index,
+     * removed with the lines) so a label can never outlive its shot.
+     * Kept separate from [lineWindows] on purpose: the existing
+     * line-window counts (4 for a direct shot, 8 with all shots) are
+     * pinned by instrumented tests and must not change. */
+    private val labelWindows = mutableListOf<LabelWindow>()
     private var bubbleParams: WindowManager.LayoutParams? = null
     private var bubbleView: View? = null
     /** Lock-progress ring on the bubble (v1.0.5). */
@@ -124,6 +145,15 @@ class LineOverlayManager(
     /** Test-only: how many line windows are currently shown. */
     @androidx.annotation.VisibleForTesting
     val lineWindowCount: Int get() = lineWindows.size
+
+    /** Test-only: how many cut-angle label windows are currently shown. */
+    @androidx.annotation.VisibleForTesting
+    val labelWindowCount: Int get() = labelWindows.size
+
+    /** Test-only: the texts of the currently shown label windows, in
+     * window order (angle label first, thin-cut warning second). */
+    @androidx.annotation.VisibleForTesting
+    val labelTexts: List<String> get() = labelWindows.map { it.view.text.toString() }
 
     /** Test-only: whether EDIT mode is active. */
     @androidx.annotation.VisibleForTesting
@@ -191,6 +221,24 @@ class LineOverlayManager(
         val ringRadius: Float = 0f
     )
 
+    /** One text label to draw (v1.0.12), in screen coordinates. The
+     * window is centred on ([centerX], [centerY]); the angle label
+     * sits beside the aim line and the thin-cut warning above the cue
+     * ball, both computed from the same smoothed segments as the
+     * lines, so a label moves with its line and hides with it. */
+    private data class DrawLabel(
+        val text: String,
+        val color: Int,
+        val centerX: Float,
+        val centerY: Float
+    )
+
+    /** The lines and labels for one frame. */
+    private data class DrawnOverlay(
+        val lines: List<DrawLine>,
+        val labels: List<DrawLabel>
+    )
+
     fun update(result: DetectionResult) {
         ensureBubble()
         // Lock ring (v1.0.5): fills as the table stabilises, green
@@ -219,6 +267,7 @@ class LineOverlayManager(
         if (!result.tableLocked) {
             smoother.reset()
             removeLineWindows()
+            removeLabelWindows()
             return
         }
 
@@ -227,15 +276,18 @@ class LineOverlayManager(
             framesWithoutGuideline > NO_GUIDELINE_HIDE_AFTER_FRAMES
         if (hide) {
             removeLineWindows()
+            removeLabelWindows()
             return
         }
 
-        val lines = buildDrawLines(result)
-        if (lines.isEmpty()) {
+        val drawn = buildDrawLines(result)
+        if (drawn.lines.isEmpty()) {
             removeLineWindows()
+            removeLabelWindows()
             return
         }
-        applyLines(lines)
+        applyLines(drawn.lines)
+        applyLabels(drawn.labels)
     }
 
     /** EDIT-mode frame: draw the frozen shot with any anchor corrections.
@@ -246,53 +298,97 @@ class LineOverlayManager(
     private fun updateEditMode(result: DetectionResult) {
         if (store.guidesHidden || result.isCaptureBlack) {
             removeLineWindows()
+            removeLabelWindows()
             removeHandles()
             return
         }
         val shot = manualAim.currentShot()
         if (shot == null) {
             removeLineWindows()
+            removeLabelWindows()
             removeHandles()
             return
         }
-        val lines = buildEditLines(shot, result)
-        if (lines.isEmpty()) {
+        val drawn = buildEditLines(shot, result)
+        if (drawn.lines.isEmpty()) {
             removeLineWindows()
+            removeLabelWindows()
             removeHandles()
             return
         }
-        applyLines(lines)
+        applyLines(drawn.lines)
+        applyLabels(drawn.labels)
         ensureHandles(shot, result)
     }
 
     /** The corrected shot's lines, mapped to screen coordinates. The
-     * pocket ring marks the (unchanged) target pocket. */
+     * pocket ring marks the (unchanged) target pocket. The cut-angle
+     * label and thin-cut warning (v1.0.12) follow the frozen shot's
+     * aim line and cue ball, in the aim green — EDIT mode draws a
+     * direct shot. */
     private fun buildEditLines(
         shot: ShotSolver.ShotSolution,
         result: DetectionResult
-    ): List<DrawLine> {
+    ): DrawnOverlay {
         val sx = result.scaleToScreenX
         val sy = result.scaleToScreenY
         fun map(p: Vec2) = Vec2(p.x * sx, p.y * sy)
         val pocket = shot.targetLine.end
-        return listOf(
-            DrawLine(
-                Segment(map(shot.aimLine.start), map(shot.aimLine.end)),
-                AIM_COLOR, AIM_WIDTH_PX
+        val aim = Segment(map(shot.aimLine.start), map(shot.aimLine.end))
+        return DrawnOverlay(
+            lines = listOf(
+                DrawLine(aim, AIM_COLOR, AIM_WIDTH_PX),
+                DrawLine(
+                    Segment(map(shot.targetLine.start), map(shot.targetLine.end)),
+                    TARGET_COLOR, LINE_WIDTH_PX
+                ),
+                DrawLine(
+                    Segment(map(shot.deflectionLine.start), map(shot.deflectionLine.end)),
+                    DEFLECT_COLOR, LINE_WIDTH_PX
+                ),
+                DrawLine(
+                    Segment(map(pocket), map(pocket)),
+                    POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = 18f
+                )
             ),
-            DrawLine(
-                Segment(map(shot.targetLine.start), map(shot.targetLine.end)),
-                TARGET_COLOR, LINE_WIDTH_PX
-            ),
-            DrawLine(
-                Segment(map(shot.deflectionLine.start), map(shot.deflectionLine.end)),
-                DEFLECT_COLOR, LINE_WIDTH_PX
-            ),
-            DrawLine(
-                Segment(map(pocket), map(pocket)),
-                POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = 18f
+            labels = labelsFor(shot, aim, result, AIM_COLOR)
+        )
+    }
+
+    /** The cut-angle label (+ thin-cut warning) for one shot, from a
+     * screen-coordinate aim segment. The label colour is the shot's
+     * line family: green for a direct shot, cyan for a bank, magenta
+     * for a kick. [ballRadiusScreenPx] is the ball radius in screen
+     * pixels; the cue-ball position is the aim segment's start. */
+    private fun labelsFor(
+        shot: ShotSolver.ShotSolution,
+        aimScreen: Segment,
+        result: DetectionResult,
+        color: Int
+    ): List<DrawLabel> {
+        val ballRadiusScreenPx = (result.cueBall?.radiusPx ?: 9.0) * result.scaleToScreenX
+        val anchor = CutAngleLabel.labelAnchor(aimScreen, ballRadiusScreenPx)
+        val out = mutableListOf(
+            DrawLabel(
+                CutAngleLabel.format(shot.cutAngleDegrees),
+                color,
+                anchor.x.toFloat(),
+                anchor.y.toFloat()
             )
         )
+        val warning = CutAngleLabel.warningText(shot.cutAngleDegrees)
+        if (warning != null) {
+            val warnAnchor = CutAngleLabel.warningAnchor(
+                aimScreen.start, ballRadiusScreenPx
+            )
+            out += DrawLabel(
+                warning,
+                WARNING_COLOR,
+                warnAnchor.x.toFloat(),
+                warnAnchor.y.toFloat()
+            )
+        }
+        return out
     }
 
     /** Show the two anchor handles at the corrected cue + ghost points
@@ -397,12 +493,15 @@ class LineOverlayManager(
     /** Build the lines to draw, mapped from working to screen coordinates.
      * The best shot's lines go through the jitter smoother (screen
      * coordinates, Bloro's 40 px gate); candidates and the pocket ring
-     * are drawn as detected. */
-    private fun buildDrawLines(result: DetectionResult): List<DrawLine> {
+     * are drawn as detected. The cut-angle label (+ thin-cut warning,
+     * v1.0.12) is built from the same smoothed aim segment as the
+     * lines, so it moves with them; only the best shot gets one. */
+    private fun buildDrawLines(result: DetectionResult): DrawnOverlay {
         val sx = result.scaleToScreenX
         val sy = result.scaleToScreenY
         fun map(p: Vec2) = Vec2(p.x * sx, p.y * sy)
         val out = mutableListOf<DrawLine>()
+        var labels: List<DrawLabel> = emptyList()
 
         val shot = result.shot
         val bank = result.bank
@@ -434,6 +533,9 @@ class LineOverlayManager(
             out += DrawLine(aim, AIM_COLOR, AIM_WIDTH_PX)
             out += DrawLine(target, TARGET_COLOR, LINE_WIDTH_PX)
             out += DrawLine(deflection, DEFLECT_COLOR, LINE_WIDTH_PX)
+            // Cut-angle label (v1.0.12): the best shot's angle, in the
+            // aim green, beside the smoothed aim line.
+            labels = labelsFor(shot, aim, result, AIM_COLOR)
             // Pocket ring at the target pocket.
             val pocket = shot.targetLine.end
             out += DrawLine(
@@ -452,6 +554,7 @@ class LineOverlayManager(
             out += DrawLine(smoothed[0], AIM_COLOR, AIM_WIDTH_PX)
             out += DrawLine(smoothed[1], BANK_COLOR, LINE_WIDTH_PX)
             out += DrawLine(smoothed[2], BANK_COLOR, LINE_WIDTH_PX)
+            labels = labelsFor(bank.direct, smoothed[0], result, BANK_COLOR)
             val pocket = bank.bankPath.last().end
             out += DrawLine(
                 Segment(map(pocket), map(pocket)),
@@ -480,6 +583,7 @@ class LineOverlayManager(
             out += DrawLine(smoothed[1], KICK_COLOR, LINE_WIDTH_PX)
             out += DrawLine(smoothed[2], TARGET_COLOR, LINE_WIDTH_PX)
             out += DrawLine(smoothed[3], DEFLECT_COLOR, LINE_WIDTH_PX)
+            labels = labelsFor(kick.direct, smoothed[0], result, KICK_COLOR)
             val pocket = kick.direct.targetLine.end
             out += DrawLine(
                 Segment(map(pocket), map(pocket)),
@@ -503,6 +607,7 @@ class LineOverlayManager(
             out += DrawLine(smoothed[1], BANK_COLOR, LINE_WIDTH_PX)
             out += DrawLine(smoothed[2], BANK_COLOR, LINE_WIDTH_PX)
             out += DrawLine(smoothed[3], BANK_COLOR, LINE_WIDTH_PX)
+            labels = labelsFor(bank2.direct, smoothed[0], result, BANK_COLOR)
             val pocket = bank2.bankPath.last().end
             out += DrawLine(
                 Segment(map(pocket), map(pocket)),
@@ -535,13 +640,14 @@ class LineOverlayManager(
             out += DrawLine(smoothed[2], KICK_COLOR, LINE_WIDTH_PX)
             out += DrawLine(smoothed[3], TARGET_COLOR, LINE_WIDTH_PX)
             out += DrawLine(smoothed[4], DEFLECT_COLOR, LINE_WIDTH_PX)
+            labels = labelsFor(kick2.direct, smoothed[0], result, KICK_COLOR)
             val pocket = kick2.direct.targetLine.end
             out += DrawLine(
                 Segment(map(pocket), map(pocket)),
                 POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = 18f
             )
         }
-        return out
+        return DrawnOverlay(out, labels)
     }
 
     /** Reuse windows by index; add or remove as the line count changes. */
@@ -584,6 +690,81 @@ class LineOverlayManager(
             } catch (_: Exception) {
             }
         }
+    }
+
+    /** Reuse label windows by index; add or remove as the label count
+     * changes. Same pattern as [applyLines]: the windows are small
+     * (WRAP_CONTENT around the text, centred on the label position),
+     * NOT_TOUCHABLE, and dark-backed like the control bubble so the
+     * text stays readable on bright felt. A label window is exactly
+     * as wide as its text, so it flags no more touches as obscured
+     * than the text itself covers. */
+    private fun applyLabels(labels: List<DrawLabel>) {
+        for (i in labels.indices) {
+            val label = labels[i]
+            if (i < labelWindows.size) {
+                val win = labelWindows[i]
+                win.view.text = label.text
+                win.view.setTextColor(label.color)
+                val (w, h) = measureLabel(win.view)
+                win.params.x = (label.centerX - w / 2).toInt()
+                win.params.y = (label.centerY - h / 2).toInt()
+                win.params.width = w
+                win.params.height = h
+                windowManager.updateViewLayout(win.view, win.params)
+            } else {
+                val view = TextView(context).apply {
+                    text = label.text
+                    setTextColor(label.color)
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, LABEL_TEXT_SIZE_SP)
+                    setBackgroundColor(Color.argb(200, 0, 0, 0))
+                    setPadding(8, 2, 8, 2)
+                }
+                val (w, h) = measureLabel(view)
+                val params = WindowManager.LayoutParams(
+                    w, h,
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    PixelFormat.TRANSLUCENT
+                ).apply {
+                    gravity = Gravity.TOP or Gravity.START
+                    x = (label.centerX - w / 2).toInt()
+                    y = (label.centerY - h / 2).toInt()
+                }
+                windowManager.addView(view, params)
+                labelWindows += LabelWindow(view, params)
+            }
+        }
+        // Remove surplus windows.
+        while (labelWindows.size > labels.size) {
+            val win = labelWindows.removeAt(labelWindows.lastIndex)
+            try {
+                windowManager.removeView(win.view)
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    /** Measure a label view at its current text (UNSPECIFIED both
+     * ways, so the window wraps the text). */
+    private fun measureLabel(view: TextView): Pair<Int, Int> {
+        view.measure(
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        )
+        return view.measuredWidth to view.measuredHeight
+    }
+
+    private fun removeLabelWindows() {
+        for (win in labelWindows) {
+            try {
+                windowManager.removeView(win.view)
+            } catch (_: Exception) {
+            }
+        }
+        labelWindows.clear()
     }
 
     private data class WindowBox(
@@ -643,7 +824,10 @@ class LineOverlayManager(
             if (store.guidesHidden) DiagnosticsLog.Kind.GUIDES_HIDDEN
             else DiagnosticsLog.Kind.GUIDES_SHOWN
         )
-        if (store.guidesHidden) removeLineWindows()
+        if (store.guidesHidden) {
+            removeLineWindows()
+            removeLabelWindows()
+        }
     }
 
     // ---- Control bubble (draggable, small footprint) ----
@@ -786,6 +970,7 @@ class LineOverlayManager(
         smoother.reset()
         manualAim.exitEditMode()
         removeLineWindows()
+        removeLabelWindows()
         removeHandles()
         bubbleView?.let {
             try {

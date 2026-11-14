@@ -1,6 +1,7 @@
 package com.poolguide.tool.ui
 
 import com.poolguide.tool.cv.TableRect
+import com.poolguide.tool.geometry.CutAngleLabel
 import com.poolguide.tool.geometry.Vec2
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -522,5 +523,58 @@ class PracticeStateTest {
         s.select(2)
         assertEquals(0, s.selectedId)
         assertNull(s.ballAt(Vec2(320.0, 180.0)))
+    }
+
+    // ---- v1.0.12: cut-angle readout + thin-cut warning ----
+
+    @Test
+    fun `default layouts label with their solver cut angles`() {
+        // Pinned against the solver with kotlinc before the test was
+        // written (cut12-probe/Probe12.kt): DIRECT 34.62, BANK 30.77,
+        // KICK 2.34, COMBO first 6.39 / second 39.12, KISS kiss 72.20 /
+        // second 27.22. None of them is thin, so no warning text.
+        val s = state()
+        val direct = directShot(s)
+        assertEquals("34.6°", CutAngleLabel.format(direct.cutAngleDegrees))
+        assertNull(CutAngleLabel.warningText(direct.cutAngleDegrees))
+
+        s.setMode(PracticeState.PracticeMode.BANK)
+        val bank = (s.solve() as PracticeState.PracticeSolution.Bank).solution
+        assertEquals("30.8°", CutAngleLabel.format(bank.direct.cutAngleDegrees))
+        assertNull(CutAngleLabel.warningText(bank.direct.cutAngleDegrees))
+
+        s.setMode(PracticeState.PracticeMode.KICK)
+        val kick = (s.solve() as PracticeState.PracticeSolution.Kick).solution
+        assertEquals("2.3°", CutAngleLabel.format(kick.direct.cutAngleDegrees))
+        assertNull(CutAngleLabel.warningText(kick.direct.cutAngleDegrees))
+
+        s.setMode(PracticeState.PracticeMode.COMBO)
+        val combo = (s.solve() as PracticeState.PracticeSolution.Combo).solution
+        assertEquals("6.4°", CutAngleLabel.format(combo.firstShot.cutAngleDegrees))
+        assertEquals("39.1°", CutAngleLabel.format(combo.secondShot.cutAngleDegrees))
+        assertNull(CutAngleLabel.warningText(combo.firstShot.cutAngleDegrees))
+        assertNull(CutAngleLabel.warningText(combo.secondShot.cutAngleDegrees))
+
+        s.setMode(PracticeState.PracticeMode.KISS)
+        val kiss = (s.solve() as PracticeState.PracticeSolution.Kiss).solution
+        assertEquals("72.2°", CutAngleLabel.format(kiss.kissShot.cutAngleDegrees))
+        assertEquals("27.2°", CutAngleLabel.format(kiss.secondShot.cutAngleDegrees))
+        assertNull(CutAngleLabel.warningText(kiss.kissShot.cutAngleDegrees))
+        assertNull(CutAngleLabel.warningText(kiss.secondShot.cutAngleDegrees))
+    }
+
+    @Test
+    fun `thin layout labels with a warning`() {
+        // Verified against the solver with kotlinc before the test
+        // was written: cue (620, 260), target (620, 300) solves to
+        // the bottom-right pocket at 82.83 deg — thin, but not
+        // impossible (the solver returns null past 90).
+        val s = state()
+        s.moveBall(0, Vec2(620.0, 260.0))
+        s.moveBall(1, Vec2(620.0, 300.0))
+        val shot = directShot(s)
+        assertTrue(shot.isThinCut)
+        assertEquals("82.8°", CutAngleLabel.format(shot.cutAngleDegrees))
+        assertEquals("Thin cut 82.8°", CutAngleLabel.warningText(shot.cutAngleDegrees))
     }
 }

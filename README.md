@@ -140,6 +140,18 @@ screen. Nothing about the game is changed.**
     unmeasured, and it is unmeasured twice over on a two-rail kick.
     What you practise here is the aim geometry, not the exact outcome
     on a real table.
+13. **The cut angle is the solver's geometry, not a make guarantee.**
+    Since v1.0.12 the tool shows the cut angle beside the aim line
+    (one decimal, in the shot family's colour: green for a direct
+    shot, cyan for a bank, magenta for a kick) and a "Thin cut"
+    warning above the cue ball when the cut is over 80 degrees — a
+    thin cut has very little margin, and past 90 degrees the solver
+    returns no shot at all. The angle is computed from the detected
+    ball positions with no spin, no throw, and no cushion compression
+    in the model, so on a real table the true cut differs by whatever
+    the detection and the physics leave out. Practice mode shows the
+    same readout and warning for every mode (direct, bank, kick,
+    combo, kiss), one label per leg.
 
 ## How it works
 

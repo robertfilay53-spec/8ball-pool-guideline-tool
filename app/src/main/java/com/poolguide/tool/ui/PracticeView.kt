@@ -8,6 +8,7 @@ import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
 import com.poolguide.tool.cv.TableRect
+import com.poolguide.tool.geometry.CutAngleLabel
 import com.poolguide.tool.geometry.Segment
 import com.poolguide.tool.geometry.ShotSolver
 import com.poolguide.tool.geometry.Vec2
@@ -119,6 +120,23 @@ class PracticeView @JvmOverloads constructor(
         color = 0xFFFF5252.toInt()
         style = Paint.Style.STROKE
         strokeWidth = 4f
+    }
+    /** Cut-angle readout text (v1.0.12): centred on its anchor, colour
+     * set per shot family at draw time (green direct, cyan bank,
+     * magenta kick). Text size is set from the view scale at draw
+     * time — the paints are shared, so the size is not fixed here. */
+    private val angleTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFF00E676.toInt()
+        style = Paint.Style.FILL
+        textAlign = Paint.Align.CENTER
+    }
+    /** Thin-cut warning text (v1.0.12): amber, the same contrasting
+     * colour the live overlay uses, so a low-percentage shot reads
+     * the same in practice as over the game. */
+    private val warningTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFFFFAB00.toInt()
+        style = Paint.Style.FILL
+        textAlign = Paint.Align.CENTER
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
@@ -237,6 +255,7 @@ class PracticeView @JvmOverloads constructor(
             pocket.x.toFloat(), pocket.y.toFloat(),
             (BALL_RADIUS_PX * 1.8 * scale).toFloat(), ringPaint
         )
+        drawCutAngleLabel(canvas, direct, bankPaint.color)
     }
 
     /** Draw one kick shot the way the live overlay does: the green
@@ -285,6 +304,7 @@ class PracticeView @JvmOverloads constructor(
             pocket.x.toFloat(), pocket.y.toFloat(),
             (BALL_RADIUS_PX * 1.8 * scale).toFloat(), ringPaint
         )
+        drawCutAngleLabel(canvas, direct, kickPaint.color)
     }
 
     /** Draw one shot's aim, target, and deflection lines plus the
@@ -321,6 +341,43 @@ class PracticeView @JvmOverloads constructor(
                 (BALL_RADIUS_PX * 1.8 * scale).toFloat(), ringPaint
             )
         }
+        drawCutAngleLabel(canvas, shot, aimPaint.color)
+    }
+
+    /** Cut-angle readout + thin-cut warning for one solved shot
+     * (v1.0.12), drawn in view coordinates. The angle sits beside the
+     * aim line (midpoint + 2.5 ball radii perpendicular, via
+     * [CutAngleLabel.labelAnchor]); the warning sits above the cue
+     * ball ([CutAngleLabel.warningAnchor]) and only appears for a
+     * thin cut (> 80 deg — the solver returns null past 90, so an
+     * impossible shot draws no label at all). [labelColor] is the
+     * shot family's colour (green direct, cyan bank, magenta kick);
+     * the warning is always amber. Combo and kiss legs each get their
+     * own label, because each leg has its own cut angle. */
+    private fun drawCutAngleLabel(
+        canvas: Canvas,
+        shot: ShotSolver.ShotSolution,
+        labelColor: Int
+    ) {
+        val aimS = toView(shot.aimLine.start)
+        val aimE = toView(shot.aimLine.end)
+        val radiusViewPx = BALL_RADIUS_PX * scale
+        val anchor = CutAngleLabel.labelAnchor(
+            Segment(aimS, aimE), radiusViewPx
+        )
+        angleTextPaint.color = labelColor
+        angleTextPaint.textSize = (16.0 * scale).toFloat()
+        canvas.drawText(
+            CutAngleLabel.format(shot.cutAngleDegrees),
+            anchor.x.toFloat(), anchor.y.toFloat(), angleTextPaint
+        )
+        val warning = CutAngleLabel.warningText(shot.cutAngleDegrees) ?: return
+        val warnAnchor = CutAngleLabel.warningAnchor(aimS, radiusViewPx)
+        warningTextPaint.textSize = (16.0 * scale).toFloat()
+        canvas.drawText(
+            warning,
+            warnAnchor.x.toFloat(), warnAnchor.y.toFloat(), warningTextPaint
+        )
     }
 
     private fun drawGhost(canvas: Canvas, ghost: Vec2) {
