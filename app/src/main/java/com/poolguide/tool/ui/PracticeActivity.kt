@@ -164,6 +164,24 @@ class PracticeActivity : AppCompatActivity() {
                     )
                 }
             }
+            is PracticeState.PracticeSolution.Kick2 -> {
+                val kick = solution.solution
+                if (kick.direct.isThinCut) {
+                    getString(
+                        R.string.practice_kick2_thin,
+                        solution.railNames.first,
+                        solution.railNames.second,
+                        kick.direct.cutAngleDegrees
+                    )
+                } else {
+                    getString(
+                        R.string.practice_kick2,
+                        solution.railNames.first,
+                        solution.railNames.second,
+                        kick.direct.cutAngleDegrees
+                    )
+                }
+            }
         }
     }
 }

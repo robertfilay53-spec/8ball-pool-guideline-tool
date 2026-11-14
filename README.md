@@ -4,8 +4,9 @@ A companion helper for 8 Ball Pool (Miniclip). It watches the game on your
 screen and draws aim lines over it: the cue-ball aim line, the target ball's
 path to the pocket, and the cue ball's deflection after impact, plus one-rail
 bank shots when no direct shot exists, two-rail banks when no one-rail
-bank solves, and one-rail kick shots (cue ball off a rail first) when the
-kick's cut angle beats the best one-rail bank's.
+bank solves, one-rail kick shots (cue ball off a rail first) when the
+kick's cut angle beats the best one-rail bank's, and two-rail kick shots
+when nothing else solves.
 
 **It is a separate app. You install the original 8 Ball Pool from the Play
 Store (or APKPure) and this tool separately. The two work together on your
@@ -125,6 +126,20 @@ screen. Nothing about the game is changed.**
     synthetic data, where it measures zero; real-table cushion
     behaviour is unmeasured. What you practise here is the aim
     geometry, not the exact outcome on a real table.
+12. **Two-rail kicks are geometry only, and they are the last resort.**
+    Since v1.0.11 the tool also draws two-rail kick shots (cue ball
+    -> rail -> rail -> target -> pocket, same magenta rendering, all
+    three cue-path segments shown). In the live overlay a two-rail
+    kick is only the best shot when no direct shot, no one-rail bank,
+    no one-rail kick, and no two-rail bank solves — it never
+    displaces any other shot. In practice KICK mode a two-rail kick
+    only wins when its cut angle beats the best one-rail kick by more
+    than 30 degrees (each extra cushion compounds real-table error).
+    The cushion correction at each rail is fitted to synthetic data,
+    where it measures zero; real-table cushion behaviour is
+    unmeasured, and it is unmeasured twice over on a two-rail kick.
+    What you practise here is the aim geometry, not the exact outcome
+    on a real table.
 
 ## How it works
 
@@ -138,7 +153,7 @@ MediaProjection + VirtualDisplay (960x540, foreground service)
      -> the game's own white guideline: bilateral filter -> Canny (50, 150)
         -> HoughLinesP (30/15/8) -> verifier -> robust refit -> LineTracker
   -> shot solver (ghost ball, cut angle, tangent, mirror-pocket banks
-     (one- and two-rail), mirror-ghost kicks (one-rail), combo + kiss
+     (one- and two-rail), mirror-ghost kicks (one- and two-rail), combo + kiss
      shots; every reachable pocket ranked, best first)
   -> one small TYPE_APPLICATION_OVERLAY window per line (best shot in
      full colour, other candidates faint — PoolAimAssist UX)

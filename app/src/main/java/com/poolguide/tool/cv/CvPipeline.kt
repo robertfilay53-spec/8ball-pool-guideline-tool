@@ -216,6 +216,7 @@ class CvPipeline(
             bank = outcome.bank,
             bank2 = outcome.bank2,
             kick = outcome.kick,
+            kick2 = outcome.kick2,
             allShots = outcome.allShots,
             tableLocked = locked,
             tableFromFallback = tableFromFallback,
@@ -273,7 +274,7 @@ class CvPipeline(
 
     /** One frame's solve: best direct shot, every candidate shot, a
      * one-rail bank fallback, a one-rail kick fallback, a two-rail
-     * bank fallback, and the status line. */
+     * bank fallback, a two-rail kick fallback, and the status line. */
     private data class SolveOutcome(
         val shot: ShotSolver.ShotSolution?,
         val bank: ShotSolver.BankSolution?,
@@ -284,21 +285,27 @@ class CvPipeline(
         val bank2: ShotSolver.TwoRailBankSolution? = null,
         /** Best one-rail kick (v1.0.10), set only when no direct
          * shot solves and its cut beats the best one-rail bank's. */
-        val kick: ShotSolver.KickSolution? = null
+        val kick: ShotSolver.KickSolution? = null,
+        /** Best two-rail kick (v1.0.11), set only when no direct
+         * shot, no one-rail bank, no one-rail kick, and no two-rail
+         * bank solves: the last resort. */
+        val kick2: ShotSolver.TwoRailKickSolution? = null
     )
 
     /**
      * Pick the target ball (nearest ball along the guideline ray from the cue
      * ball; nearest ball overall when no guideline is visible) and the pocket
      * with the smallest cut angle, then solve. Falls back to a one-rail bank
-     * or a one-rail kick when no direct shot is possible, and to a two-rail
-     * bank when neither one-rail shot solves.
+     * or a one-rail kick when no direct shot is possible, to a two-rail
+     * bank when neither one-rail shot solves, and to a two-rail kick
+     * when nothing else solves.
      *
      * Ranking (best shot stays honest): direct first, then the better of
      * the one-rail bank and the one-rail kick, then two-rail banks as a
-     * last resort. A bank and a kick are both one-rail shots ranked by
-     * the same number — the direct cut angle of the underlying solve,
-     * the codebase's established difficulty proxy — so the smaller cut
+     * last resort, then two-rail kicks as the last resort after that.
+     * A bank and a kick are both one-rail shots ranked by the same
+     * number — the direct cut angle of the underlying solve, the
+     * codebase's established difficulty proxy — so the smaller cut
      * wins, and a tie goes to the bank, the established fallback. A
      * kick never displaces a direct shot. The bank fallback is now
      * best-by-cut (it used to return the first bank in pocket/rail
@@ -311,7 +318,12 @@ class CvPipeline(
      * v1.0.3); the kick fallback applies them to its one contact, for
      * the same reason — a contact inside a pocket's jaws or on the
      * pocket is not a clean rail shot, and a fallback shot is already
-     * the least reliable shot the tool shows.
+     * the least reliable shot the tool shows. The two-rail kick
+     * fallback (v1.0.11) applies the same guards to BOTH of its
+     * contacts, for the same reason — and it is only tried after the
+     * two-rail bank search comes back empty, because a two-rail kick
+     * compounds real-table error twice (two cushion contacts, each
+     * fitted to synthetic data, real-table behaviour unmeasured).
      */
     private fun solveFor(
         cue: Ball?,
@@ -415,6 +427,39 @@ class CvPipeline(
         }
         if (bestTwoRail != null) {
             return SolveOutcome(null, null, emptyList(), "Bank shot (two rails) to pocket", bank2 = bestTwoRail)
+        }
+
+        // No two-rail bank either: try two-rail kicks, ranked by the
+        // direct cut angle (easiest pot first). Both contacts must
+        // pass the corner guards (same numbers as PracticeState):
+        // inside the rail span, four ball radii clear of the corners,
+        // and not on the pocket. This is the last resort: a two-rail
+        // kick is only shown when it is the only shot left.
+        var bestTwoRailKick: ShotSolver.TwoRailKickSolution? = null
+        var bestTwoRailKickCut = Double.MAX_VALUE
+        for (pocket in pockets) {
+            for ((index1, rail1) in rails.withIndex()) {
+                for ((index2, rail2) in rails.withIndex()) {
+                    if (index1 == index2) continue
+                    // No pocket-on-rail skip here (unlike the bank
+                    // searches): a kick mirrors the ghost, never the
+                    // pocket, so a pocket on a rail is not
+                    // degenerate — the solver itself returns null
+                    // when the ghost sits on either rail.
+                    val kick2 = ShotSolver.solveTwoRailKick(
+                        cue.center, target.center, pocket, rail1, rail2, radius
+                    ) ?: continue
+                    if (!bankContactIsValid(kick2.railContacts[0], index1, tableRect, pocket, radius)) continue
+                    if (!bankContactIsValid(kick2.railContacts[1], index2, tableRect, pocket, radius)) continue
+                    if (kick2.direct.cutAngleDegrees < bestTwoRailKickCut) {
+                        bestTwoRailKick = kick2
+                        bestTwoRailKickCut = kick2.direct.cutAngleDegrees
+                    }
+                }
+            }
+        }
+        if (bestTwoRailKick != null) {
+            return SolveOutcome(null, null, emptyList(), "Kick shot (two rails) to pocket", kick2 = bestTwoRailKick)
         }
         return SolveOutcome(null, null, emptyList(), "No shot found for this ball")
     }
