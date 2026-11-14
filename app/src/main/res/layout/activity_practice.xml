@@ -40,6 +40,35 @@
         android:orientation="horizontal">
 
         <Button
+            android:id="@+id/btn_mode_direct"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/practice_mode_direct" />
+
+        <Button
+            android:id="@+id/btn_mode_combo"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/practice_mode_combo" />
+
+        <Button
+            android:id="@+id/btn_mode_kiss"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/practice_mode_kiss" />
+
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:orientation="horizontal">
+
+        <Button
             android:id="@+id/btn_nudge_left"
             android:layout_width="0dp"
             android:layout_height="wrap_content"

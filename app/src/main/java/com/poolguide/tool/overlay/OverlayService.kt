@@ -25,6 +25,7 @@ import com.poolguide.tool.cv.CvConfig
 import com.poolguide.tool.cv.CvPipeline
 import com.poolguide.tool.cv.OpenCvInit
 import com.poolguide.tool.data.CalibrationStore
+import com.poolguide.tool.data.DiagnosticsLog
 import org.opencv.android.Utils
 import org.opencv.core.Mat
 import org.opencv.imgproc.Imgproc
@@ -96,6 +97,10 @@ class OverlayService : Service() {
 
     private fun startOverlay() {
         store = CalibrationStore(this)
+        // Diagnostics session (v1.0.6). A second start while a session
+        // is active is a no-op, so CaptureService starting at the
+        // same time cannot wipe these first events.
+        DiagnosticsLog.start()
 
         // 1. Notification + startForeground FIRST (5s timeout on Android 14+).
         // specialUse on 34+ (declared in the manifest with its subtype
@@ -207,6 +212,7 @@ class OverlayService : Service() {
 
     private fun stopOverlay() {
         running = false
+        DiagnosticsLog.end()
         OverlayBus.listener = null
         demoRunnable?.let { cvHandler?.removeCallbacks(it) }
         demoRunnable = null

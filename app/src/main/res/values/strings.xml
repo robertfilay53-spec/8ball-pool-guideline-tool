@@ -14,6 +14,10 @@
     <string name="btn_demo">Demo mode (no game)</string>
     <string name="btn_calibrate">Calibrate table</string>
     <string name="btn_practice">Practice mode (no game)</string>
+    <string name="btn_export_diagnostics">Export diagnostics</string>
+    <string name="diagnostics_exported">Diagnostics saved — share the file only if you choose to.</string>
+    <string name="diagnostics_export_failed">Could not save the diagnostics file.</string>
+    <string name="diagnostics_empty">No session yet — start capture or demo first, then export.</string>
     <string name="stop">Stop</string>
     <string name="cancel">Cancel</string>
     <string name="hide_guides">Hide guides</string>
@@ -28,6 +32,13 @@
     <string name="practice_no_shot">No shot — drag the balls into line.</string>
     <string name="practice_cut">Cut %.0f deg to pocket.</string>
     <string name="practice_cut_thin">Cut %.0f deg (thin cut — very low margin) to pocket.</string>
+    <string name="practice_combo">Combo to pocket — first cut %.0f deg, second cut %.0f deg.</string>
+    <string name="practice_combo_thin">Combo to pocket — first cut %.0f deg (thin cut — very low margin), second cut %.0f deg.</string>
+    <string name="practice_kiss">Kiss to pocket — kiss cut %.0f deg, second cut %.0f deg.</string>
+    <string name="practice_kiss_thin">Kiss to pocket — kiss cut %.0f deg (thin cut — very low margin), second cut %.0f deg.</string>
+    <string name="practice_mode_direct">Direct</string>
+    <string name="practice_mode_combo">Combo</string>
+    <string name="practice_mode_kiss">Kiss</string>
     <string name="practice_reset">Reset layout</string>
     <string name="nudge_up">↑</string>
     <string name="nudge_down">↓</string>

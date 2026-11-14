@@ -25,8 +25,10 @@ import android.view.WindowManager
 import com.poolguide.tool.R
 import com.poolguide.tool.cv.CvConfig
 import com.poolguide.tool.cv.CvPipeline
+import com.poolguide.tool.cv.DetectionResult
 import com.poolguide.tool.cv.OpenCvInit
 import com.poolguide.tool.data.CalibrationStore
+import com.poolguide.tool.data.DiagnosticsLog
 import com.poolguide.tool.overlay.OverlayService
 import org.opencv.android.Utils
 import org.opencv.core.CvType
@@ -94,6 +96,12 @@ class CaptureService : Service() {
     private var running = false
     private var lastNotifUpdateMs = 0L
 
+    // Diagnostics (v1.0.6): previous frame's state, for edge-triggered
+    // events (lock gained/lost, fallback entered/left, black frames).
+    private var lastWasLocked = false
+    private var lastWasFallback = false
+    private var lastWasBlack = false
+
     private val displayListener = object : DisplayManager.DisplayListener {
         override fun onDisplayAdded(displayId: Int) {}
         override fun onDisplayRemoved(displayId: Int) {}
@@ -123,6 +131,10 @@ class CaptureService : Service() {
 
     private fun startCapture(intent: Intent) {
         store = CalibrationStore(this)
+        // Diagnostics session (v1.0.6): a second start while a session
+        // is active is a no-op, so the overlay service starting at
+        // the same time cannot wipe these first events.
+        DiagnosticsLog.start()
 
         // 1. Notification + startForeground FIRST (5s timeout on Android 14+).
         // Live capture always holds a real MediaProjection token, so the
@@ -238,6 +250,7 @@ class CaptureService : Service() {
             try {
                 val result = pipeline?.process(frameMat) ?: return@post
                 OverlayBus.post(result)
+                recordDiagnostics(result)
                 postPreview(frameMat, result.isCaptureBlack)
                 maybeUpdateNotification(result.status)
             } catch (e: Exception) {
@@ -245,6 +258,47 @@ class CaptureService : Service() {
             } finally {
                 cvBusy.set(false)
             }
+        }
+    }
+
+    /** Diagnostics (v1.0.6): edge-triggered events on every frame, plus
+     * a compact frame-stats line every 150 frames (~10 s at 15 FPS).
+     * Runs on the CV thread; DiagnosticsLog is synchronised. */
+    private fun recordDiagnostics(result: DetectionResult) {
+        if (result.tableLocked && !lastWasLocked) {
+            DiagnosticsLog.record(
+                DiagnosticsLog.Kind.TABLE_LOCKED,
+                "lock=${"%.2f".format(result.tableLockProgress)}"
+            )
+        } else if (!result.tableLocked && lastWasLocked) {
+            DiagnosticsLog.record(DiagnosticsLog.Kind.TABLE_LOST, result.status)
+        }
+        if (result.tableFromFallback && !lastWasFallback) {
+            DiagnosticsLog.record(DiagnosticsLog.Kind.FALLBACK_START, result.status)
+        } else if (!result.tableFromFallback && lastWasFallback) {
+            DiagnosticsLog.record(DiagnosticsLog.Kind.FALLBACK_END, result.status)
+        }
+        if (result.isCaptureBlack && !lastWasBlack) {
+            DiagnosticsLog.record(
+                DiagnosticsLog.Kind.BLACK_FRAME,
+                "capture is black — FLAG_SECURE may be set"
+            )
+        } else if (!result.isCaptureBlack && lastWasBlack) {
+            DiagnosticsLog.record(DiagnosticsLog.Kind.BLACK_FRAME_CLEARED)
+        }
+        lastWasLocked = result.tableLocked
+        lastWasFallback = result.tableFromFallback
+        lastWasBlack = result.isCaptureBlack
+        if (result.frameIndex % 150L == 0L) {
+            DiagnosticsLog.record(
+                DiagnosticsLog.Kind.FRAME_STATS,
+                "frame=${result.frameIndex} balls=${result.balls.size} " +
+                    "cue=${if (result.cueBall != null) "yes" else "no"} " +
+                    "guideline=${result.guideline.size} " +
+                    "locked=${result.tableLocked} " +
+                    "fallback=${result.tableFromFallback} " +
+                    "lock=${"%.2f".format(result.tableLockProgress)}"
+            )
         }
     }
 
@@ -282,6 +336,7 @@ class CaptureService : Service() {
 
     private fun stopCapture() {
         running = false
+        DiagnosticsLog.end()
         virtualDisplay?.release()
         virtualDisplay = null
         mediaProjection?.stop()

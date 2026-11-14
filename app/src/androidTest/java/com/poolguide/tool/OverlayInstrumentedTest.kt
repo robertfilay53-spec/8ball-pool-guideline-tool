@@ -228,6 +228,50 @@ class OverlayInstrumentedTest {
     }
 
     @Test
+    fun lockRing_freezesInEditMode() {
+        val ctx = appContext()
+        assertTrue(
+            "overlay permission must be granted for this test",
+            Settings.canDrawOverlays(ctx)
+        )
+        val store = CalibrationStore(ctx).apply { guidesHidden = false }
+        val manager = LineOverlayManager(ctx, store)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+
+        // Live: locked table, ring full and not frozen.
+        instrumentation.runOnMainSync {
+            manager.update(shotResult().copy(tableLocked = true, tableLockProgress = 1f))
+        }
+        assertEquals(1f, manager.lockRingProgress, 0.001f)
+        assertFalse(manager.lockRingFrozen)
+
+        // Enter EDIT mode: the ring switches to its frozen state even
+        // though the live lock progress is still 1.0.
+        instrumentation.runOnMainSync { manager.toggleEditMode() }
+        assertTrue(manager.isEditMode)
+        assertTrue(manager.lockRingFrozen)
+
+        // Later frames must not unfreeze it: a settling table (0.5)
+        // still shows the frozen state, not live progress.
+        instrumentation.runOnMainSync {
+            manager.update(shotResult().copy(tableLocked = false, tableLockProgress = 0.5f))
+        }
+        assertTrue(manager.lockRingFrozen)
+
+        // Leaving EDIT mode unfreezes the ring and live progress
+        // resumes.
+        instrumentation.runOnMainSync { manager.toggleEditMode() }
+        assertFalse(manager.isEditMode)
+        assertFalse(manager.lockRingFrozen)
+        instrumentation.runOnMainSync {
+            manager.update(shotResult().copy(tableLocked = false, tableLockProgress = 0.5f))
+        }
+        assertEquals(0.5f, manager.lockRingProgress, 0.001f)
+
+        instrumentation.runOnMainSync { manager.removeAll() }
+    }
+
+    @Test
     fun editMode_withNoShotDoesNothing() {
         val ctx = appContext()
         assertTrue(
