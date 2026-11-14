@@ -4,7 +4,6 @@ import com.poolguide.tool.geometry.PathBlock
 import com.poolguide.tool.geometry.Rail
 import com.poolguide.tool.geometry.ShotSolver
 import com.poolguide.tool.geometry.Vec2
-import kotlin.math.abs
 
 /**
  * The live pipeline's fallback chain (v1.0.13, pure geometry — no
@@ -26,18 +25,27 @@ import kotlin.math.abs
  * one in cut order, so the bank-vs-kick comparison is between
  * the two first-clear shots: the easiest makeable one-rail shot
  * wins, and when every bank or kick is blocked the best stays
- * and is flagged, as before. The two-rail fallback
- * applies the v1.0.7 corner guards to BOTH contacts (the one-rail
- * bank fallback does not apply them, unchanged from v1.0.3); the
- * kick fallback applies them to its one contact, for the same
- * reason — a contact inside a pocket's jaws or on the pocket is
- * not a clean rail shot, and a fallback shot is already the least
- * reliable shot the tool shows. The two-rail kick fallback
- * (v1.0.11) applies the same guards to BOTH of its contacts, for
- * the same reason — and it is only tried after the two-rail bank
- * search comes back empty, because a two-rail kick compounds
- * real-table error twice (two cushion contacts, each fitted to
- * synthetic data, real-table behaviour unmeasured).
+ * and is flagged, as before. Since v1.0.23 each two-rail family
+ * is a ranked list too ([ShotSolver.allTwoRailBanks],
+ * [ShotSolver.allTwoRailKicks]) and the shown shot is the first
+ * CLEAR one in cut order, so a blocked easiest two-rail bank or
+ * kick no longer hides a makeable one; when every two-rail bank
+ * or kick is blocked the best stays and is flagged, as before.
+ * The bank is still tried before the kick within the two-rail
+ * search (the kick compounds real-table error twice), so the
+ * re-ranking is within each family, not between them. The
+ * two-rail fallback applies the v1.0.7 corner guards to BOTH
+ * contacts (the one-rail bank fallback does not apply them,
+ * unchanged from v1.0.3); the kick fallback applies them to its
+ * one contact, for the same reason: a contact inside a pocket's
+ * jaws or on the pocket is not a clean rail shot, and a fallback
+ * shot is already the least reliable shot the tool shows. The
+ * two-rail kick fallback (v1.0.11) applies the same guards to
+ * BOTH of its contacts, for the same reason, and it is only
+ * tried after the two-rail bank search comes back empty, because
+ * a two-rail kick compounds real-table error twice (two cushion
+ * contacts, each fitted to synthetic data, real-table behaviour
+ * unmeasured).
  *
  * The combo fallback (v1.0.13) is only tried after the two-rail
  * kick search comes back empty: the picked target is the FIRST
@@ -122,60 +130,39 @@ fun solveFallback(
     // direct cut angle (easiest pot first). Both contacts must
     // pass the corner guards (same numbers as PracticeState):
     // inside the rail span, four ball radii clear of the corners,
-    // and not on the pocket.
-    var bestTwoRail: ShotSolver.TwoRailBankSolution? = null
-    var bestTwoRailCut = Double.MAX_VALUE
-    for (pocket in pockets) {
-        for ((index1, rail1) in rails.withIndex()) {
-            for ((index2, rail2) in rails.withIndex()) {
-                if (index1 == index2) continue
-                if (abs((pocket - rail1.point).dot(rail1.normal)) < 1.0) continue
-                if (abs((pocket - rail2.point).dot(rail2.normal)) < 1.0) continue
-                val bank2 = ShotSolver.solveTwoRailBank(
-                    cue, target, pocket, rail1, rail2, ballRadiusPx
-                ) ?: continue
-                if (!bankContactIsValid(bank2.railContacts[0], index1, table, pocket, ballRadiusPx)) continue
-                if (!bankContactIsValid(bank2.railContacts[1], index2, table, pocket, ballRadiusPx)) continue
-                if (bank2.direct.cutAngleDegrees < bestTwoRailCut) {
-                    bestTwoRail = bank2
-                    bestTwoRailCut = bank2.direct.cutAngleDegrees
-                }
-            }
-        }
+    // and not on the pocket. The shown bank is its first CLEAR
+    // one in cut order (v1.0.23 re-ranking): a blocked easiest
+    // two-rail bank no longer hides a makeable one, and when
+    // every two-rail bank is blocked the best stays and is
+    // flagged, as before. [others] is the blocker list here:
+    // every ball except the cue and the target, which travel
+    // the path.
+    val allTwoRailBanks = ShotSolver.allTwoRailBanks(
+        cue, target, pockets, rails, ballRadiusPx
+    ) { contact, index, pocket ->
+        bankContactIsValid(contact, index, table, pocket, ballRadiusPx)
     }
-    if (bestTwoRail != null) return FallbackShot.Bank2(bestTwoRail)
+    val shownBank2 = PathBlock.firstClearTwoRailBank(allTwoRailBanks, others, ballRadiusPx)
+        ?: allTwoRailBanks.firstOrNull()
+    if (shownBank2 != null) return FallbackShot.Bank2(shownBank2)
 
     // No two-rail bank either: try two-rail kicks, ranked by the
     // direct cut angle (easiest pot first). Both contacts must
     // pass the corner guards (same numbers as PracticeState):
     // inside the rail span, four ball radii clear of the corners,
-    // and not on the pocket. This is the last resort before the
-    // combo/kiss search: a two-rail kick is only shown when it is
-    // the only single-ball shot left.
-    var bestTwoRailKick: ShotSolver.TwoRailKickSolution? = null
-    var bestTwoRailKickCut = Double.MAX_VALUE
-    for (pocket in pockets) {
-        for ((index1, rail1) in rails.withIndex()) {
-            for ((index2, rail2) in rails.withIndex()) {
-                if (index1 == index2) continue
-                // No pocket-on-rail skip here (unlike the bank
-                // searches): a kick mirrors the ghost, never the
-                // pocket, so a pocket on a rail is not
-                // degenerate — the solver itself returns null
-                // when the ghost sits on either rail.
-                val kick2 = ShotSolver.solveTwoRailKick(
-                    cue, target, pocket, rail1, rail2, ballRadiusPx
-                ) ?: continue
-                if (!bankContactIsValid(kick2.railContacts[0], index1, table, pocket, ballRadiusPx)) continue
-                if (!bankContactIsValid(kick2.railContacts[1], index2, table, pocket, ballRadiusPx)) continue
-                if (kick2.direct.cutAngleDegrees < bestTwoRailKickCut) {
-                    bestTwoRailKick = kick2
-                    bestTwoRailKickCut = kick2.direct.cutAngleDegrees
-                }
-            }
-        }
+    // and not on the pocket. The shown kick is its first CLEAR
+    // one in cut order (v1.0.23 re-ranking), same rule as the
+    // bank above. This is the last resort before the combo/kiss
+    // search: a two-rail kick is only shown when it is the only
+    // single-ball shot left.
+    val allTwoRailKicks = ShotSolver.allTwoRailKicks(
+        cue, target, pockets, rails, ballRadiusPx
+    ) { contact, index, pocket ->
+        bankContactIsValid(contact, index, table, pocket, ballRadiusPx)
     }
-    if (bestTwoRailKick != null) return FallbackShot.Kick2(bestTwoRailKick)
+    val shownKick2 = PathBlock.firstClearTwoRailKick(allTwoRailKicks, others, ballRadiusPx)
+        ?: allTwoRailKicks.firstOrNull()
+    if (shownKick2 != null) return FallbackShot.Kick2(shownKick2)
 
     // No two-rail kick either: try combos, ranked by the second
     // shot's cut angle (easiest pot first). The picked target is

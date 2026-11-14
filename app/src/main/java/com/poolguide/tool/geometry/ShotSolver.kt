@@ -120,6 +120,80 @@ object ShotSolver {
         })
     }
 
+    /** Every reachable two-rail bank across [pockets] and every
+     * ordered pair of distinct [rails], best (smallest direct cut
+     * angle) first. The same ranking as [allShots], so the live
+     * pipeline can re-rank two-rail banks the way v1.0.21
+     * re-ranked direct shots and v1.0.22 re-ranked one-rail banks.
+     * [isValidContact] is the corner guard the live fallback
+     * applies to each contact (inside the rail span, four ball
+     * radii clear of the corners, not on the pocket): the geometry
+     * module takes it as a predicate so the table rect stays out
+     * of the solver. A pocket on either rail is skipped by the
+     * solver itself (it returns null there), and same-rail pairs
+     * are skipped here. The sort is stable, so equal keys keep
+     * pocket/rail order. */
+    fun allTwoRailBanks(
+        cue: Vec2,
+        target: Vec2,
+        pockets: List<Vec2>,
+        rails: List<Rail>,
+        ballRadiusPx: Double,
+        isValidContact: (contact: Vec2, railIndex: Int, pocket: Vec2) -> Boolean
+    ): List<TwoRailBankSolution> {
+        val solved = pockets.flatMap { pocket ->
+            rails.flatMapIndexed { index1, rail1 ->
+                rails.mapIndexedNotNull { index2, rail2 ->
+                    if (index1 == index2) return@mapIndexedNotNull null
+                    val bank = solveTwoRailBank(
+                        cue, target, pocket, rail1, rail2, ballRadiusPx
+                    ) ?: return@mapIndexedNotNull null
+                    if (!isValidContact(bank.railContacts[0], index1, pocket)) null
+                    else if (!isValidContact(bank.railContacts[1], index2, pocket)) null
+                    else bank
+                }
+            }
+        }
+        return solved.sortedWith(Comparator { a, b ->
+            cutOrder(a.direct.cutAngleDegrees, b.direct.cutAngleDegrees)
+        })
+    }
+
+    /** Every reachable two-rail kick across [pockets] and every
+     * ordered pair of distinct [rails], best (smallest direct cut
+     * angle) first. The same ranking as [allKicks]. [isValidContact]
+     * is the corner guard the live fallback applies to each
+     * contact (inside the rail span, four ball radii clear of the
+     * corners, not on the pocket). A ghost on either rail is
+     * skipped by the solver itself (it returns null there), and
+     * same-rail pairs are skipped here. The sort is stable, so
+     * equal keys keep pocket/rail order. */
+    fun allTwoRailKicks(
+        cue: Vec2,
+        target: Vec2,
+        pockets: List<Vec2>,
+        rails: List<Rail>,
+        ballRadiusPx: Double,
+        isValidContact: (contact: Vec2, railIndex: Int, pocket: Vec2) -> Boolean
+    ): List<TwoRailKickSolution> {
+        val solved = pockets.flatMap { pocket ->
+            rails.flatMapIndexed { index1, rail1 ->
+                rails.mapIndexedNotNull { index2, rail2 ->
+                    if (index1 == index2) return@mapIndexedNotNull null
+                    val kick = solveTwoRailKick(
+                        cue, target, pocket, rail1, rail2, ballRadiusPx
+                    ) ?: return@mapIndexedNotNull null
+                    if (!isValidContact(kick.railContacts[0], index1, pocket)) null
+                    else if (!isValidContact(kick.railContacts[1], index2, pocket)) null
+                    else kick
+                }
+            }
+        }
+        return solved.sortedWith(Comparator { a, b ->
+            cutOrder(a.direct.cutAngleDegrees, b.direct.cutAngleDegrees)
+        })
+    }
+
     /** Result of solving a combo shot: the cue strikes [firstShot]'s
      * target, which strikes [secondShot]'s target into the pocket. */
     data class ComboSolution(

@@ -297,4 +297,100 @@ class LiveFallbackTest {
             com.poolguide.tool.geometry.PathBlock.blockedBy(bank, blockers, r)
         )
     }
+
+    // ---- two-rail re-ranking (v1.0.23) ----
+    //
+    // Layouts verified against the real solver with kotlinc before
+    // the tests were written (see probe23/probe23g.kt and
+    // probe23j.kt). The fallback only reaches the two-rail search
+    // when no direct shot and no one-rail bank or kick solves, and
+    // a 90,006-layout scan found exactly four such layouts, all
+    // with the cue 19 px from the target: the one-rail bank sits
+    // at ~90 degrees cut, so the family flips within 0.1 px of
+    // cue movement (probe23i). The layout below is one of them:
+    // target (50,50) near the top-left corner, cue 19 px away at
+    // 300 degrees, so no direct shot and no one-rail bank or kick
+    // solves, and two two-rail banks solve: 27.93 into the
+    // top-middle pocket (contacts left (40,68.5) + bottom
+    // (186.9,340)) and 88.05 into the top-right pocket (contacts
+    // (40,59.4) + (339,340)). The tests pin exact doubles and
+    // assert the empty earlier families first, so a solver change
+    // that flips the family fails loudly here instead of silently
+    // showing a different shot. No demo image proves this end to
+    // end (see the PR body): the cue sits 19 px from the target
+    // and the best bank's ghost is ~1 px from the cue, so no
+    // guideline can be drawn for the pipeline to pick the target.
+
+    private val twoRailTarget = Vec2(50.0, 50.0)
+    private val twoRailCue = run {
+        val angle = Math.toRadians(300.0)
+        Vec2(
+            50.0 + 19.0 * kotlin.math.cos(angle),
+            50.0 + 19.0 * kotlin.math.sin(angle)
+        )
+    }
+
+    private fun allTwoRailBanksGuarded(cue: Vec2, target: Vec2) =
+        ShotSolver.allTwoRailBanks(
+            cue, target, pockets, railsOf(table), r
+        ) { contact, index, pocket ->
+            bankContactIsValid(contact, index, table, pocket, r)
+        }
+
+    @Test
+    fun `blocked best two-rail bank gives way to the next clear two-rail bank`() {
+        assertTrue(ShotSolver.allShots(twoRailCue, twoRailTarget, pockets, r).isEmpty())
+        assertTrue(
+            ShotSolver.allBanks(twoRailCue, twoRailTarget, pockets, railsOf(table), r).isEmpty()
+        )
+        assertTrue(
+            ShotSolver.allKicks(twoRailCue, twoRailTarget, pockets, railsOf(table), r) { contact, index, pocket ->
+                bankContactIsValid(contact, index, table, pocket, r)
+            }.isEmpty()
+        )
+        val banks = allTwoRailBanksGuarded(twoRailCue, twoRailTarget)
+        assertEquals(27.93, banks.first().direct.cutAngleDegrees, 0.1)
+        // Blocker on the best bank's second-leg midpoint (113.4,204.2).
+        val mid = (banks.first().bankPath[1].start + banks.first().bankPath[1].end) * 0.5
+        val result = solveFallback(
+            twoRailCue, twoRailTarget, listOf(mid), pockets, table, r
+        )
+        assertTrue(result is FallbackShot.Bank2)
+        val bank = (result as FallbackShot.Bank2).solution
+        assertEquals(88.05, bank.direct.cutAngleDegrees, 0.1)
+        assertVec(Vec2(63.1, 37.7), bank.direct.ghostPoint)
+        assertVec(Vec2(40.0, 59.4), bank.railContacts[0])
+        assertVec(Vec2(339.0, 340.0), bank.railContacts[1])
+        assertVec(Vec2(680.0, 20.0), bank.bankPath[2].end)
+        assertNull(
+            com.poolguide.tool.geometry.PathBlock.blockedBy(
+                bank, listOf(mid), r
+            )
+        )
+    }
+
+    @Test
+    fun `all-blocked two-rail banks keep the best and flag it`() {
+        val banks = allTwoRailBanksGuarded(twoRailCue, twoRailTarget)
+        // One blocker on each bank's second-leg midpoint:
+        // (113.4,204.2) on the best bank, (189.5,199.7) on the
+        // second. No bank is clear, so the fallback keeps the
+        // best bank (27.93) and the pipeline flags it via the
+        // first blocker on its path.
+        val blockers = banks.map {
+            (it.bankPath[1].start + it.bankPath[1].end) * 0.5
+        }
+        val result = solveFallback(
+            twoRailCue, twoRailTarget, blockers, pockets, table, r
+        )
+        assertTrue(result is FallbackShot.Bank2)
+        val bank = (result as FallbackShot.Bank2).solution
+        assertEquals(27.93, bank.direct.cutAngleDegrees, 0.1)
+        // The flag names the first blocker on the kept best bank's
+        // path: the best bank's own leg-2 midpoint (blockers[0]).
+        assertEquals(
+            blockers[0],
+            com.poolguide.tool.geometry.PathBlock.blockedBy(bank, blockers, r)
+        )
+    }
 }

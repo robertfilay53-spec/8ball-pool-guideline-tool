@@ -40,10 +40,16 @@ import kotlin.math.sqrt
  * shot solves, the shown one-rail shot is the first clear bank
  * or kick in cut order, and the bank-vs-kick choice compares
  * the two first-clear cuts, so the easiest makeable one-rail
- * shot wins. Two-rail banks/kicks, combo, and kiss shots are
- * still flag-only: their fallbacks return a single best shot,
- * not a ranked list, so there is nothing to re-rank within
- * the family.
+ * shot wins. v1.0.23 re-ranks TWO-RAIL banks and kicks the
+ * same way ([firstClearTwoRailBank], [firstClearTwoRailKick]):
+ * when no one-rail shot solves either, the shown two-rail shot
+ * is the first clear one in cut order. The two-rail bank is
+ * still tried before the two-rail kick (a two-rail kick
+ * compounds real-table error twice, so it stays the last resort
+ * before combo, as before). The re-ranking is WITHIN each
+ * family, not between them. Combo and kiss shots are still
+ * flag-only: their fallbacks return a single best shot, not a
+ * ranked list, so there is nothing to re-rank within the family.
  */
 object PathBlock {
 
@@ -178,6 +184,38 @@ object PathBlock {
         blockers: List<Vec2>,
         ballRadiusPx: Double
     ): ShotSolver.KickSolution? {
+        require(ballRadiusPx > 0) { "ballRadiusPx must be positive" }
+        return kicks.firstOrNull { blockedBy(it, blockers, ballRadiusPx) == null }
+    }
+
+    /** First CLEAR two-rail bank in [banks] (v1.0.23): the first
+     * bank whose path no other ball sits on, in the given order.
+     * The caller passes the cut-ranked [ShotSolver.allTwoRailBanks]
+     * list, so this is the easiest makeable two-rail bank. Returns
+     * null when every bank is blocked (the caller then keeps the
+     * best and flags it) or when [banks] is empty. Same blocker
+     * rule as [firstClearBank]. */
+    fun firstClearTwoRailBank(
+        banks: List<ShotSolver.TwoRailBankSolution>,
+        blockers: List<Vec2>,
+        ballRadiusPx: Double
+    ): ShotSolver.TwoRailBankSolution? {
+        require(ballRadiusPx > 0) { "ballRadiusPx must be positive" }
+        return banks.firstOrNull { blockedBy(it, blockers, ballRadiusPx) == null }
+    }
+
+    /** First CLEAR two-rail kick in [kicks] (v1.0.23): the first
+     * kick whose path no other ball sits on, in the given order.
+     * The caller passes the cut-ranked [ShotSolver.allTwoRailKicks]
+     * list, so this is the easiest makeable two-rail kick. Returns
+     * null when every kick is blocked (the caller then keeps the
+     * best and flags it) or when [kicks] is empty. Same blocker
+     * rule as [firstClearBank]. */
+    fun firstClearTwoRailKick(
+        kicks: List<ShotSolver.TwoRailKickSolution>,
+        blockers: List<Vec2>,
+        ballRadiusPx: Double
+    ): ShotSolver.TwoRailKickSolution? {
         require(ballRadiusPx > 0) { "ballRadiusPx must be positive" }
         return kicks.firstOrNull { blockedBy(it, blockers, ballRadiusPx) == null }
     }
