@@ -165,4 +165,34 @@ class PracticeInstrumentedTest {
             }
         }
     }
+
+    @Test
+    fun practice_groupTags_drawWithoutCrashing() {
+        // v1.0.14: PracticeView draws one group tag per ball next to
+        // its shot lines (cue "C", others "S"). The tag text comes
+        // from the ball's group, so this pins the assignment through
+        // the live view and exercises the tag draw path (anchor +
+        // drawText) in every mode — the canvas pixels themselves are
+        // not assertable on the emulator.
+        ActivityScenario.launch(PracticeActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val state = activity.practiceView.state
+                assertNotNull("practice state must exist", state)
+                assertEquals(
+                    com.poolguide.tool.geometry.BallGroup.CUE, state!!.cue.group
+                )
+                assertEquals(
+                    com.poolguide.tool.geometry.BallGroup.SOLID, state.target.group
+                )
+                assertEquals(
+                    com.poolguide.tool.geometry.BallGroup.SOLID, state.middle.group
+                )
+                for (mode in PracticeState.PracticeMode.values()) {
+                    state.setMode(mode)
+                    assertNotNull("mode $mode must solve", state.solve())
+                    activity.practiceView.invalidate()
+                }
+            }
+        }
+    }
 }

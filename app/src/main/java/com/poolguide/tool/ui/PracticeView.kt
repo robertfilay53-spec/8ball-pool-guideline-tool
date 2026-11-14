@@ -8,6 +8,7 @@ import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
 import com.poolguide.tool.cv.TableRect
+import com.poolguide.tool.geometry.BallGroupTag
 import com.poolguide.tool.geometry.CutAngleLabel
 import com.poolguide.tool.geometry.Segment
 import com.poolguide.tool.geometry.ShotSolver
@@ -138,6 +139,15 @@ class PracticeView @JvmOverloads constructor(
         style = Paint.Style.FILL
         textAlign = Paint.Align.CENTER
     }
+    /** Group-tag text (v1.0.14): centred on its anchor, colour set
+     * per ball at draw time (white cue, blue middle, red target —
+     * the ball's own paint colour). Text size is set from the view
+     * scale at draw time, like the cut-angle label. */
+    private val groupTagPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        style = Paint.Style.FILL
+        textAlign = Paint.Align.CENTER
+    }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
@@ -174,7 +184,8 @@ class PracticeView @JvmOverloads constructor(
         }
         // Solved shot lines (v1.0.6: direct, combo, and kiss modes;
         // v1.0.7: bank mode).
-        when (val solution = st.solve()) {
+        val solution = st.solve()
+        when (solution) {
             is PracticeState.PracticeSolution.Direct -> drawShot(canvas, solution.shot)
             is PracticeState.PracticeSolution.Bank -> drawBank(canvas, solution.solution.direct, solution.solution.bankPath)
             is PracticeState.PracticeSolution.Bank2 -> drawBank(canvas, solution.solution.direct, solution.solution.bankPath)
@@ -220,6 +231,79 @@ class PracticeView @JvmOverloads constructor(
                     v.x.toFloat(), v.y.toFloat(), ballR + 6f, selectPaint
                 )
             }
+        }
+        // Group tags (v1.0.14): the same tags as the live overlay —
+        // the ball's group, in the ball's own paint colour, anchored
+        // 2.2 radii off the nearest shot segment through the ball (or
+        // straight above it when no line passes through it), so a tag
+        // never sits on the line it sits next to. Tags draw only when
+        // a shot solves, the same as the lines.
+        if (solution != null) {
+            val segments = segmentsFor(solution)
+            for (ball in st.balls()) {
+                val anchor = BallGroupTag.anchor(ball.center, BALL_RADIUS_PX, segments)
+                groupTagPaint.color = when {
+                    ball.isCue -> Color.WHITE
+                    ball.id == 2 -> Color.BLUE
+                    else -> Color.RED
+                }
+                groupTagPaint.textSize = (16.0 * scale).toFloat()
+                val ap = toView(anchor)
+                canvas.drawText(
+                    ball.group.tagText(),
+                    ap.x.toFloat(), ap.y.toFloat(), groupTagPaint
+                )
+            }
+        }
+    }
+
+    /** The shot segments of a solution, in logical coordinates — the
+     * lines the group tags anchor off (v1.0.14). Mirrors the draw
+     * calls in onDraw so the anchor rule sees exactly the lines that
+     * are on screen. */
+    private fun segmentsFor(
+        solution: PracticeState.PracticeSolution
+    ): List<Segment> {
+        return when (solution) {
+            is PracticeState.PracticeSolution.Direct -> listOf(
+                solution.shot.aimLine,
+                solution.shot.targetLine,
+                solution.shot.deflectionLine
+            )
+            is PracticeState.PracticeSolution.Bank ->
+                listOf(solution.solution.direct.aimLine) + solution.solution.bankPath
+            is PracticeState.PracticeSolution.Bank2 ->
+                listOf(solution.solution.direct.aimLine) + solution.solution.bankPath
+            is PracticeState.PracticeSolution.Kick ->
+                listOf(solution.solution.direct.aimLine) +
+                    solution.solution.kickPath.drop(1) +
+                    listOf(
+                        solution.solution.direct.targetLine,
+                        solution.solution.direct.deflectionLine
+                    )
+            is PracticeState.PracticeSolution.Kick2 ->
+                listOf(solution.solution.direct.aimLine) +
+                    solution.solution.kickPath.drop(1) +
+                    listOf(
+                        solution.solution.direct.targetLine,
+                        solution.solution.direct.deflectionLine
+                    )
+            is PracticeState.PracticeSolution.Combo -> listOf(
+                solution.solution.firstShot.aimLine,
+                solution.solution.firstShot.targetLine,
+                solution.solution.firstShot.deflectionLine,
+                solution.solution.secondShot.aimLine,
+                solution.solution.secondShot.targetLine,
+                solution.solution.secondShot.deflectionLine
+            )
+            is PracticeState.PracticeSolution.Kiss -> listOf(
+                solution.solution.kissShot.aimLine,
+                solution.solution.kissShot.targetLine,
+                solution.solution.kissShot.deflectionLine,
+                solution.solution.secondShot.aimLine,
+                solution.solution.secondShot.targetLine,
+                solution.solution.secondShot.deflectionLine
+            )
         }
     }
 

@@ -6,8 +6,11 @@ import android.content.Intent
 import android.provider.Settings
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.poolguide.tool.cv.Ball
+import com.poolguide.tool.cv.BallColor
 import com.poolguide.tool.cv.DetectionResult
 import com.poolguide.tool.data.CalibrationStore
+import com.poolguide.tool.geometry.BallGroup
 import com.poolguide.tool.geometry.CutAngleLabel
 import com.poolguide.tool.geometry.Segment
 import com.poolguide.tool.geometry.ShotSolver
@@ -66,6 +69,61 @@ class OverlayInstrumentedTest {
             tableLocked = true,
             status = "Shot to pocket"
         )
+    }
+
+    /** The same shot as [shotResult], but with three classified balls
+     * (v1.0.14): the cue ball (C), the target ball (S), and an
+     * unknown-group ball off the shot lines (?). The shot itself is
+     * unchanged — the balls only feed the group tags. */
+    private fun shotResultWithBalls(): DetectionResult {
+        val cue = Ball(0, Vec2(100.0, 200.0), 9.0, BallColor.WHITE, false, BallGroup.CUE)
+        val target = Ball(1, Vec2(300.0, 200.0), 9.0, BallColor.RED, false, BallGroup.SOLID)
+        val unknown = Ball(2, Vec2(500.0, 100.0), 9.0, BallColor.UNKNOWN, false, BallGroup.UNKNOWN)
+        return shotResult().copy(
+            balls = listOf(cue, target, unknown),
+            cueBall = cue
+        )
+    }
+
+    @Test
+    fun groupTags_showWithLines_hideWithLines() {
+        val ctx = appContext()
+        assertTrue(
+            "overlay permission must be granted for this test",
+            Settings.canDrawOverlays(ctx)
+        )
+        val store = CalibrationStore(ctx).apply { guidesHidden = false }
+        val manager = LineOverlayManager(ctx, store)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+
+        // One tag window per detected ball, in ball order — and the
+        // pinned line/label counts do not move (4 lines, 1 angle
+        // label for this straight best shot).
+        store.showAllShots = false
+        instrumentation.runOnMainSync { manager.update(shotResultWithBalls()) }
+        assertEquals("expected 4 line windows", 4, manager.lineWindowCount)
+        assertEquals("expected 1 label window", 1, manager.labelWindowCount)
+        assertEquals("expected 3 tag windows", 3, manager.tagWindowCount)
+        assertEquals(listOf("C", "S", "?"), manager.tagTexts)
+
+        // Hide toggle removes the tags with the lines.
+        store.guidesHidden = true
+        instrumentation.runOnMainSync { manager.update(shotResultWithBalls()) }
+        assertEquals("hide must remove all tag windows", 0, manager.tagWindowCount)
+        assertEquals("hide must remove all line windows", 0, manager.lineWindowCount)
+
+        // Black frame removes the tags too.
+        store.guidesHidden = false
+        instrumentation.runOnMainSync { manager.update(shotResultWithBalls()) }
+        assertEquals(3, manager.tagWindowCount)
+        val black = shotResultWithBalls().copy(
+            isCaptureBlack = true, shot = null, guideline = emptyList()
+        )
+        instrumentation.runOnMainSync { manager.update(black) }
+        assertEquals("black frame must remove all tag windows", 0, manager.tagWindowCount)
+
+        instrumentation.runOnMainSync { manager.removeAll() }
+        assertEquals(0, manager.tagWindowCount)
     }
 
     @Test

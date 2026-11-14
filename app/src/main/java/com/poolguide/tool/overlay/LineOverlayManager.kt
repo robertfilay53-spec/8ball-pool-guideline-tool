@@ -14,9 +14,12 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import com.poolguide.tool.R
+import com.poolguide.tool.cv.Ball
+import com.poolguide.tool.cv.BallColor
 import com.poolguide.tool.cv.DetectionResult
 import com.poolguide.tool.data.CalibrationStore
 import com.poolguide.tool.data.DiagnosticsLog
+import com.poolguide.tool.geometry.BallGroupTag
 import com.poolguide.tool.geometry.CutAngleLabel
 import com.poolguide.tool.geometry.Segment
 import com.poolguide.tool.geometry.ShotSolver
@@ -126,6 +129,14 @@ class LineOverlayManager(
      * line-window counts (4 for a direct shot, 8 with all shots) are
      * pinned by instrumented tests and must not change. */
     private val labelWindows = mutableListOf<LabelWindow>()
+    /** Group-tag windows (v1.0.14): one small TextView window per
+     * detected ball ("C" cue, "8" eight, "S" solid, "ST" stripe,
+     * "?" unknown), managed exactly like the label windows (reuse by
+     * index, removed with the lines). Kept separate from
+     * [labelWindows] on purpose: the pinned label counts (1 for a
+     * direct shot, 2 for a thin one) must not change when tags are
+     * added. */
+    private val tagWindows = mutableListOf<LabelWindow>()
     private var bubbleParams: WindowManager.LayoutParams? = null
     private var bubbleView: View? = null
     /** Lock-progress ring on the bubble (v1.0.5). */
@@ -154,6 +165,15 @@ class LineOverlayManager(
      * window order (angle label first, thin-cut warning second). */
     @androidx.annotation.VisibleForTesting
     val labelTexts: List<String> get() = labelWindows.map { it.view.text.toString() }
+
+    /** Test-only: how many group-tag windows are currently shown. */
+    @androidx.annotation.VisibleForTesting
+    val tagWindowCount: Int get() = tagWindows.size
+
+    /** Test-only: the texts of the currently shown tag windows, in
+     * ball order (the order of [DetectionResult.balls]). */
+    @androidx.annotation.VisibleForTesting
+    val tagTexts: List<String> get() = tagWindows.map { it.view.text.toString() }
 
     /** Test-only: whether EDIT mode is active. */
     @androidx.annotation.VisibleForTesting
@@ -233,10 +253,12 @@ class LineOverlayManager(
         val centerY: Float
     )
 
-    /** The lines and labels for one frame. */
+    /** The lines, labels, and group tags for one frame. */
     private data class DrawnOverlay(
         val lines: List<DrawLine>,
-        val labels: List<DrawLabel>
+        val labels: List<DrawLabel>,
+        /** Group tags (v1.0.14): one per detected ball, in ball order. */
+        val tags: List<DrawLabel> = emptyList()
     )
 
     fun update(result: DetectionResult) {
@@ -268,6 +290,7 @@ class LineOverlayManager(
             smoother.reset()
             removeLineWindows()
             removeLabelWindows()
+            removeTagWindows()
             return
         }
 
@@ -277,6 +300,7 @@ class LineOverlayManager(
         if (hide) {
             removeLineWindows()
             removeLabelWindows()
+            removeTagWindows()
             return
         }
 
@@ -284,10 +308,12 @@ class LineOverlayManager(
         if (drawn.lines.isEmpty()) {
             removeLineWindows()
             removeLabelWindows()
+            removeTagWindows()
             return
         }
         applyLines(drawn.lines)
         applyLabels(drawn.labels)
+        applyTags(drawn.tags)
     }
 
     /** EDIT-mode frame: draw the frozen shot with any anchor corrections.
@@ -299,6 +325,7 @@ class LineOverlayManager(
         if (store.guidesHidden || result.isCaptureBlack) {
             removeLineWindows()
             removeLabelWindows()
+            removeTagWindows()
             removeHandles()
             return
         }
@@ -306,6 +333,7 @@ class LineOverlayManager(
         if (shot == null) {
             removeLineWindows()
             removeLabelWindows()
+            removeTagWindows()
             removeHandles()
             return
         }
@@ -313,11 +341,13 @@ class LineOverlayManager(
         if (drawn.lines.isEmpty()) {
             removeLineWindows()
             removeLabelWindows()
+            removeTagWindows()
             removeHandles()
             return
         }
         applyLines(drawn.lines)
         applyLabels(drawn.labels)
+        applyTags(drawn.tags)
         ensureHandles(shot, result)
     }
 
@@ -335,24 +365,63 @@ class LineOverlayManager(
         fun map(p: Vec2) = Vec2(p.x * sx, p.y * sy)
         val pocket = shot.targetLine.end
         val aim = Segment(map(shot.aimLine.start), map(shot.aimLine.end))
-        return DrawnOverlay(
-            lines = listOf(
-                DrawLine(aim, AIM_COLOR, AIM_WIDTH_PX),
-                DrawLine(
-                    Segment(map(shot.targetLine.start), map(shot.targetLine.end)),
-                    TARGET_COLOR, LINE_WIDTH_PX
-                ),
-                DrawLine(
-                    Segment(map(shot.deflectionLine.start), map(shot.deflectionLine.end)),
-                    DEFLECT_COLOR, LINE_WIDTH_PX
-                ),
-                DrawLine(
-                    Segment(map(pocket), map(pocket)),
-                    POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = 18f
-                )
+        val lines = listOf(
+            DrawLine(aim, AIM_COLOR, AIM_WIDTH_PX),
+            DrawLine(
+                Segment(map(shot.targetLine.start), map(shot.targetLine.end)),
+                TARGET_COLOR, LINE_WIDTH_PX
             ),
-            labels = labelsFor(shot, aim, result, AIM_COLOR)
+            DrawLine(
+                Segment(map(shot.deflectionLine.start), map(shot.deflectionLine.end)),
+                DEFLECT_COLOR, LINE_WIDTH_PX
+            ),
+            DrawLine(
+                Segment(map(pocket), map(pocket)),
+                POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = 18f
+            )
         )
+        return DrawnOverlay(
+            lines = lines,
+            labels = labelsFor(shot, aim, result, AIM_COLOR),
+            tags = groupTags(result, lines.filter { !it.isRing }.map { it.segment })
+        )
+    }
+
+    /** Group tags (v1.0.14): one small tag per detected ball, in the
+     * ball's own colour family (white for the cue and the 8-ball —
+     * black text would be unreadable on the dark tag backing — grey
+     * for an unknown group). The anchor sits 2.2 radii off the
+     * nearest drawn shot segment through the ball (or straight above
+     * it when no line passes through it), so a tag never sits on the
+     * line it sits next to. [segments] are screen coordinates, the
+     * same space as the drawn lines. */
+    private fun groupTags(result: DetectionResult, segments: List<Segment>): List<DrawLabel> {
+        val sx = result.scaleToScreenX
+        val sy = result.scaleToScreenY
+        return result.balls.map { ball ->
+            val center = Vec2(ball.center.x * sx, ball.center.y * sy)
+            val radiusScreen = ball.radiusPx * sx
+            val anchor = BallGroupTag.anchor(center, radiusScreen, segments)
+            DrawLabel(
+                ball.group.tagText(),
+                tagColor(ball),
+                anchor.x.toFloat(),
+                anchor.y.toFloat()
+            )
+        }
+    }
+
+    /** Tag text colour for one ball, from its detected colour family. */
+    private fun tagColor(ball: Ball): Int = when (ball.color) {
+        BallColor.WHITE -> Color.WHITE
+        BallColor.BLACK -> Color.WHITE
+        BallColor.RED -> 0xFFFF5252.toInt()
+        BallColor.YELLOW -> 0xFFFFD600.toInt()
+        BallColor.BLUE -> 0xFF448AFF.toInt()
+        BallColor.ORANGE -> 0xFFFFAB40.toInt()
+        BallColor.GREEN -> 0xFF00E676.toInt()
+        BallColor.PURPLE -> 0xFFE040FB.toInt()
+        BallColor.UNKNOWN -> 0xFFBDBDBD.toInt()
     }
 
     /** The cut-angle label (+ thin-cut warning) for one shot, from a
@@ -727,7 +796,11 @@ class LineOverlayManager(
                 POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = 18f
             )
         }
-        return DrawnOverlay(out, labels)
+        return DrawnOverlay(
+            out,
+            labels,
+            groupTags(result, out.filter { !it.isRing }.map { it.segment })
+        )
     }
 
     /** Reuse windows by index; add or remove as the line count changes. */
@@ -827,6 +900,59 @@ class LineOverlayManager(
         }
     }
 
+    /** Group tags (v1.0.14): same window mechanics as [applyLabels],
+     * but on the separate [tagWindows] list so the pinned label
+     * counts never change. A tag is a small NOT_TOUCHABLE TextView in
+     * the ball's own colour family on the same dark backing as the
+     * cut-angle labels. */
+    private fun applyTags(tags: List<DrawLabel>) {
+        for (i in tags.indices) {
+            val tag = tags[i]
+            if (i < tagWindows.size) {
+                val win = tagWindows[i]
+                win.view.text = tag.text
+                win.view.setTextColor(tag.color)
+                val (w, h) = measureLabel(win.view)
+                win.params.x = (tag.centerX - w / 2).toInt()
+                win.params.y = (tag.centerY - h / 2).toInt()
+                win.params.width = w
+                win.params.height = h
+                windowManager.updateViewLayout(win.view, win.params)
+            } else {
+                val view = TextView(context).apply {
+                    text = tag.text
+                    setTextColor(tag.color)
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, LABEL_TEXT_SIZE_SP)
+                    setBackgroundColor(Color.argb(200, 0, 0, 0))
+                    setPadding(8, 2, 8, 2)
+                }
+                val (w, h) = measureLabel(view)
+                val params = WindowManager.LayoutParams(
+                    w, h,
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    PixelFormat.TRANSLUCENT
+                ).apply {
+                    gravity = Gravity.TOP or Gravity.START
+                    x = (tag.centerX - w / 2).toInt()
+                    y = (tag.centerY - h / 2).toInt()
+                }
+                windowManager.addView(view, params)
+                tagWindows += LabelWindow(view, params)
+            }
+        }
+        // Remove surplus windows.
+        while (tagWindows.size > tags.size) {
+            val win = tagWindows.removeAt(tagWindows.lastIndex)
+            try {
+                windowManager.removeView(win.view)
+            } catch (_: Exception) {
+            }
+        }
+    }
+
     /** Measure a label view at its current text (UNSPECIFIED both
      * ways, so the window wraps the text). */
     private fun measureLabel(view: TextView): Pair<Int, Int> {
@@ -845,6 +971,16 @@ class LineOverlayManager(
             }
         }
         labelWindows.clear()
+    }
+
+    private fun removeTagWindows() {
+        for (win in tagWindows) {
+            try {
+                windowManager.removeView(win.view)
+            } catch (_: Exception) {
+            }
+        }
+        tagWindows.clear()
     }
 
     private data class WindowBox(
@@ -907,6 +1043,7 @@ class LineOverlayManager(
         if (store.guidesHidden) {
             removeLineWindows()
             removeLabelWindows()
+            removeTagWindows()
         }
     }
 
@@ -1051,6 +1188,7 @@ class LineOverlayManager(
         manualAim.exitEditMode()
         removeLineWindows()
         removeLabelWindows()
+        removeTagWindows()
         removeHandles()
         bubbleView?.let {
             try {

@@ -1,5 +1,7 @@
 package com.poolguide.tool.cv
 
+import com.poolguide.tool.geometry.BallGroup
+import com.poolguide.tool.geometry.BallGroupClassifier
 import com.poolguide.tool.geometry.Vec2
 import org.opencv.core.Core
 import org.opencv.core.Mat
@@ -174,7 +176,32 @@ class BallDetector {
             }
         }
 
-        return track(found, frameIndex)
+        return track(classifyGroups(hsv, found), frameIndex)
+    }
+
+    /**
+     * Group identification (v1.0.14): sample each detected ball's disc
+     * and classify its group (cue / eight / solid / stripe / unknown).
+     * A ball whose disc overlaps another detected ball's is occluded:
+     * UNKNOWN, never guessed. Runs on the full found list so the
+     * occlusion check sees every ball on the table this frame; the
+     * tracker then carries each ball's group across frames with its
+     * id (a ball missed briefly keeps the group it was last
+     * classified with).
+     */
+    private fun classifyGroups(hsv: Mat, found: List<Ball>): List<Ball> {
+        return found.map { ball ->
+            val others = found.filter { it !== ball }
+                .map { it.center to it.radiusPx }
+            val group = if (BallGroupClassifier.isOccluded(ball.center, ball.radiusPx, others)) {
+                BallGroup.UNKNOWN
+            } else {
+                BallGroupClassifier.classify(
+                    BallClassifier.sampleDisc(hsv, ball.center, ball.radiusPx)
+                )
+            }
+            ball.copy(group = group)
+        }
     }
 
     fun reset() {

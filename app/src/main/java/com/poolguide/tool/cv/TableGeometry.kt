@@ -1,6 +1,7 @@
 package com.poolguide.tool.cv
 
 import com.poolguide.tool.data.GameProfile
+import com.poolguide.tool.geometry.BallGroup
 import com.poolguide.tool.geometry.Segment
 import com.poolguide.tool.geometry.ShotSolver
 import com.poolguide.tool.geometry.Vec2
@@ -17,7 +18,12 @@ data class Ball(
     val radiusPx: Double,
     val color: BallColor,
     /** True when the ball's centre pixel is white (stripe ball band). */
-    val isStripe: Boolean
+    val isStripe: Boolean,
+    /** Group from the disc classifier (v1.0.14): cue / eight /
+     * solid / stripe / unknown. UNKNOWN until the detector classifies
+     * the ball — a tracked ball carried over a missed frame keeps the
+     * group it was last classified with. */
+    val group: BallGroup = BallGroup.UNKNOWN
 ) {
     val isCue: Boolean get() = color == BallColor.WHITE
     val isEight: Boolean get() = color == BallColor.BLACK
