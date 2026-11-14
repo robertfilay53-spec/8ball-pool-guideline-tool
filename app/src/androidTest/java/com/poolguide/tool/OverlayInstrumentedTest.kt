@@ -8,6 +8,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.poolguide.tool.cv.DetectionResult
 import com.poolguide.tool.data.CalibrationStore
+import com.poolguide.tool.geometry.CutAngleLabel
 import com.poolguide.tool.geometry.Segment
 import com.poolguide.tool.geometry.ShotSolver
 import com.poolguide.tool.geometry.Vec2
@@ -287,6 +288,139 @@ class OverlayInstrumentedTest {
         assertFalse(manager.isEditMode)
         assertEquals(0, manager.handleWindowCount)
         assertEquals(0, manager.lineWindowCount)
+
+        instrumentation.runOnMainSync { manager.removeAll() }
+    }
+
+    /** Thin-cut result (v1.0.12): cue (620, 260), target (620, 300)
+     * solves to the bottom-right pocket at 82.83 deg — thin, but not
+     * impossible. Verified against the solver with kotlinc before the
+     * test was written (cut12-probe/Probe12.kt). */
+    private fun thinShotResult(): DetectionResult {
+        val shot = ShotSolver.bestShot(
+            Vec2(620.0, 260.0), Vec2(620.0, 300.0),
+            listOf(
+                Vec2(40.0, 20.0), Vec2(680.0, 20.0), Vec2(680.0, 340.0),
+                Vec2(40.0, 340.0), Vec2(360.0, 20.0), Vec2(360.0, 340.0)
+            ),
+            9.0
+        )!!
+        return DetectionResult(
+            frameIndex = 1,
+            workingWidth = 720,
+            workingHeight = 405,
+            scaleToScreenX = 1.0,
+            scaleToScreenY = 1.0,
+            isCaptureBlack = false,
+            table = null,
+            pockets = emptyList(),
+            balls = emptyList(),
+            cueBall = null,
+            guideline = listOf(
+                com.poolguide.tool.cv.GuidelineSegment(
+                    Segment(Vec2(620.0, 260.0), Vec2(620.0, 300.0)), 40
+                )
+            ),
+            shot = shot,
+            bank = null,
+            allShots = listOf(shot),
+            tableLocked = true,
+            status = "Shot to pocket"
+        )
+    }
+
+    @Test
+    fun cutAngleLabel_showsWithLinesAndHidesWithThem() {
+        val ctx = appContext()
+        assertTrue(
+            "overlay permission must be granted for this test",
+            Settings.canDrawOverlays(ctx)
+        )
+        val store = CalibrationStore(ctx).apply { guidesHidden = false }
+        val manager = LineOverlayManager(ctx, store)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+
+        // A direct shot draws 4 line windows + 1 angle label (the
+        // shot is not thin, so no warning). The label text is the
+        // shot's own cut angle, one decimal.
+        val result = shotResult()
+        store.showAllShots = false
+        instrumentation.runOnMainSync { manager.update(result) }
+        assertEquals(4, manager.lineWindowCount)
+        assertEquals(1, manager.labelWindowCount)
+        assertEquals(
+            listOf(CutAngleLabel.format(result.shot!!.cutAngleDegrees)),
+            manager.labelTexts
+        )
+
+        // Hide toggle removes the label with the lines.
+        store.guidesHidden = true
+        instrumentation.runOnMainSync { manager.update(result) }
+        assertEquals(0, manager.lineWindowCount)
+        assertEquals("hide must remove the label too", 0, manager.labelWindowCount)
+
+        // Unhide brings both back.
+        store.guidesHidden = false
+        instrumentation.runOnMainSync { manager.update(result) }
+        assertEquals(4, manager.lineWindowCount)
+        assertEquals(1, manager.labelWindowCount)
+
+        // Black frame removes both as well.
+        val black = result.copy(isCaptureBlack = true, shot = null, guideline = emptyList())
+        instrumentation.runOnMainSync { manager.update(black) }
+        assertEquals("black frame must remove all line windows", 0, manager.lineWindowCount)
+        assertEquals("black frame must remove the label too", 0, manager.labelWindowCount)
+
+        instrumentation.runOnMainSync { manager.removeAll() }
+        assertEquals(0, manager.labelWindowCount)
+    }
+
+    @Test
+    fun thinCut_showsWarningLabel() {
+        val ctx = appContext()
+        assertTrue(
+            "overlay permission must be granted for this test",
+            Settings.canDrawOverlays(ctx)
+        )
+        val store = CalibrationStore(ctx).apply { guidesHidden = false }
+        val manager = LineOverlayManager(ctx, store)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+
+        // A thin shot draws the angle label AND the warning label.
+        val result = thinShotResult()
+        assertTrue(result.shot!!.isThinCut)
+        instrumentation.runOnMainSync { manager.update(result) }
+        assertEquals(4, manager.lineWindowCount)
+        assertEquals("thin shot needs angle + warning labels", 2, manager.labelWindowCount)
+        assertEquals(
+            listOf("82.8°", "Thin cut 82.8°"),
+            manager.labelTexts
+        )
+
+        instrumentation.runOnMainSync { manager.removeAll() }
+        assertEquals(0, manager.labelWindowCount)
+    }
+
+    @Test
+    fun noShot_showsNoLabels() {
+        val ctx = appContext()
+        assertTrue(
+            "overlay permission must be granted for this test",
+            Settings.canDrawOverlays(ctx)
+        )
+        val store = CalibrationStore(ctx).apply { guidesHidden = false }
+        val manager = LineOverlayManager(ctx, store)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+
+        // No shot, no bank, no kick: no lines and no labels, even
+        // with a guideline and a locked table.
+        val noShot = shotResult().copy(
+            shot = null, bank = null, kick = null, bank2 = null, kick2 = null,
+            allShots = emptyList()
+        )
+        instrumentation.runOnMainSync { manager.update(noShot) }
+        assertEquals(0, manager.lineWindowCount)
+        assertEquals("no shot must draw no labels", 0, manager.labelWindowCount)
 
         instrumentation.runOnMainSync { manager.removeAll() }
     }
