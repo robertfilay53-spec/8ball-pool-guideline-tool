@@ -303,7 +303,12 @@ class ComboKissTest {
         assertEquals(119.6, kiss.ghostPoint.y, 1.0)
         assertEquals(102.1, kiss.contactPoint.x, 1.0)
         assertEquals(109.8, kiss.contactPoint.y, 1.0)
-        assertEquals(kiss.ghostPoint, kiss.kissShot.ghostPoint)
+        // The first leg's ghost point is the same point, recomputed
+        // inside solveShot via a normalized() call — compare with a
+        // tolerance, not exact equality: the normalize rounds the
+        // last floating-point bit (exact assertEquals failed in CI).
+        assertEquals(kiss.ghostPoint.x, kiss.kissShot.ghostPoint.x, 1e-9)
+        assertEquals(kiss.ghostPoint.y, kiss.kissShot.ghostPoint.y, 1e-9)
         assertEquals(Vec2(180.0, 100.0), kiss.secondShot.ghostPoint)
         // The refined deflection ray from the ghost point must point at
         // the target's ghost point (the bisection root).
