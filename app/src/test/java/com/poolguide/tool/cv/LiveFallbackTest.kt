@@ -439,4 +439,46 @@ class LiveFallbackTest {
             kissBlockedBy(kiss, listOf(Vec2(100.0, 60.0), mid), r)!!
         )
     }
+
+    // ---- combo / kiss re-ranking (v1.0.25) ----
+    //
+    // Kiss re-ranking through the whole fallback chain: the same
+    // cue (55,58) and middle ball (60,40) as the v1.0.13 kiss
+    // layout, so no single-ball shot and no combo solves, and the
+    // kiss is reached. Two second balls pot into the top-middle
+    // pocket: (300,50) cuts 26.58 degrees, (340,60) cuts 67.23.
+    // A blocker (330,35) sits on the best kiss's second-leg
+    // midpoint. Values pinned by the kotlinc probe
+    // (probe25/Probe25i.kt). No fallback-level combo re-ranking
+    // test exists: every layout where the combo is reached has
+    // its candidate second balls clustered within a diameter of
+    // each other's chains, so no blocker can separate the best
+    // combo from the next one (probes 25c/25e/25f/25j/25k); the
+    // combo re-ranking itself is pinned at the firstClearCombo
+    // level in PathBlockTest, and the fallback wiring is the same
+    // code path this kiss test exercises.
+
+    @Test
+    fun `blocked best kiss gives way to the next clear kiss`() {
+        val seconds = listOf(Vec2(300.0, 50.0), Vec2(340.0, 60.0))
+        // No combo solves for these seconds, so the kiss is the
+        // last resort, and the best kiss is shown when clear.
+        assertNull(ShotSolver.bestCombo(cue, middle, seconds, pockets, r))
+        val clear = solveFallback(cue, middle, seconds, pockets, table, r)
+        assertTrue(clear is FallbackShot.Kiss)
+        val clearKiss = (clear as FallbackShot.Kiss).solution
+        assertEquals(26.58, clearKiss.secondShot.cutAngleDegrees, 0.1)
+        assertVec(Vec2(300.0, 50.0), clearKiss.secondShot.targetLine.start)
+        assertVec(Vec2(360.0, 20.0), clearKiss.secondShot.targetLine.end)
+        // With a blocker on the best kiss's second leg, the shown
+        // kiss is the next clear one: (340,60) at 67.23 degrees.
+        val blocked = solveFallback(
+            cue, middle, seconds + Vec2(330.0, 35.0), pockets, table, r
+        )
+        assertTrue(blocked is FallbackShot.Kiss)
+        val kiss = (blocked as FallbackShot.Kiss).solution
+        assertEquals(67.23, kiss.secondShot.cutAngleDegrees, 0.1)
+        assertVec(Vec2(340.0, 60.0), kiss.secondShot.targetLine.start)
+        assertVec(Vec2(360.0, 20.0), kiss.secondShot.targetLine.end)
+    }
 }

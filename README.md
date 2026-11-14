@@ -296,9 +296,15 @@ screen. Nothing about the game is changed.**
     and the shown two-rail kick the first clear two-rail kick.
     The two-rail bank is still tried before the two-rail kick,
     so the re-ranking is within each family, not between them.
-    Combo and kiss shots are still flag-only: their fallbacks
-    return a single best shot, not a ranked list, so there is
-    nothing to re-rank within the family. Since v1.0.24 the flag
+    Since v1.0.25 the same rule covers the COMBO and KISS
+    families: when no two-rail shot solves either, the shown combo
+    is the first clear combo in cut order and the shown kiss the
+    first clear kiss. A combo is still tried before a kiss, so the
+    re-ranking is within each family, not between them. Each
+    candidate's own second ball is never counted as a blocker of
+    its own shot (it sits at the start of its own target line);
+    another candidate's second ball stays in the blocker list,
+    because it is a real ball on the table. Since v1.0.24 the flag
     covers COMBO and KISS shots too: a combo is flagged when
     another ball sits on the cue's aim line, the first ball's
     path to the second ball's ghost point, or the second ball's
