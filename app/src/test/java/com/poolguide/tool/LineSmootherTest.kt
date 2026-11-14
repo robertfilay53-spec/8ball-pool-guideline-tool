@@ -95,4 +95,62 @@ class LineSmootherTest {
         val (a, _, _) = smoother.smooth(moved, target, deflection, status)
         assertEquals(110.0, a.start.x, 1e-9)
     }
+
+    // ---- v1.0.9: smoothList (two-rail banks have four segments) ----
+
+    private val bankStatus = "Bank shot (two rails) to pocket"
+    private fun bank2Segments() = listOf(
+        seg(100.0, 200.0, 300.0, 200.0), // aim
+        seg(300.0, 200.0, 400.0, 300.0), // target -> rail 1
+        seg(400.0, 300.0, 500.0, 200.0), // rail 1 -> rail 2
+        seg(500.0, 200.0, 600.0, 50.0) // rail 2 -> pocket
+    )
+
+    @Test
+    fun `smoothList first frame snaps all four segments`() {
+        val smoother = LineSmoother()
+        val out = smoother.smoothList(bank2Segments(), bankStatus)
+        assertEquals(4, out.size)
+        assertEquals(bank2Segments(), out)
+    }
+
+    @Test
+    fun `smoothList small cue move interpolates all four segments halfway`() {
+        val smoother = LineSmoother()
+        smoother.smoothList(bank2Segments(), bankStatus)
+        // Cue moves 10 px right (inside the 40 px gate): every
+        // segment's endpoints move half that far (lerp 0.5).
+        val moved = bank2Segments().map {
+            seg(it.start.x + 10.0, it.start.y, it.end.x + 10.0, it.end.y)
+        }
+        val out = smoother.smoothList(moved, bankStatus)
+        assertEquals(4, out.size)
+        assertEquals(105.0, out[0].start.x, 1e-9)
+        assertEquals(405.0, out[1].start.x, 1e-9)
+        assertEquals(505.0, out[2].start.x, 1e-9)
+        assertEquals(605.0, out[3].end.x, 1e-9)
+    }
+
+    @Test
+    fun `smoothList snaps when the segment count changes`() {
+        // A three-segment direct shot followed by a four-segment
+        // two-rail bank, same status string: the line counts differ,
+        // so the bank must snap in, never lerp from the direct
+        // shot's lines.
+        val smoother = LineSmoother()
+        smoother.smooth(aim, target, deflection, bankStatus)
+        val out = smoother.smoothList(bank2Segments(), bankStatus)
+        assertEquals(4, out.size)
+        assertEquals(bank2Segments(), out)
+    }
+
+    @Test
+    fun `smooth delegates to smoothList and keeps the old behaviour`() {
+        val smoother = LineSmoother()
+        val (a, _, _) = smoother.smooth(aim, target, deflection, status)
+        assertEquals(aim, a)
+        val moved = seg(110.0, 200.0, 310.0, 200.0)
+        val (b, _, _) = smoother.smooth(moved, target, deflection, status)
+        assertEquals(105.0, b.start.x, 1e-9)
+    }
 }

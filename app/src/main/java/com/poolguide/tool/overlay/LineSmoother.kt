@@ -30,9 +30,7 @@ class LineSmoother {
     }
 
     private data class Smoothed(
-        val aim: Segment,
-        val target: Segment,
-        val deflection: Segment,
+        val segments: List<Segment>,
         val status: String
     )
 
@@ -46,23 +44,36 @@ class LineSmoother {
         deflection: Segment,
         status: String
     ): Triple<Segment, Segment, Segment> {
+        val smoothed = smoothList(listOf(aim, target, deflection), status)
+        return Triple(smoothed[0], smoothed[1], smoothed[2])
+    }
+
+    /** Smooth any number of lines for this frame (direct shots have
+     * three, one-rail banks three, two-rail banks four). Same gate:
+     * snap on the first frame, on a status change, when the cue
+     * point moved over the gate, or when the line count changed
+     * (a bank and a direct shot have different segment counts, so
+     * they can never lerp into each other); otherwise lerp every
+     * endpoint toward the new values. */
+    fun smoothList(segments: List<Segment>, status: String): List<Segment> {
+        require(segments.isNotEmpty()) { "smoothList needs at least one segment" }
         val previous = last
-        val cueMoved = previous?.aim?.start?.distanceTo(aim.start) ?: Double.MAX_VALUE
+        val cueMoved = previous?.segments?.firstOrNull()?.start
+            ?.distanceTo(segments.first().start) ?: Double.MAX_VALUE
         val snap = previous == null ||
             previous.status != status ||
-            cueMoved > JITTER_GATE_PX
+            cueMoved > JITTER_GATE_PX ||
+            previous.segments.size != segments.size
         val smoothed = if (snap) {
-            Smoothed(aim, target, deflection, status)
+            Smoothed(segments, status)
         } else {
             Smoothed(
-                aim = lerpSegment(previous.aim, aim),
-                target = lerpSegment(previous.target, target),
-                deflection = lerpSegment(previous.deflection, deflection),
-                status = status
+                previous.segments.zip(segments) { from, to -> lerpSegment(from, to) },
+                status
             )
         }
         last = smoothed
-        return Triple(smoothed.aim, smoothed.target, smoothed.deflection)
+        return smoothed.segments
     }
 
     fun reset() {

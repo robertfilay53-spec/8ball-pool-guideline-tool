@@ -376,7 +376,121 @@ class ComboKissTest {
     }
 }
 
-class TableGeometryTest {
+class TwoRailBankTest {
+
+    private val r = 9.0
+    // Practice-table rails (normals point into the table).
+    private val bottom = Rail(Vec2(40.0, 340.0), Vec2(0.0, -1.0))
+    private val right = Rail(Vec2(680.0, 20.0), Vec2(-1.0, 0.0))
+    private val top = Rail(Vec2(40.0, 20.0), Vec2(0.0, 1.0))
+    private val left = Rail(Vec2(40.0, 20.0), Vec2(1.0, 0.0))
+
+    // Swept layout (verified against the solver with kotlinc before
+    // the tests were written): cue (580, 300), target (600, 320),
+    // bottom then right rails to the top-middle pocket (360, 20).
+    private val cue = Vec2(580.0, 300.0)
+    private val target = Vec2(600.0, 320.0)
+    private val pocket = Vec2(360.0, 20.0)
+
+    @Test
+    fun `two-rail bank contacts sit on their rails and the path connects`() {
+        val bank = ShotSolver.solveTwoRailBank(cue, target, pocket, bottom, right, r)
+        assertNotNull(bank)
+        bank!!
+        assertEquals(12.64, bank.direct.cutAngleDegrees, 0.1)
+        assertTrue(!bank.direct.isThinCut)
+        // First contact on the bottom rail (y=340), second on the
+        // right rail (x=680).
+        assertEquals(623.5, bank.railContacts[0].x, 0.5)
+        assertEquals(340.0, bank.railContacts[0].y, 0.0)
+        assertEquals(680.0, bank.railContacts[1].x, 0.0)
+        assertEquals(292.0, bank.railContacts[1].y, 0.5)
+        // Three segments, connected: target -> C1 -> C2 -> pocket.
+        assertEquals(3, bank.bankPath.size)
+        assertEquals(target, bank.bankPath[0].start)
+        assertEquals(bank.railContacts[0], bank.bankPath[0].end)
+        assertEquals(bank.railContacts[0], bank.bankPath[1].start)
+        assertEquals(bank.railContacts[1], bank.bankPath[1].end)
+        assertEquals(bank.railContacts[1], bank.bankPath[2].start)
+        assertEquals(pocket, bank.bankPath[2].end)
+        // Doubly mirrored pocket: across the right rail, then the bottom.
+        assertEquals(Vec2(1000.0, 660.0), bank.mirroredPocket)
+    }
+
+    @Test
+    fun `two-rail bank obeys the reflection law at both rails`() {
+        val bank = ShotSolver.solveTwoRailBank(cue, target, pocket, bottom, right, r)
+        assertNotNull(bank)
+        bank!!
+        val c1 = bank.railContacts[0]
+        val c2 = bank.railContacts[1]
+        // The outgoing direction from each contact is the reflection
+        // of the incoming direction across that rail.
+        val out1 = ShotSolver.reflectDirection(c1 - target, bottom)
+        val actual1 = (c2 - c1).normalized()
+        assertEquals(0.0, ShotSolver.cutAngleDegrees(out1, actual1), 1e-6)
+        val out2 = ShotSolver.reflectDirection(c2 - c1, right)
+        val actual2 = (pocket - c2).normalized()
+        assertEquals(0.0, ShotSolver.cutAngleDegrees(out2, actual2), 1e-6)
+    }
+
+    @Test
+    fun `same rail twice returns null`() {
+        assertNull(ShotSolver.solveTwoRailBank(cue, target, pocket, bottom, bottom, r))
+        assertNull(ShotSolver.solveTwoRailBank(cue, target, pocket, right, right, r))
+    }
+
+    @Test
+    fun `pocket on either rail returns null`() {
+        // Top-middle pocket sits on the top rail (y=20).
+        assertNull(ShotSolver.solveTwoRailBank(cue, target, pocket, top, right, r))
+        // Top-right pocket sits on the right rail (x=680).
+        assertNull(
+            ShotSolver.solveTwoRailBank(
+                cue, target, Vec2(680.0, 20.0), bottom, right, r
+            )
+        )
+    }
+
+    @Test
+    fun `impossible cut returns null`() {
+        // Cue behind the target relative to the doubly mirrored
+        // pocket (1000, 660): the cut is over 90 degrees.
+        assertNull(
+            ShotSolver.solveTwoRailBank(
+                Vec2(700.0, 340.0), target, pocket, bottom, right, r
+            )
+        )
+    }
+
+    @Test
+    fun `synthetic cushion correction moves both contacts and stays on the rails`() {
+        // A constant 1-degree correction at each rail: the correction
+        // path runs (bisection re-solves both contacts) and the bank
+        // still exists, with both contacts on their rails.
+        val corrected = ShotSolver.solveTwoRailBank(
+            cue, target, pocket, bottom, right, r,
+            CushionCorrection(1.0, 0.0, 0.0)
+        )
+        assertNotNull(corrected)
+        corrected!!
+        assertEquals(340.0, corrected.railContacts[0].y, 0.0)
+        assertEquals(680.0, corrected.railContacts[1].x, 0.0)
+        // The correction actually moved the contacts (the second one
+        // by 1.4 px), but only by a few px — a correction is a small
+        // empirical adjustment, never a large one.
+        val ideal = ShotSolver.solveTwoRailBank(cue, target, pocket, bottom, right, r)!!
+        assertTrue(
+            corrected.railContacts[1].distanceTo(ideal.railContacts[1]) > 0.0
+        )
+        assertTrue(
+            corrected.railContacts[1].distanceTo(ideal.railContacts[1]) < 5.0
+        )
+        assertTrue(
+            corrected.direct.cutAngleDegrees != ideal.direct.cutAngleDegrees
+        )
+    }
+}
 
     @Test
     fun `six pockets at the corners and side midpoints`() {

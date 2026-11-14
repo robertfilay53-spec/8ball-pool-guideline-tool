@@ -214,6 +214,7 @@ class CvPipeline(
             guideline = guideline,
             shot = outcome.shot,
             bank = outcome.bank,
+            bank2 = outcome.bank2,
             allShots = outcome.allShots,
             tableLocked = locked,
             tableFromFallback = tableFromFallback,
@@ -270,19 +271,33 @@ class CvPipeline(
     }
 
     /** One frame's solve: best direct shot, every candidate shot, a
-     * one-rail bank fallback, and the status line. */
+     * one-rail bank fallback, a two-rail bank fallback, and the status
+     * line. */
     private data class SolveOutcome(
         val shot: ShotSolver.ShotSolution?,
         val bank: ShotSolver.BankSolution?,
         val allShots: List<ShotSolver.ShotSolution>,
-        val status: String
+        val status: String,
+        /** Best two-rail bank (v1.0.9), set only when no direct shot
+         * and no one-rail bank solves: the last-resort best shot. */
+        val bank2: ShotSolver.TwoRailBankSolution? = null
     )
 
     /**
      * Pick the target ball (nearest ball along the guideline ray from the cue
      * ball; nearest ball overall when no guideline is visible) and the pocket
      * with the smallest cut angle, then solve. Falls back to a one-rail bank
-     * when no direct shot is possible.
+     * when no direct shot is possible, and to a two-rail bank when no
+     * one-rail bank solves.
+     *
+     * Ranking (best shot stays honest): direct first, then one-rail
+     * banks, then two-rail banks as a last resort — a two-rail bank
+     * never displaces a direct shot or a one-rail bank in the live
+     * overlay. The two-rail fallback applies the v1.0.7 corner
+     * guards to BOTH contacts (the one-rail fallback does not apply
+     * them, unchanged from v1.0.3): a contact inside a pocket's jaws
+     * or on the pocket is not a clean bank, and a two-rail bank is
+     * already the least reliable shot the tool shows.
      */
     private fun solveFor(
         cue: Ball?,
@@ -321,7 +336,57 @@ class CvPipeline(
                 return SolveOutcome(null, bank, emptyList(), "Bank shot (one rail) to pocket")
             }
         }
+
+        // No one-rail bank either: try two-rail banks, ranked by the
+        // direct cut angle (easiest pot first). Both contacts must
+        // pass the corner guards (same numbers as PracticeState):
+        // inside the rail span, four ball radii clear of the corners,
+        // and not on the pocket.
+        var bestTwoRail: ShotSolver.TwoRailBankSolution? = null
+        var bestTwoRailCut = Double.MAX_VALUE
+        for (pocket in pockets) {
+            for ((index1, rail1) in rails.withIndex()) {
+                for ((index2, rail2) in rails.withIndex()) {
+                    if (index1 == index2) continue
+                    if (abs((pocket - rail1.point).dot(rail1.normal)) < 1.0) continue
+                    if (abs((pocket - rail2.point).dot(rail2.normal)) < 1.0) continue
+                    val bank2 = ShotSolver.solveTwoRailBank(
+                        cue.center, target.center, pocket, rail1, rail2, radius
+                    ) ?: continue
+                    if (!bankContactIsValid(bank2.railContacts[0], index1, tableRect, pocket, radius)) continue
+                    if (!bankContactIsValid(bank2.railContacts[1], index2, tableRect, pocket, radius)) continue
+                    if (bank2.direct.cutAngleDegrees < bestTwoRailCut) {
+                        bestTwoRail = bank2
+                        bestTwoRailCut = bank2.direct.cutAngleDegrees
+                    }
+                }
+            }
+        }
+        if (bestTwoRail != null) {
+            return SolveOutcome(null, null, emptyList(), "Bank shot (two rails) to pocket", bank2 = bestTwoRail)
+        }
         return SolveOutcome(null, null, emptyList(), "No shot found for this ball")
+    }
+
+    /** The v1.0.7 corner guard, shared with PracticeState's bank
+     * solve (same numbers, same comment): the contact must lie inside
+     * its rail span, four ball radii clear of the corners, and not on
+     * the pocket. [railIndex] follows railsOf() order: 0 top, 1 bottom,
+     * 2 left, 3 right. */
+    private fun bankContactIsValid(
+        contact: Vec2,
+        railIndex: Int,
+        tableRect: TableRect,
+        pocket: Vec2,
+        ballRadiusPx: Double
+    ): Boolean {
+        val along = if (railIndex < 2) contact.x else contact.y
+        val lo = if (railIndex < 2) tableRect.topLeft.x + 4 * ballRadiusPx
+            else tableRect.topLeft.y + 4 * ballRadiusPx
+        val hi = if (railIndex < 2) tableRect.topRight.x - 4 * ballRadiusPx
+            else tableRect.bottomLeft.y - 4 * ballRadiusPx
+        if (along < lo || along > hi) return false
+        return contact.distanceTo(pocket) >= 2 * ballRadiusPx
     }
 
     private fun pickTarget(

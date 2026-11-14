@@ -95,6 +95,24 @@ class PracticeActivity : AppCompatActivity() {
                     )
                 }
             }
+            is PracticeState.PracticeSolution.Bank2 -> {
+                val bank = solution.solution
+                if (bank.direct.isThinCut) {
+                    getString(
+                        R.string.practice_bank2_thin,
+                        solution.railNames.first,
+                        solution.railNames.second,
+                        bank.direct.cutAngleDegrees
+                    )
+                } else {
+                    getString(
+                        R.string.practice_bank2,
+                        solution.railNames.first,
+                        solution.railNames.second,
+                        bank.direct.cutAngleDegrees
+                    )
+                }
+            }
             is PracticeState.PracticeSolution.Combo -> {
                 val combo = solution.solution
                 if (combo.firstShot.isThinCut) {
