@@ -29,13 +29,15 @@ import kotlin.math.sqrt
  * positions, not a measurement of the real table.
  *
  * v1.0.19 only FLAGS a blocked shot (overlay label, status line,
- * shot history). It does NOT re-rank to a clear pocket: the
- * project's own fixtures depict blocked shots (the green demo
- * table's best shot has the yellow 1-ball sitting 1 px off the
- * target line, and 11 of the 15 harness tables inherit that
- * layout), so re-ranking would invalidate the demo and harness
- * baselines. Re-ranking is a later slice, once the fixtures are
- * rebuilt with clear paths.
+ * shot history). v1.0.21 re-ranks DIRECT shots: the live pipeline
+ * shows the first CLEAR direct shot in cut order ([firstClearShot]),
+ * so a blocked easiest pocket no longer hides a makeable one. When
+ * every direct shot is blocked the best stays and is flagged, as
+ * before — the demo tables prove it: on the green and blue demo
+ * tables every reachable pocket is blocked, so their shown shots
+ * are unchanged. Bank, kick, combo, and kiss shots are still
+ * flag-only: their fallbacks return a single best shot, not a
+ * ranked list, so there is nothing to re-rank within the family.
  */
 object PathBlock {
 
@@ -121,6 +123,24 @@ object PathBlock {
     ): Vec2? = firstBlockerOnPath(
         listOf(shot.aimLine, shot.targetLine), blockers, ballRadiusPx
     )
+
+    /** First CLEAR direct shot in [shots] (v1.0.21): the first shot
+     * whose path no other ball sits on, in the given order — the
+     * caller passes the cut-ranked [ShotSolver.allShots] list, so
+     * this is the easiest makeable pocket. Returns null when every
+     * shot is blocked (the caller then keeps the best and flags it)
+     * or when [shots] is empty. [blockers] must be every ball
+     * EXCEPT the ones travelling the path (the cue and the target);
+     * a travelling ball passed as a blocker would flag its own
+     * path. */
+    fun firstClearShot(
+        shots: List<ShotSolver.ShotSolution>,
+        blockers: List<Vec2>,
+        ballRadiusPx: Double
+    ): ShotSolver.ShotSolution? {
+        require(ballRadiusPx > 0) { "ballRadiusPx must be positive" }
+        return shots.firstOrNull { blockedBy(it, blockers, ballRadiusPx) == null }
+    }
 
     /** One-rail bank: the cue travels the aim line, the target
      * travels the bank path (target -> rail -> pocket). */

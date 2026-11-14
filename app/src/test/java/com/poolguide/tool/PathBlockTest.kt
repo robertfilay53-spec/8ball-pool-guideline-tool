@@ -315,4 +315,55 @@ class PathBlockTest {
         assertTrue(cutAnchor.y > midY)
         assertTrue(blockedAnchor.y < midY)
     }
+
+    // ---- firstClearShot (v1.0.21 re-ranking) ----
+    //
+    // The fixture's cut-ranked direct shots (kotlinc probe,
+    // /tmp/probe21/Probe21.kt): (680,340) cut 22.17, (680,20) cut
+    // 27.75, (360,340) cut 71.70, (360,20) cut 76.59. Blockers sit
+    // on solved-path midpoints, so they hold for whatever the best
+    // solution is.
+
+    @Test
+    fun firstClearShot_returnsBestWhenNothingIsBlocked() {
+        val all = ShotSolver.allShots(cue, target, pockets, r)
+        val pick = PathBlock.firstClearShot(all, emptyList(), r)
+        assertEquals(Vec2(680.0, 340.0), pick!!.targetLine.end)
+        assertEquals(22.17, pick.cutAngleDegrees, 0.05)
+    }
+
+    @Test
+    fun firstClearShot_skipsBlockedBestForNextClearShot() {
+        val all = ShotSolver.allShots(cue, target, pockets, r)
+        val best = all.first()
+        // Blocker on the best shot's target-line midpoint (490,270).
+        val mid = (best.targetLine.start + best.targetLine.end) * 0.5
+        val pick = PathBlock.firstClearShot(all, listOf(mid), r)
+        assertEquals(Vec2(680.0, 20.0), pick!!.targetLine.end)
+        assertEquals(27.75, pick.cutAngleDegrees, 0.05)
+    }
+
+    @Test
+    fun firstClearShot_returnsNullWhenEveryShotIsBlocked() {
+        val all = ShotSolver.allShots(cue, target, pockets, r)
+        // One blocker on each shot's target-line midpoint.
+        val mids = all.map { (it.targetLine.start + it.targetLine.end) * 0.5 }
+        assertNull(PathBlock.firstClearShot(all, mids, r))
+    }
+
+    @Test
+    fun firstClearShot_ballInFrontOfCueBlocksEveryShot() {
+        // The four aim lines fan out from the cue, so one ball on
+        // the best shot's aim-line midpoint sits within a diameter
+        // of every aim line: no direct shot is clear.
+        val all = ShotSolver.allShots(cue, target, pockets, r)
+        val best = all.first()
+        val mid = (best.aimLine.start + best.aimLine.end) * 0.5
+        assertNull(PathBlock.firstClearShot(all, listOf(mid), r))
+    }
+
+    @Test
+    fun firstClearShot_emptyShotListIsNull() {
+        assertNull(PathBlock.firstClearShot(emptyList(), emptyList(), r))
+    }
 }
