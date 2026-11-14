@@ -935,12 +935,15 @@ class OverlayInstrumentedTest {
             store.showAllShots = false
             instrumentation.runOnMainSync { manager.update(shotResult()) }
             assertEquals(4, manager.lineWindowCount)
+            // The fabricated result's three pockets are (600,50),
+            // (600,350), (650,200): the best shot is straight to the
+            // mid-right pocket, cut 0.0 deg, 29.6 bd.
             val snap = ShotHistory.snapshot()
             assertEquals("one entry after the first drawn shot", 1, snap.size)
             assertEquals("DIRECT", snap[0].family)
             assertEquals("?", snap[0].pocketName)
-            assertEquals(22.17, snap[0].cutAngleDegrees, 0.05)
-            assertEquals(32.68, snap[0].distanceBd, 0.05)
+            assertEquals(0.0, snap[0].cutAngleDegrees, 0.0)
+            assertEquals(29.56, snap[0].distanceBd, 0.05)
 
             // Same shot again: deduped, still one entry.
             instrumentation.runOnMainSync { manager.update(shotResult()) }
