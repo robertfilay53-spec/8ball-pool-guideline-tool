@@ -508,6 +508,38 @@ class LineOverlayManager(
                 Segment(map(pocket), map(pocket)),
                 POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = 18f
             )
+        } else if (result.kick2 != null && store.bankLinesEnabled) {
+            // Two-rail kick (v1.0.11): the cue ball goes off two rails
+            // first, so the cue path has three segments — cue -> rail
+            // 1 contact in green (the aim direction, same as every
+            // other shot) and contact 1 -> contact 2 -> ghost in
+            // magenta (the kicked cue ball, distinct from the cyan
+            // bank lines). The target line and deflection are drawn
+            // as for a direct shot. Five smoothed segments, so a
+            // two-rail kick never lerps into any other shot. This
+            // branch sits last: a two-rail kick is only shown when
+            // it is the only shot left.
+            val kick2 = result.kick2
+            val smoothed = smoother.smoothList(
+                listOf(
+                    Segment(map(kick2.direct.aimLine.start), map(kick2.direct.aimLine.end)),
+                    Segment(map(kick2.kickPath[1].start), map(kick2.kickPath[1].end)),
+                    Segment(map(kick2.kickPath[2].start), map(kick2.kickPath[2].end)),
+                    Segment(map(kick2.direct.targetLine.start), map(kick2.direct.targetLine.end)),
+                    Segment(map(kick2.direct.deflectionLine.start), map(kick2.direct.deflectionLine.end))
+                ),
+                result.status
+            )
+            out += DrawLine(smoothed[0], AIM_COLOR, AIM_WIDTH_PX)
+            out += DrawLine(smoothed[1], KICK_COLOR, LINE_WIDTH_PX)
+            out += DrawLine(smoothed[2], KICK_COLOR, LINE_WIDTH_PX)
+            out += DrawLine(smoothed[3], TARGET_COLOR, LINE_WIDTH_PX)
+            out += DrawLine(smoothed[4], DEFLECT_COLOR, LINE_WIDTH_PX)
+            val pocket = kick2.direct.targetLine.end
+            out += DrawLine(
+                Segment(map(pocket), map(pocket)),
+                POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = 18f
+            )
         }
         return out
     }

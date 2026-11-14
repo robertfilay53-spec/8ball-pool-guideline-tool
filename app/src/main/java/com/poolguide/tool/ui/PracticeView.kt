@@ -160,7 +160,8 @@ class PracticeView @JvmOverloads constructor(
             is PracticeState.PracticeSolution.Direct -> drawShot(canvas, solution.shot)
             is PracticeState.PracticeSolution.Bank -> drawBank(canvas, solution.solution.direct, solution.solution.bankPath)
             is PracticeState.PracticeSolution.Bank2 -> drawBank(canvas, solution.solution.direct, solution.solution.bankPath)
-            is PracticeState.PracticeSolution.Kick -> drawKick(canvas, solution.solution)
+            is PracticeState.PracticeSolution.Kick -> drawKick(canvas, solution.solution.direct, solution.solution.kickPath)
+            is PracticeState.PracticeSolution.Kick2 -> drawKick(canvas, solution.solution.direct, solution.solution.kickPath)
             is PracticeState.PracticeSolution.Combo -> {
                 val combo = solution.solution
                 // First leg's target line ends at the intermediate ghost
@@ -239,29 +240,33 @@ class PracticeView @JvmOverloads constructor(
     }
 
     /** Draw one kick shot the way the live overlay does: the green
-     * aim line (cue -> rail contact, the cue-stick direction), the
-     * magenta kicked cue-ball path (contact -> ghost), the yellow
-     * target line (target -> pocket), the white deflection, the ghost
-     * circle at impact, and the pocket ring at the pocket. Unlike a
-     * bank, the target line IS drawn: the target goes straight to
-     * the pocket, it is the cue ball that banks. */
+     * aim line (cue -> first rail contact, the cue-stick direction),
+     * the magenta kicked cue-ball path (every [kickPath] segment
+     * after the first: contact -> ghost for a one-rail kick,
+     * contact 1 -> contact 2 -> ghost for a two-rail kick), the
+     * yellow target line (target -> pocket), the white deflection,
+     * the ghost circle at impact, and the pocket ring at the pocket.
+     * Unlike a bank, the target line IS drawn: the target goes
+     * straight to the pocket, it is the cue ball that banks. */
     private fun drawKick(
         canvas: Canvas,
-        kick: ShotSolver.KickSolution
+        direct: ShotSolver.ShotSolution,
+        kickPath: List<Segment>
     ) {
-        val direct = kick.direct
         val aimS = toView(direct.aimLine.start)
         val aimE = toView(direct.aimLine.end)
         canvas.drawLine(
             aimS.x.toFloat(), aimS.y.toFloat(),
             aimE.x.toFloat(), aimE.y.toFloat(), aimPaint
         )
-        val kickS = toView(kick.kickPath[1].start)
-        val kickE = toView(kick.kickPath[1].end)
-        canvas.drawLine(
-            kickS.x.toFloat(), kickS.y.toFloat(),
-            kickE.x.toFloat(), kickE.y.toFloat(), kickPaint
-        )
+        for (segment in kickPath.drop(1)) {
+            val s = toView(segment.start)
+            val e = toView(segment.end)
+            canvas.drawLine(
+                s.x.toFloat(), s.y.toFloat(),
+                e.x.toFloat(), e.y.toFloat(), kickPaint
+            )
+        }
         val tgtS = toView(direct.targetLine.start)
         val tgtE = toView(direct.targetLine.end)
         canvas.drawLine(

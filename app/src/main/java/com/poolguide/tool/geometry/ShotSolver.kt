@@ -353,6 +353,21 @@ object ShotSolver {
         val mirroredPocket: Vec2
     )
 
+    /** Result of solving a two-rail kick shot: the cue ball goes off
+     * two rails BEFORE hitting the target (the mirror of a two-rail
+     * bank, where the target ball banks instead). */
+    data class TwoRailKickSolution(
+        val direct: ShotSolution,
+        /** Where the cue ball meets the cushions, in path order:
+         * [0] is the first rail hit, [1] the second. */
+        val railContacts: List<Vec2>,
+        /** Cue-ball path: cue -> rail 1 contact -> rail 2 contact
+         * -> ghost point (three segments). */
+        val kickPath: List<Segment>,
+        /** The doubly mirrored ghost point used for the geometry. */
+        val mirroredGhost: Vec2
+    )
+
     /** Result of solving a one-rail kick shot: the cue ball goes off
      * a rail BEFORE hitting the target (the mirror of a one-rail
      * bank, where the target ball banks instead). */
@@ -608,6 +623,143 @@ object ShotSolver {
                 Segment(corrected2, pocket)
             ),
             mirroredPocket = mirrored
+        )
+    }
+
+    /**
+     * Solve a two-rail kick: mirror the TARGET ball's ghost point
+     * across the LAST rail first ([rail2]), then across the FIRST
+     * rail ([rail1]), and aim the cue at the doubly mirrored ghost.
+     * The straight line cue -> doubly mirrored ghost unfolds the
+     * two-reflection path: it crosses [rail1] at the first contact,
+     * and the segment from that contact to the once-mirrored ghost
+     * crosses [rail2] at the second contact. This is the mirror of
+     * a two-rail bank: there the pocket is mirrored twice and the
+     * target banks; here the ghost is mirrored twice and the cue
+     * banks. Returns null when the rails are the same, when the
+     * ghost sits on either rail (it would mirror to itself), when
+     * either contact is not on its segment, when the contacts
+     * coincide (both at the same corner), or when the cut is
+     * impossible (> 90 deg).
+     *
+     * Cushion correction (same form as the two-rail bank, Bloro
+     * lead): the correction is applied at EACH rail contact, the
+     * second contact re-solved first (its target is the ghost),
+     * then the first (its target is the corrected second contact).
+     * With the fitted coefficients the correction is zero and the
+     * ideal kick is returned unchanged. When a correction cannot
+     * be satisfied, the ideal kick is returned: a slightly-off kick
+     * line is better than no kick line.
+     *
+     * Ranking note: a two-rail kick compounds real-table error
+     * twice (two cushion contacts, each fitted to synthetic data),
+     * so it is the last resort: the live pipeline only tries it
+     * after direct, one-rail bank, one-rail kick, and two-rail bank
+     * all fail (see CvPipeline.solveFor), and practice KICK mode
+     * only recommends it when its cut beats the best one-rail kick
+     * by more than [PracticeState.TWO_RAIL_CUT_MARGIN_DEGREES]
+     * (see PracticeState.solveBestKick).
+     */
+    fun solveTwoRailKick(
+        cue: Vec2,
+        target: Vec2,
+        pocket: Vec2,
+        rail1: Rail,
+        rail2: Rail,
+        ballRadiusPx: Double,
+        correction: CushionCorrection = CushionCorrection.FITTED
+    ): TwoRailKickSolution? {
+        require(ballRadiusPx > 0) { "ballRadiusPx must be positive" }
+        if (cue.distanceTo(target) < 2 * ballRadiusPx + 0.5) return null // already at impact
+        if (rail1 == rail2) return null
+        val ghost = ghostPoint(target, pocket, ballRadiusPx)
+        // Ghost on either rail: the mirror is the ghost itself, the
+        // kick is degenerate (the cue would meet the target at the
+        // cushion).
+        if (abs((ghost - rail1.point).dot(rail1.normal)) < 1.0) return null
+        if (abs((ghost - rail2.point).dot(rail2.normal)) < 1.0) return null
+        val mirroredOnce = mirrorPointAcrossRail(ghost, rail2)
+        val mirrored = mirrorPointAcrossRail(mirroredOnce, rail1)
+        val contact1 = railContactPoint(cue, mirrored, rail1) ?: return null
+        val contact2 = railContactPoint(contact1, mirroredOnce, rail2) ?: return null
+        if (contact1.distanceTo(contact2) < 1e-6) return null
+        val ideal = buildTwoRailKick(
+            cue, target, pocket, rail1, rail2, contact1, contact2, ballRadiusPx, mirrored
+        ) ?: return null
+
+        // Incident angles: between each ideal outgoing direction and
+        // its rail, same definition as the one-rail kick.
+        val rail1Dir = rail1.normal.perp()
+        val rail2Dir = rail2.normal.perp()
+        val out1 = reflectDirection(contact1 - cue, rail1)
+        val out2 = reflectDirection(contact2 - contact1, rail2)
+        val adjust1 = correction.correct(angleBetween(out1, rail1Dir))
+        val adjust2 = correction.correct(angleBetween(out2, rail2Dir))
+        if (abs(adjust1) < 1e-9 && abs(adjust2) < 1e-9) return ideal
+
+        val corrected2 = correctedContact(rail2, contact1, ghost, contact2, adjust2)
+            ?: return ideal
+        val corrected1 = correctedContact(rail1, cue, corrected2, contact1, adjust1)
+            ?: return ideal
+        return buildTwoRailKick(
+            cue, target, pocket, rail1, rail2, corrected1, corrected2, ballRadiusPx, mirrored
+        ) ?: ideal
+    }
+
+    /**
+     * Build a two-rail kick solution from given rail contacts: the
+     * cue arrives at the ghost point travelling the twice-reflected
+     * direction, so the cut angle is between the second reflected
+     * direction and the pocket direction. Returns null when either
+     * reflected ray does not head toward its next point or the cut
+     * is impossible (> 90 deg).
+     */
+    private fun buildTwoRailKick(
+        cue: Vec2,
+        target: Vec2,
+        pocket: Vec2,
+        rail1: Rail,
+        rail2: Rail,
+        contact1: Vec2,
+        contact2: Vec2,
+        ballRadiusPx: Double,
+        mirroredGhost: Vec2
+    ): TwoRailKickSolution? {
+        val ghost = ghostPoint(target, pocket, ballRadiusPx)
+        val outDir1 = reflectDirection(contact1 - cue, rail1)
+        if ((contact2 - contact1).dot(outDir1) <= 0.0) return null
+        val outDir2 = reflectDirection(contact2 - contact1, rail2)
+        if ((ghost - contact2).dot(outDir2) <= 0.0) return null
+        val u = (pocket - target).normalized()
+        if (u.norm() < 1e-9) return null // target sits on the pocket
+        val cutAngle = cutAngleDegrees(outDir2, u)
+        if (cutAngle > 90.0) return null // impossible: would have to hit from the wrong side
+        val tangent = tangentDirection(outDir2, u)
+        val deflectLen = 2 * ballRadiusPx // draw 1-2 ball diameters
+        val direct = ShotSolution(
+            ghostPoint = ghost,
+            // The aim line is the cue-stick direction: cue -> first
+            // rail contact. The full cue-ball path is kickPath (cue ->
+            // contact 1 -> contact 2 -> ghost); a single segment cannot
+            // express the reflections, so aimLine ends at contact 1,
+            // not the ghost.
+            aimLine = Segment(cue, contact1),
+            targetLine = Segment(target, pocket),
+            deflectionLine = Segment(ghost, ghost + tangent * deflectLen),
+            cutAngleDegrees = cutAngle,
+            isThinCut = cutAngle > THIN_CUT_DEGREES,
+            distanceToImpact = cue.distanceTo(contact1) +
+                contact1.distanceTo(contact2) + contact2.distanceTo(ghost)
+        )
+        return TwoRailKickSolution(
+            direct = direct,
+            railContacts = listOf(contact1, contact2),
+            kickPath = listOf(
+                Segment(cue, contact1),
+                Segment(contact1, contact2),
+                Segment(contact2, ghost)
+            ),
+            mirroredGhost = mirroredGhost
         )
     }
 

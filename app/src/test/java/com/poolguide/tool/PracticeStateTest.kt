@@ -331,6 +331,93 @@ class PracticeStateTest {
         assertNull(s.solve())
     }
 
+    // ---- v1.0.11: two-rail kick mode ----
+
+    @Test
+    fun `two-rail kick layout wins by the margin rule`() {
+        // Verified against the solver with kotlinc before the test
+        // was written: cue (60, 40), target (100, 60), bottom then
+        // top rails to the bottom-left pocket, cut 16.0 deg, contacts
+        // (80.4, 340.0) and (102.2, 20.0). The best one-rail kick
+        // there is 58.0 deg, so the two-rail kick wins by the margin
+        // rule (16.0 + 30 < 58.0).
+        val s = state()
+        s.setMode(PracticeState.PracticeMode.KICK)
+        s.moveBall(0, Vec2(60.0, 40.0))
+        s.moveBall(1, Vec2(100.0, 60.0))
+        val solution = s.solve()
+        assertTrue(solution is PracticeState.PracticeSolution.Kick2)
+        val kick = solution as PracticeState.PracticeSolution.Kick2
+        assertEquals("bottom" to "top", kick.railNames)
+        assertTrue(kick.solution.direct.cutAngleDegrees > 14.0)
+        assertTrue(kick.solution.direct.cutAngleDegrees < 18.0)
+        assertEquals(80.4, kick.solution.railContacts[0].x, 0.5)
+        assertEquals(340.0, kick.solution.railContacts[0].y, 0.0)
+        assertEquals(102.2, kick.solution.railContacts[1].x, 0.5)
+        assertEquals(20.0, kick.solution.railContacts[1].y, 0.0)
+        assertEquals(3, kick.solution.kickPath.size)
+        // The kick path ends at the ghost point, not the pocket; the
+        // target line ends at the pocket.
+        assertEquals(103.8, kick.solution.kickPath.last().end.x, 0.5)
+        assertEquals(42.4, kick.solution.kickPath.last().end.y, 0.5)
+        assertEquals(40.0, kick.solution.direct.targetLine.end.x, 0.0)
+        assertEquals(340.0, kick.solution.direct.targetLine.end.y, 0.0)
+        assertTrue(!kick.solution.direct.isThinCut)
+    }
+
+    @Test
+    fun `kick default still solves one rail, two-rail loses on the margin`() {
+        // At the kick default the best two-rail kick (3.7 deg) is
+        // barely worse than the best one-rail kick (2.3 deg), so the
+        // margin rule keeps the one-rail kick: 3.7 + 30 is not less
+        // than 2.3. Verified against the solver with kotlinc before
+        // the test was written.
+        val s = state()
+        s.setMode(PracticeState.PracticeMode.KICK)
+        assertTrue(s.solveKick2() != null)
+        val solution = s.solve()
+        assertTrue(solution is PracticeState.PracticeSolution.Kick)
+    }
+
+    @Test
+    fun `two-rail kick that is only slightly better loses to the one-rail kick`() {
+        // Cue (140, 120), target (60, 120): the best two-rail kick
+        // is 4.3 deg and the best one-rail kick is 1.0 deg — the
+        // two-rail kick is worse outright, so the one-rail kick wins
+        // without the margin even mattering. Verified against the
+        // solver with kotlinc before the test was written.
+        val s = state()
+        s.setMode(PracticeState.PracticeMode.KICK)
+        s.moveBall(0, Vec2(140.0, 120.0))
+        s.moveBall(1, Vec2(60.0, 120.0))
+        assertTrue(s.solveKick2() != null)
+        val solution = s.solve()
+        assertTrue(solution is PracticeState.PracticeSolution.Kick)
+    }
+
+    @Test
+    fun `two-rail kick with every contact in the pocket jaws is rejected`() {
+        // Same corner layout as the one-rail guard test: two-rail
+        // kicks solve here, but none passes the corner guards on
+        // both contacts. Verified against the solver with kotlinc
+        // before the test was written.
+        val s = state()
+        s.setMode(PracticeState.PracticeMode.KICK)
+        s.moveBall(0, Vec2(80.0, 60.0))
+        s.moveBall(1, Vec2(50.0, 30.0))
+        assertNull(s.solveKick2())
+        assertNull(s.solve())
+    }
+
+    @Test
+    fun `two-rail kick overlapping balls have no shot`() {
+        val s = state()
+        s.setMode(PracticeState.PracticeMode.KICK)
+        s.moveBall(1, s.cue.center)
+        assertNull(s.solveKick2())
+        assertNull(s.solve())
+    }
+
     // ---- v1.0.6: combo mode ----
 
     @Test

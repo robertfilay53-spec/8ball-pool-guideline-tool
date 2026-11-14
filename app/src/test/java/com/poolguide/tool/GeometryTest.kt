@@ -693,3 +693,198 @@ class TableGeometryTest {
         assertEquals(Vec2(100.0, 100.0 - inset), pockets[5])
     }
 }
+
+class TwoRailKickTest {
+
+    private val r = 9.0
+    // Practice-table rails (normals point into the table).
+    private val bottom = Rail(Vec2(40.0, 340.0), Vec2(0.0, -1.0))
+    private val right = Rail(Vec2(680.0, 20.0), Vec2(-1.0, 0.0))
+    private val top = Rail(Vec2(40.0, 20.0), Vec2(0.0, 1.0))
+    private val left = Rail(Vec2(40.0, 20.0), Vec2(1.0, 0.0))
+
+    // Geometry layout (verified against the solver with kotlinc before
+    // the tests were written): cue (140, 120), target (60, 120),
+    // top then left rails to the bottom-middle pocket (360, 340).
+    private val cue = Vec2(140.0, 120.0)
+    private val target = Vec2(60.0, 120.0)
+    private val pocket = Vec2(360.0, 340.0)
+
+    @Test
+    fun `two-rail kick contacts sit on their rails and the path connects`() {
+        val kick = ShotSolver.solveTwoRailKick(cue, target, pocket, top, left, r)
+        assertNotNull(kick)
+        kick!!
+        assertEquals(24.63, kick.direct.cutAngleDegrees, 0.1)
+        assertTrue(!kick.direct.isThinCut)
+        // First contact on the top rail (y=20), second on the left
+        // rail (x=40).
+        assertEquals(84.3, kick.railContacts[0].x, 0.5)
+        assertEquals(20.0, kick.railContacts[0].y, 0.0)
+        assertEquals(40.0, kick.railContacts[1].x, 0.0)
+        assertEquals(99.5, kick.railContacts[1].y, 0.5)
+        // Three segments, connected: cue -> C1 -> C2 -> ghost.
+        assertEquals(3, kick.kickPath.size)
+        assertEquals(cue, kick.kickPath[0].start)
+        assertEquals(kick.railContacts[0], kick.kickPath[0].end)
+        assertEquals(kick.railContacts[0], kick.kickPath[1].start)
+        assertEquals(kick.railContacts[1], kick.kickPath[1].end)
+        assertEquals(kick.railContacts[1], kick.kickPath[2].start)
+        assertEquals(kick.direct.ghostPoint, kick.kickPath[2].end)
+        // The ghost is the direct ghost for target -> pocket, and the
+        // mirrored ghost is its reflection across the left rail, then
+        // the top rail. (Component-wise: the ghost is not an exact
+        // decimal.)
+        assertEquals(45.5, kick.direct.ghostPoint.x, 0.5)
+        assertEquals(109.4, kick.direct.ghostPoint.y, 0.5)
+        assertEquals(34.5, kick.mirroredGhost.x, 0.5)
+        assertEquals(-69.4, kick.mirroredGhost.y, 0.5)
+        // The aim line is the cue-stick direction (cue -> first
+        // contact), not cue -> ghost: a single segment cannot express
+        // the reflections, so it ends at the first contact.
+        assertEquals(cue, kick.direct.aimLine.start)
+        assertEquals(kick.railContacts[0], kick.direct.aimLine.end)
+        assertEquals(target, kick.direct.targetLine.start)
+        assertEquals(pocket, kick.direct.targetLine.end)
+    }
+
+    @Test
+    fun `two-rail kick obeys the reflection law at both rails`() {
+        val kick = ShotSolver.solveTwoRailKick(cue, target, pocket, top, left, r)
+        assertNotNull(kick)
+        kick!!
+        val c1 = kick.railContacts[0]
+        val c2 = kick.railContacts[1]
+        // The outgoing direction from each contact is the reflection
+        // of the incoming direction across that rail, and the second
+        // one passes through the ghost point.
+        val out1 = ShotSolver.reflectDirection(c1 - cue, top)
+        val actual1 = (c2 - c1).normalized()
+        assertEquals(0.0, ShotSolver.cutAngleDegrees(out1, actual1), 1e-6)
+        val out2 = ShotSolver.reflectDirection(c2 - c1, left)
+        val actual2 = (kick.direct.ghostPoint - c2).normalized()
+        assertEquals(0.0, ShotSolver.cutAngleDegrees(out2, actual2), 1e-6)
+        // Incident and outgoing angles to each rail are equal.
+        val railDir1 = top.normal.perp()
+        val in1 = (c1 - cue).normalized()
+        assertEquals(
+            ShotSolver.cutAngleDegrees(in1, railDir1),
+            ShotSolver.cutAngleDegrees(out1, railDir1),
+            1e-6
+        )
+        val railDir2 = left.normal.perp()
+        val in2 = (c2 - c1).normalized()
+        assertEquals(
+            ShotSolver.cutAngleDegrees(in2, railDir2),
+            ShotSolver.cutAngleDegrees(out2, railDir2),
+            1e-6
+        )
+    }
+
+    @Test
+    fun `same rail twice returns null`() {
+        assertNull(ShotSolver.solveTwoRailKick(cue, target, pocket, top, top, r))
+        assertNull(ShotSolver.solveTwoRailKick(cue, target, pocket, bottom, bottom, r))
+    }
+
+    @Test
+    fun `ghost on either rail returns null`() {
+        // Ghost point exactly on the bottom rail (y=340): the mirror
+        // is the ghost itself, so the kick is degenerate. Same
+        // construction as the one-rail kick test, verified against
+        // the solver with kotlinc before the test was written — it
+        // returns null whether the ghost's rail is first or second.
+        assertNull(
+            ShotSolver.solveTwoRailKick(
+                Vec2(200.0, 100.0), Vec2(510.8, 325.6), Vec2(630.8, 165.6), bottom, right, r
+            )
+        )
+        assertNull(
+            ShotSolver.solveTwoRailKick(
+                Vec2(200.0, 100.0), Vec2(510.8, 325.6), Vec2(630.8, 165.6), right, bottom, r
+            )
+        )
+    }
+
+    @Test
+    fun `impossible cut returns null`() {
+        // Cue behind the target relative to the doubly mirrored
+        // ghost: the cut is over 90 degrees.
+        assertNull(
+            ShotSolver.solveTwoRailKick(
+                Vec2(700.0, 340.0), Vec2(600.0, 320.0), Vec2(360.0, 20.0), bottom, right, r
+            )
+        )
+    }
+
+    @Test
+    fun `coincident contacts return null`() {
+        // The cue sits on the line from the bottom-right corner to
+        // the doubly mirrored ghost, so the unfolded path crosses
+        // both rails exactly at the corner: both contacts are the
+        // corner, and the kick is degenerate. Verified against the
+        // solver with kotlinc before the test was written.
+        assertNull(
+            ShotSolver.solveTwoRailKick(
+                Vec2(609.3, 269.3), Vec2(600.0, 320.0), Vec2(360.0, 20.0), bottom, right, r
+            )
+        )
+    }
+
+    @Test
+    fun `overlapping balls return null`() {
+        assertNull(ShotSolver.solveTwoRailKick(target, target, pocket, top, left, r))
+    }
+
+    @Test
+    fun `thin cut is flagged above 80 degrees`() {
+        // Cue (60, 40), target (60, 60), top then bottom rails to
+        // the top-right pocket: cut 88.0 deg. Verified against the
+        // solver with kotlinc before the test was written.
+        val kick = ShotSolver.solveTwoRailKick(
+            Vec2(60.0, 40.0), Vec2(60.0, 60.0), Vec2(680.0, 20.0), top, bottom, r
+        )
+        assertNotNull(kick)
+        kick!!
+        assertEquals(87.97, kick.direct.cutAngleDegrees, 0.1)
+        assertTrue(kick.direct.isThinCut)
+        assertEquals(59.4, kick.railContacts[0].x, 0.5)
+        assertEquals(20.0, kick.railContacts[0].y, 0.0)
+        assertEquals(50.1, kick.railContacts[1].x, 0.5)
+        assertEquals(340.0, kick.railContacts[1].y, 0.0)
+    }
+
+    @Test
+    fun `synthetic cushion correction moves both contacts and stays on the rails`() {
+        // A constant 1-degree correction at each rail: the correction
+        // path runs (bisection re-solves both contacts) and the kick
+        // still exists, with both contacts on their rails.
+        val corrected = ShotSolver.solveTwoRailKick(
+            cue, target, pocket, top, left, r,
+            CushionCorrection(1.0, 0.0, 0.0)
+        )
+        assertNotNull(corrected)
+        corrected!!
+        assertEquals(20.0, corrected.railContacts[0].y, 0.0)
+        assertEquals(40.0, corrected.railContacts[1].x, 0.0)
+        // The correction actually moved the contacts (the first one
+        // by 0.9 px), but only by a few px — a correction is a small
+        // empirical adjustment, never a large one.
+        val ideal = ShotSolver.solveTwoRailKick(cue, target, pocket, top, left, r)!!
+        assertTrue(
+            corrected.railContacts[0].distanceTo(ideal.railContacts[0]) > 0.0
+        )
+        assertTrue(
+            corrected.railContacts[0].distanceTo(ideal.railContacts[0]) < 5.0
+        )
+        assertTrue(
+            corrected.railContacts[1].distanceTo(ideal.railContacts[1]) > 0.0
+        )
+        assertTrue(
+            corrected.railContacts[1].distanceTo(ideal.railContacts[1]) < 5.0
+        )
+        assertTrue(
+            corrected.direct.cutAngleDegrees != ideal.direct.cutAngleDegrees
+        )
+    }
+}

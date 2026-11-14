@@ -95,6 +95,14 @@ data class DetectionResult(
      * wins and a tie goes to the bank, the established fallback. A
      * kick never displaces a direct shot. */
     val kick: ShotSolver.KickSolution? = null,
+    /** Best two-rail kick (v1.0.11), set only when no direct shot,
+     * no one-rail bank, no one-rail kick, and no two-rail bank
+     * solves: the last-resort best shot. A two-rail kick compounds
+     * real-table error twice (two cushion contacts, each fitted to
+     * synthetic data), so it is only offered when it is the only
+     * option — it never displaces any other shot in the live
+     * overlay. */
+    val kick2: ShotSolver.TwoRailKickSolution? = null,
     /** Every reachable direct shot, best first (allShots ranking).
      * Empty when no direct shot exists. The overlay draws the non-best
      * entries faint when "Show all shots" is on; [shot] is always

@@ -42,6 +42,8 @@
     <string name="practice_kiss_thin">Kiss to pocket — kiss cut %.0f deg (thin cut — very low margin), second cut %.0f deg.</string>
     <string name="practice_kick">Kick off the %1$s rail — cut %2$.0f deg to pocket.</string>
     <string name="practice_kick_thin">Kick off the %1$s rail — cut %2$.0f deg (thin cut — very low margin) to pocket.</string>
+    <string name="practice_kick2">Kick off the %1$s then %2$s rails — cut %3$.0f deg to pocket.</string>
+    <string name="practice_kick2_thin">Kick off the %1$s then %2$s rails — cut %3$.0f deg (thin cut — very low margin) to pocket.</string>
     <string name="practice_mode_direct">Direct</string>
     <string name="practice_mode_bank">Bank</string>
     <string name="practice_mode_combo">Combo</string>

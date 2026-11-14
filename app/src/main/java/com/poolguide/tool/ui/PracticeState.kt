@@ -42,7 +42,13 @@ import kotlin.math.abs
  *   sits on the rail itself is degenerate (the mirror is the ghost),
  *   so those are skipped; the rail contact must also lie inside the
  *   rail span, four ball radii clear of the corners, and not on the
- *   pocket — the same three guards as the bank solve.
+ *   pocket — the same three guards as the bank solve. Two-rail
+ *   kicks (v1.0.11) are ranked after one-rail kicks, the same way
+ *   two-rail banks are ranked after one-rail banks in BANK mode: a
+ *   two-rail kick only wins when its cut angle is smaller than the
+ *   best one-rail cut by more than [TWO_RAIL_CUT_MARGIN_DEGREES].
+ *   Each extra cushion compounds real-table error, so a two-rail
+ *   kick must be clearly easier to be the recommended kick.
  *
  * Default layouts are verified against the solver (see PracticeStateTest):
  * the combo default solves to the top-right pocket (first cut 6.4 deg,
@@ -57,7 +63,12 @@ import kotlin.math.abs
  * two-rail bank wins by the margin rule. The kick default reuses the
  * bank default's balls (cue (120, 80), target (480, 300)) and solves
  * off the right rail to the bottom-middle pocket (cut 2.3 deg, contact
- * (680.0, 241.5)) — the same two balls, a different shot.
+ * (680.0, 241.5)) — the same two balls, a different shot. The
+ * two-rail kick test layout (cue (60, 40), target (100, 60)) solves
+ * off the bottom then top rails to the bottom-left pocket (cut 16.0
+ * deg, contacts (80.4, 340.0) and (102.2, 20.0)); the best one-rail
+ * kick there is 58.0 deg, so the two-rail kick wins by the margin
+ * rule.
  */
 class PracticeState(
     private val table: TableRect,
@@ -87,6 +98,13 @@ class PracticeState(
             val solution: ShotSolver.KickSolution,
             /** Which rail the kick runs off ("top", "bottom", "left", "right"). */
             val railName: String
+        ) : PracticeSolution
+        /** Two-rail kick (v1.0.11): cue -> rail 1 -> rail 2 ->
+         * target -> pocket. */
+        data class Kick2(
+            val solution: ShotSolver.TwoRailKickSolution,
+            /** Which rails the kick runs off, in path order. */
+            val railNames: Pair<String, String>
         ) : PracticeSolution
     }
 
@@ -201,7 +219,25 @@ class PracticeState(
         PracticeMode.BANK -> solveBestBank()
         PracticeMode.COMBO -> solveCombo()?.let { PracticeSolution.Combo(it) }
         PracticeMode.KISS -> solveKiss()?.let { PracticeSolution.Kiss(it) }
-        PracticeMode.KICK -> solveKick()?.let { PracticeSolution.Kick(it.first, it.second) }
+        PracticeMode.KICK -> solveBestKick()
+    }
+
+    /** KICK mode: the best kick. One-rail kicks rank first; a
+     * two-rail kick only wins when its cut angle beats the best
+     * one-rail cut by more than [TWO_RAIL_CUT_MARGIN_DEGREES]
+     * (a two-rail kick must be clearly easier — see the class KDoc).
+     * Either kind wins outright when the other does not exist. */
+    private fun solveBestKick(): PracticeSolution? {
+        val oneRail = solveKick()
+        val twoRail = solveKick2()
+        val oneCut = oneRail?.first?.direct?.cutAngleDegrees ?: Double.MAX_VALUE
+        val twoCut = twoRail?.first?.direct?.cutAngleDegrees
+            ?.plus(TWO_RAIL_CUT_MARGIN_DEGREES) ?: Double.MAX_VALUE
+        return if (twoCut < oneCut) {
+            twoRail?.let { PracticeSolution.Kick2(it.first, it.second) }
+        } else {
+            oneRail?.let { PracticeSolution.Kick(it.first, it.second) }
+        }
     }
 
     /** BANK mode: the best bank. One-rail banks rank first; a
@@ -350,6 +386,41 @@ class PracticeState(
             }
         }
         return best?.let { it to bestRail }
+    }
+
+    /** Two-rail kick (v1.0.11): cue -> rail 1 -> rail 2 -> target
+     * -> best pocket, ranked by the direct cut angle (easiest pot
+     * first). Same three guards as [solveKick], applied to BOTH
+     * contacts: a pocket whose ghost sits on either rail is skipped
+     * by the solver (it returns null there), each contact must lie
+     * inside its rail span, four ball radii clear of the corners,
+     * and neither contact may sit on the pocket. Returns the kick
+     * plus the two rail names in path order, or null when no
+     * two-rail kick is possible. */
+    fun solveKick2(): Pair<ShotSolver.TwoRailKickSolution, Pair<String, String>>? {
+        if (cue.center.distanceTo(target.center) < ballRadiusPx * 2 + 0.5) return null
+        val rails = railsOf()
+        var best: ShotSolver.TwoRailKickSolution? = null
+        var bestRails = "" to ""
+        var bestCut = Double.MAX_VALUE
+        for (pocket in table.pockets()) {
+            for ((index1, rail1) in rails.withIndex()) {
+                for ((index2, rail2) in rails.withIndex()) {
+                    if (index1 == index2) continue
+                    val kick = ShotSolver.solveTwoRailKick(
+                        cue.center, target.center, pocket, rail1, rail2, ballRadiusPx
+                    ) ?: continue
+                    if (!bankContactIsValid(kick.railContacts[0], index1, pocket)) continue
+                    if (!bankContactIsValid(kick.railContacts[1], index2, pocket)) continue
+                    if (kick.direct.cutAngleDegrees < bestCut) {
+                        best = kick
+                        bestRails = railNames[index1] to railNames[index2]
+                        bestCut = kick.direct.cutAngleDegrees
+                    }
+                }
+            }
+        }
+        return best?.let { it to bestRails }
     }
 
     /** The v1.0.7 corner guard (same numbers as the live pipeline's
