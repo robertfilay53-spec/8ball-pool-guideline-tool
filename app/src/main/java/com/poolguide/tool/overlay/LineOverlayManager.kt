@@ -470,7 +470,7 @@ class LineOverlayManager(
             pocketScreen,
             arrivalScreen.end - arrivalScreen.start,
             ballRadiusScreen,
-            RING_RADIUS_PX
+            RING_RADIUS_PX.toDouble()
         )
         return DrawLabel(text, color, anchor.x.toFloat(), anchor.y.toFloat())
     }
