@@ -1,6 +1,7 @@
 package com.poolguide.tool.cv
 
 import com.poolguide.tool.data.GameProfile
+import com.poolguide.tool.geometry.PathBlock
 import com.poolguide.tool.geometry.Segment
 import com.poolguide.tool.geometry.ShotSolver
 import com.poolguide.tool.geometry.Vec2
@@ -218,6 +219,7 @@ class CvPipeline(
             combo = outcome.combo,
             kiss = outcome.kiss,
             allShots = outcome.allShots,
+            blockedBy = outcome.blockedBy,
             tableLocked = locked,
             tableFromFallback = tableFromFallback,
             // The ring on the control bubble shows this: 1.0 once
@@ -299,7 +301,12 @@ class CvPipeline(
         /** Best kiss (v1.0.13), set only when no combo solves
          * either: the last resort of all. A kiss never displaces
          * a combo. */
-        val kiss: ShotSolver.KissSolution? = null
+        val kiss: ShotSolver.KissSolution? = null,
+        /** Blocked-path flag (v1.0.19): the centre of the ball sitting
+         * on the shown shot's path, or null when the path is clear.
+         * The overlay draws a "Path blocked" label for it and the
+         * status line says so. Combo/kiss shots are not flagged. */
+        val blockedBy: Vec2? = null
     )
 
     /**
@@ -339,6 +346,15 @@ class CvPipeline(
         val target = pickTarget(cue, balls, guideline)
             ?: return SolveOutcome(null, null, emptyList(), "No target ball in line")
         val radius = (cue.radiusPx + target.radiusPx) / 2.0
+        // Every other ball is a potential blocker (v1.0.19): the cue
+        // and the target travel the path, so they are never blockers
+        // of their own shot. The same list feeds the fallback chain
+        // as its candidate second balls.
+        val others = balls.filter { it.id != cue.id && it.id != target.id }
+            .map { it.center }
+        // Status suffix when the shown shot's path is blocked.
+        fun blockedSuffix(blocked: Vec2?): String =
+            if (blocked != null) " — path blocked by another ball" else ""
 
         // Every direct shot, best first: smallest cut angle, first-listed
         // pocket wins ties within the tie margin (a symmetric layout must
@@ -347,8 +363,12 @@ class CvPipeline(
         val all = ShotSolver.allShots(cue.center, target.center, pockets, radius)
         val best = all.firstOrNull()
         if (best != null) {
+            val blocked = PathBlock.blockedBy(best, others, radius)
             val warn = if (best.isThinCut) " — thin cut, very low margin" else ""
-            return SolveOutcome(best, null, all, "Shot to pocket$warn")
+            return SolveOutcome(
+                best, null, all, "Shot to pocket$warn${blockedSuffix(blocked)}",
+                blockedBy = blocked
+            )
         }
 
         // No direct shot: run the fallback chain (one-rail bank or
@@ -357,19 +377,41 @@ class CvPipeline(
         // target is the first ball for a combo or kiss; every other
         // ball is a candidate second ball (the ball that pots).
         val tableRect = table ?: return SolveOutcome(null, null, emptyList(), "No shot found")
-        val others = balls.filter { it.id != cue.id && it.id != target.id }
-            .map { it.center }
         return when (val fallback = solveFallback(
             cue.center, target.center, others, pockets, tableRect, radius
         )) {
-            is FallbackShot.Bank ->
-                SolveOutcome(null, fallback.solution, emptyList(), "Bank shot (one rail) to pocket")
-            is FallbackShot.Kick ->
-                SolveOutcome(null, null, emptyList(), "Kick shot (one rail) to pocket", kick = fallback.solution)
-            is FallbackShot.Bank2 ->
-                SolveOutcome(null, null, emptyList(), "Bank shot (two rails) to pocket", bank2 = fallback.solution)
-            is FallbackShot.Kick2 ->
-                SolveOutcome(null, null, emptyList(), "Kick shot (two rails) to pocket", kick2 = fallback.solution)
+            is FallbackShot.Bank -> {
+                val blocked = PathBlock.blockedBy(fallback.solution, others, radius)
+                SolveOutcome(
+                    null, fallback.solution, emptyList(),
+                    "Bank shot (one rail) to pocket${blockedSuffix(blocked)}",
+                    blockedBy = blocked
+                )
+            }
+            is FallbackShot.Kick -> {
+                val blocked = PathBlock.blockedBy(fallback.solution, others, radius)
+                SolveOutcome(
+                    null, null, emptyList(),
+                    "Kick shot (one rail) to pocket${blockedSuffix(blocked)}",
+                    kick = fallback.solution, blockedBy = blocked
+                )
+            }
+            is FallbackShot.Bank2 -> {
+                val blocked = PathBlock.blockedBy(fallback.solution, others, radius)
+                SolveOutcome(
+                    null, null, emptyList(),
+                    "Bank shot (two rails) to pocket${blockedSuffix(blocked)}",
+                    bank2 = fallback.solution, blockedBy = blocked
+                )
+            }
+            is FallbackShot.Kick2 -> {
+                val blocked = PathBlock.blockedBy(fallback.solution, others, radius)
+                SolveOutcome(
+                    null, null, emptyList(),
+                    "Kick shot (two rails) to pocket${blockedSuffix(blocked)}",
+                    kick2 = fallback.solution, blockedBy = blocked
+                )
+            }
             is FallbackShot.Combo ->
                 SolveOutcome(null, null, emptyList(), "Combo shot to pocket", combo = fallback.solution)
             is FallbackShot.Kiss ->

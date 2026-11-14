@@ -55,6 +55,7 @@ class ShotHistoryTest {
         kick2: ShotSolver.TwoRailKickSolution? = null,
         combo: ShotSolver.ComboSolution? = null,
         kiss: ShotSolver.KissSolution? = null,
+        blockedBy: Vec2? = null,
         tableRect: TableRect? = table,
         pocketList: List<Vec2> = pockets
     ) = DetectionResult(
@@ -64,12 +65,14 @@ class ShotHistoryTest {
         balls = emptyList(), cueBall = null, guideline = emptyList(),
         shot = shot, bank = bank, kick = kick, bank2 = bank2,
         kick2 = kick2, combo = combo, kiss = kiss,
+        blockedBy = blockedBy,
         tableLocked = true, status = "test"
     )
 
     private fun entry(
-        family: String, pocket: String, cut: Double, dist: Double, timeMs: Long = 1_000L
-    ) = ShotHistory.ShotEntry(family, pocket, cut, dist, timeMs)
+        family: String, pocket: String, cut: Double, dist: Double, timeMs: Long = 1_000L,
+        blocked: Boolean = false
+    ) = ShotHistory.ShotEntry(family, pocket, cut, dist, timeMs, blocked)
 
     // ---- entryFor: one family at a time ----
 
@@ -262,6 +265,37 @@ class ShotHistoryTest {
         assertEquals(2, calls)
     }
 
+    // ---- blocked flag (v1.0.19) ----
+
+    @Test
+    fun entryFor_blockedShotSetsBlockedTrue() {
+        val direct = ShotSolver.allShots(
+            Vec2(100.0, 200.0), Vec2(300.0, 200.0), pockets, r
+        ).first()
+        val blocked = ShotHistory.entryFor(result(shot = direct, blockedBy = Vec2(500.0, 200.0)))
+        assertNotNull(blocked)
+        assertTrue(blocked!!.blocked)
+        val clean = ShotHistory.entryFor(result(shot = direct))
+        assertNotNull(clean)
+        assertFalse(clean!!.blocked)
+    }
+
+    @Test
+    fun recordIfChanged_blockedFlipOpensNewEntry() {
+        assertTrue(ShotHistory.recordIfChanged(entry("DIRECT", "BR", 22.17, 32.68)))
+        assertEquals(1, ShotHistory.snapshot().size)
+        // Same shot, now blocked: a different entry, not a dupe.
+        assertTrue(
+            ShotHistory.recordIfChanged(entry("DIRECT", "BR", 22.17, 32.68, 2_000L, blocked = true))
+        )
+        assertEquals(2, ShotHistory.snapshot().size)
+        // Blocked again: deduped.
+        assertFalse(
+            ShotHistory.recordIfChanged(entry("DIRECT", "BR", 22.17, 32.68, 3_000L, blocked = true))
+        )
+        assertEquals(2, ShotHistory.snapshot().size)
+    }
+
     // ---- format ----
 
     @Test
@@ -276,6 +310,18 @@ class ShotHistoryTest {
         assertTrue(
             thin.matches(Regex("^\\d{2}:\\d{2}:\\d{2} BANK → BR, cut 80.0°, 42.1 bd$"))
         )
+    }
+
+    @Test
+    fun format_blockedAppendsBlockedSuffix() {
+        val line = ShotHistory.format(
+            entry("DIRECT", "TL", 24.6, 29.6, 1_794_650_400_000L, blocked = true)
+        )
+        assertTrue(
+            line.matches(Regex("^\\d{2}:\\d{2}:\\d{2} DIRECT → TL, cut 24.6°, 29.6 bd — blocked$"))
+        )
+        val clean = ShotHistory.format(entry("DIRECT", "TL", 24.6, 29.6, 1_794_650_400_000L))
+        assertFalse(clean.contains("blocked"))
     }
 
     // ---- diagnostics export ----

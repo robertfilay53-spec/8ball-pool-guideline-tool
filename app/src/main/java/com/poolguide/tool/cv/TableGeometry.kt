@@ -124,6 +124,12 @@ data class DetectionResult(
      * entries faint when "Show all shots" is on; [shot] is always
      * allShots.firstOrNull(). */
     val allShots: List<ShotSolver.ShotSolution> = emptyList(),
+    /** Blocked-path flag (v1.0.19): the centre of the ball sitting
+     * on the shown shot's path, or null when the path is clear. Set
+     * by the pipeline from the other detected balls; the overlay
+     * draws a "Path blocked" label for it and the status line says
+     * so. Combo/kiss shots are not flagged (v1.0.19). */
+    val blockedBy: Vec2? = null,
     /** Table-lock gate (v1.0.3, Bloro lead): true once the detected
      * table rect has stayed within 2 px for 75 consecutive frames
      * (5 s at the 15 FPS cap). The overlay draws nothing until this is

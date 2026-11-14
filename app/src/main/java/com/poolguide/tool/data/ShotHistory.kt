@@ -45,13 +45,17 @@ object ShotHistory {
     const val MAX_SHOTS = 8
 
     /** One solved shot, as the player saw it. [timeMs] is wall-clock
-     * milliseconds; [format] renders it as HH:mm:ss. */
+     * milliseconds; [format] renders it as HH:mm:ss. [blocked] is
+     * true when another ball sat on the shown shot's path (v1.0.19):
+     * the shot was drawn, flagged "Path blocked", and the player
+     * was warned — the strip records that, not a clean make. */
     data class ShotEntry(
         val family: String,
         val pocketName: String,
         val cutAngleDegrees: Double,
         val distanceBd: Double,
-        val timeMs: Long
+        val timeMs: Long,
+        val blocked: Boolean = false
     )
 
     private val entries = ArrayDeque<ShotEntry>()
@@ -127,7 +131,11 @@ object ShotHistory {
             pocketName = pocketName(pocket, result.table, result.pockets),
             cutAngleDegrees = solution.cutAngleDegrees,
             distanceBd = PocketDistanceLabel.totalBallDiameters(segments, ballRadiusPx),
-            timeMs = nowMs
+            timeMs = nowMs,
+            // v1.0.19: the blocked flag rides along — a blocked shot
+            // is a different entry from the same clean shot, so a
+            // ball rolling onto the path opens a new strip line.
+            blocked = result.blockedBy != null
         )
     }
 
@@ -181,6 +189,7 @@ object ShotHistory {
         val last = entries.lastOrNull()
         if (last != null && last.family == entry.family &&
             last.pocketName == entry.pocketName &&
+            last.blocked == entry.blocked &&
             round1(last.cutAngleDegrees) == round1(entry.cutAngleDegrees) &&
             round1(last.distanceBd) == round1(entry.distanceBd)
         ) {
@@ -202,12 +211,14 @@ object ShotHistory {
 
     /** One strip line, Locale.US on purpose like [CutAngleLabel]
      * and [PocketDistanceLabel]: "14:32:05 DIRECT → TL, cut 24.6°,
-     * 29.6 bd" — never "24,6°" on a comma-decimal device. */
+     * 29.6 bd" — never "24,6°" on a comma-decimal device. A blocked
+     * shot (v1.0.19) appends " — blocked". */
     fun format(entry: ShotEntry): String {
         val time = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(entry.timeMs))
+        val blockedSuffix = if (entry.blocked) " — blocked" else ""
         return "$time ${entry.family} → ${entry.pocketName}, " +
             "cut ${CutAngleLabel.format(entry.cutAngleDegrees)}, " +
-            PocketDistanceLabel.format(entry.distanceBd)
+            PocketDistanceLabel.format(entry.distanceBd) + blockedSuffix
     }
 
     private fun round1(x: Double): Double = (x * 10.0).roundToInt() / 10.0

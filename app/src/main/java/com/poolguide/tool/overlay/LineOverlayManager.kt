@@ -21,6 +21,7 @@ import com.poolguide.tool.data.CalibrationStore
 import com.poolguide.tool.data.DiagnosticsLog
 import com.poolguide.tool.data.ShotHistory
 import com.poolguide.tool.geometry.BallGroupTag
+import com.poolguide.tool.geometry.BlockedPathLabel
 import com.poolguide.tool.geometry.CutAngleLabel
 import com.poolguide.tool.geometry.PocketDistanceLabel
 import com.poolguide.tool.geometry.RailContactMarker
@@ -522,6 +523,30 @@ class LineOverlayManager(
         return out
     }
 
+    /** The blocked-path label (v1.0.19) for one shot: "Path blocked"
+     * in the warning amber, at the aim line's midpoint on the
+     * opposite side from the cut-angle label. Null when the shown
+     * shot's path is clear ([DetectionResult.blockedBy] is null).
+     * [aimScreen] is the smoothed first segment (aim line) in
+     * screen coordinates, the same segment the cut-angle label is
+     * built from. Combo/kiss shots are not flagged in v1.0.19, so
+     * this is only called from the direct, bank, kick, two-rail
+     * bank, and two-rail kick branches. */
+    private fun blockedLabel(
+        aimScreen: Segment,
+        result: DetectionResult
+    ): DrawLabel? {
+        if (result.blockedBy == null) return null
+        val ballRadiusScreenPx = (result.cueBall?.radiusPx ?: 9.0) * result.scaleToScreenX
+        val anchor = BlockedPathLabel.labelAnchor(aimScreen, ballRadiusScreenPx)
+        return DrawLabel(
+            BlockedPathLabel.TEXT,
+            WARNING_COLOR,
+            anchor.x.toFloat(),
+            anchor.y.toFloat()
+        )
+    }
+
     /** Show the two anchor handles at the corrected cue + ghost points
      * (screen coordinates), reusing the windows across frames. The
      * handles are small touchable windows by design (Line Guide's
@@ -628,7 +653,12 @@ class LineOverlayManager(
      * v1.0.12) is built from the same smoothed aim segment as the
      * lines, so it moves with them; only the best shot gets one. The
      * pocket-distance label (v1.0.15) sits beside the pocket ring,
-     * last in window order, in the shot family's colour. */
+     * last in window order, in the shot family's colour. The
+     * blocked-path label (v1.0.19) sits at the aim line's midpoint
+     * on the opposite side from the cut-angle label, only when
+     * another ball sits on the shown shot's path — never in EDIT
+     * mode, where the drawn shot is the frozen manual aim, not the
+     * live detection the flag belongs to. */
     private fun buildDrawLines(result: DetectionResult): DrawnOverlay {
         val sx = result.scaleToScreenX
         val sy = result.scaleToScreenY
@@ -684,8 +714,11 @@ class LineOverlayManager(
             // Cut-angle label (v1.0.12): the best shot's angle, in the
             // aim green, beside the smoothed aim line. Pocket-distance
             // label (v1.0.15): the total path in ball diameters,
-            // beside the pocket ring, last in window order.
+            // beside the pocket ring, last in window order. Blocked-path
+            // label (v1.0.19): "Path blocked" when another ball sits
+            // on the shot's path, opposite the cut-angle label.
             labels = labelsFor(shot, aim, result, AIM_COLOR) +
+                listOfNotNull(blockedLabel(aim, result)) +
                 distanceLabel(
                     PocketDistanceLabel.pathSegments(shot),
                     shot.targetLine.end, shot.targetLine, result, AIM_COLOR
@@ -709,6 +742,7 @@ class LineOverlayManager(
             out += DrawLine(smoothed[1], BANK_COLOR, LINE_WIDTH_PX)
             out += DrawLine(smoothed[2], BANK_COLOR, LINE_WIDTH_PX)
             labels = labelsFor(bank.direct, smoothed[0], result, BANK_COLOR) +
+                listOfNotNull(blockedLabel(smoothed[0], result)) +
                 distanceLabel(
                     PocketDistanceLabel.pathSegments(bank),
                     bank.bankPath.last().end, bank.bankPath.last(), result, BANK_COLOR
@@ -745,6 +779,7 @@ class LineOverlayManager(
             out += DrawLine(smoothed[2], TARGET_COLOR, LINE_WIDTH_PX)
             out += DrawLine(smoothed[3], DEFLECT_COLOR, LINE_WIDTH_PX)
             labels = labelsFor(kick.direct, smoothed[0], result, KICK_COLOR) +
+                listOfNotNull(blockedLabel(smoothed[0], result)) +
                 distanceLabel(
                     PocketDistanceLabel.pathSegments(kick),
                     kick.direct.targetLine.end, kick.direct.targetLine, result, KICK_COLOR
@@ -776,6 +811,7 @@ class LineOverlayManager(
             out += DrawLine(smoothed[2], BANK_COLOR, LINE_WIDTH_PX)
             out += DrawLine(smoothed[3], BANK_COLOR, LINE_WIDTH_PX)
             labels = labelsFor(bank2.direct, smoothed[0], result, BANK_COLOR) +
+                listOfNotNull(blockedLabel(smoothed[0], result)) +
                 distanceLabel(
                     PocketDistanceLabel.pathSegments(bank2),
                     bank2.bankPath.last().end, bank2.bankPath.last(), result, BANK_COLOR
@@ -816,6 +852,7 @@ class LineOverlayManager(
             out += DrawLine(smoothed[3], TARGET_COLOR, LINE_WIDTH_PX)
             out += DrawLine(smoothed[4], DEFLECT_COLOR, LINE_WIDTH_PX)
             labels = labelsFor(kick2.direct, smoothed[0], result, KICK_COLOR) +
+                listOfNotNull(blockedLabel(smoothed[0], result)) +
                 distanceLabel(
                     PocketDistanceLabel.pathSegments(kick2),
                     kick2.direct.targetLine.end, kick2.direct.targetLine, result, KICK_COLOR
