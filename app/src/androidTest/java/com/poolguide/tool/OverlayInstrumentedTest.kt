@@ -306,6 +306,24 @@ class OverlayInstrumentedTest {
         }
         assertTrue("ghost drag must register an override", manager.editHasOverrides)
         assertTrue("still in edit mode after the drag", manager.isEditMode)
+        val dragGhost = manager.editGhostOverride
+        assertNotNull("ghost override must be set after the drag", dragGhost)
+        assertEquals(315.48193812482685, dragGhost!!.x, 1e-9)
+        assertEquals(211.92632987965453, dragGhost.y, 1e-9)
+        // Device-side guard check: evaluate the ghost re-aim
+        // intermediates with the production functions, on the device.
+        val aimEnd = Vec2(315.48193812482685, 211.92632987965453)
+        val aimStart = Vec2(450.0, 340.0)
+        val aimDir = (aimEnd - aimStart).normalized()
+        val depart = (Vec2(300.0, 200.0) - aimEnd).normalized()
+        val cut = ShotSolver.cutAngleDegrees(aimDir, depart)
+        assertTrue("device cut must be under 90, was $cut", cut < 90.0)
+        val rail = Rail(Vec2(73.91304347826087, 0.0), Vec2(0.0, -1.0))
+        val deviceContact = ShotSolver.railContactPoint(
+            Vec2(300.0, 200.0), Vec2(300.0, 200.0) + depart * 2000.0, rail
+        )
+        assertNotNull("device railContactPoint must find the contact", deviceContact)
+        assertEquals(40.37380684500539, deviceContact!!.x, 1e-9)
         val edited = manager.editedBank!!
         assertEquals(315.48193812482685, edited.direct.ghostPoint.x, 1e-9)
         assertEquals(40.37380684500539, edited.railContact.x, 1e-9)

@@ -70,6 +70,9 @@ class ManualAim {
     /** True when the frozen shot is a one-rail bank (v1.0.29). */
     val isBankEdit: Boolean get() = baseBank != null
     val hasOverrides: Boolean get() = cueOverride != null || ghostOverride != null
+    /** Test-only: the current ghost override value (v1.0.29 diagnostic). */
+    @androidx.annotation.VisibleForTesting
+    val ghostOverrideForTest: Vec2? get() = ghostOverride
 
     /** Freeze [shot] as the editable base and enter EDIT mode. */
     fun enterEditMode(shot: ShotSolver.ShotSolution, radiusPx: Double) {
