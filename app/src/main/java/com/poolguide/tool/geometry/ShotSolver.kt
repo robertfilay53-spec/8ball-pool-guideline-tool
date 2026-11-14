@@ -37,17 +37,258 @@ object ShotSolver {
         target: Vec2,
         pockets: List<Vec2>,
         ballRadiusPx: Double
-    ): ShotSolution? {
-        var best: ShotSolution? = null
-        for (pocket in pockets) {
-            val solved = solveShot(cue, target, pocket, ballRadiusPx) ?: continue
-            if (best == null ||
-                solved.cutAngleDegrees < best.cutAngleDegrees - TIE_MARGIN_DEGREES
-            ) {
-                best = solved
+    ): ShotSolution? = allShots(cue, target, pockets, ballRadiusPx).firstOrNull()
+
+    /** Every reachable direct shot across [pockets], best (smallest cut
+     * angle) first. Pockets tied within [TIE_MARGIN_DEGREES] keep their
+     * list order, so the first-listed pocket still wins a symmetric tie
+     * (PoolAimAssist UX: draw all candidates faint, highlight the best).
+     * The sort is stable, so equal keys keep pocket order. */
+    fun allShots(
+        cue: Vec2,
+        target: Vec2,
+        pockets: List<Vec2>,
+        ballRadiusPx: Double
+    ): List<ShotSolution> {
+        val solved = pockets.mapNotNull { solveShot(cue, target, it, ballRadiusPx) }
+        return solved.sortedWith(Comparator { a, b ->
+            when {
+                a.cutAngleDegrees < b.cutAngleDegrees - TIE_MARGIN_DEGREES -> -1
+                b.cutAngleDegrees < a.cutAngleDegrees - TIE_MARGIN_DEGREES -> 1
+                else -> 0
+            }
+        })
+    }
+
+    /** Result of solving a combo shot: the cue strikes [firstShot]'s
+     * target, which strikes [secondShot]'s target into the pocket. */
+    data class ComboSolution(
+        /** Cue -> first ball; the first ball departs toward [intermediateGhost]. */
+        val firstShot: ShotSolution,
+        /** First ball (at [firstShot]'s ghost point) -> second ball -> pocket. */
+        val secondShot: ShotSolution,
+        /** Where the first ball must be at impact with the second ball:
+         * the second ball's ghost point for the pocket. */
+        val intermediateGhost: Vec2
+    )
+
+    /** Result of solving a kiss shot: the cue kisses off the first ball
+     * (thin cut) and its deflection carries it into the second ball's
+     * ghost point, potting the second ball. */
+    data class KissSolution(
+        /** Cue -> kissed ball; [ShotSolution.targetLine] is the kissed
+         * ball's departure line (it pots nothing — it just moves away),
+         * and [ShotSolution.deflectionLine] is the cue's refined
+         * post-kiss direction toward [secondShot]'s ghost point. */
+        val kissShot: ShotSolution,
+        /** Cue (at the kiss ghost point) -> target ball -> pocket. */
+        val secondShot: ShotSolution,
+        /** Where the cue must be at impact with the kissed ball. */
+        val ghostPoint: Vec2,
+        /** The contact point on the kissed ball. */
+        val contactPoint: Vec2
+    )
+
+    /**
+     * Solve a combo shot: cue -> [first] -> [second] -> pocket.
+     *
+     * Physics (yasin/Aim ComboShot lead, closed form): a struck ball at
+     * rest always departs along the line from its ghost-ball centre
+     * through its own centre. So the second ball's ghost point for the
+     * pocket, [intermediateGhost], is exactly where the first ball must
+     * be at impact with it — and the first ball departs toward that
+     * point when the cue strikes it with the contact normal pointing
+     * from [intermediateGhost] through the first ball. That is just
+     * [solveShot] with the pocket replaced by [intermediateGhost].
+     * The second leg is then [solveShot] from the first ball's ghost
+     * point; its aim direction is the first ball's departure direction
+     * by construction (the ghost point sits one diameter behind the
+     * first ball on the same line), so no extra check is needed.
+     * Returns null when either leg is impossible.
+     */
+    fun solveCombo(
+        cue: Vec2,
+        first: Vec2,
+        second: Vec2,
+        pocket: Vec2,
+        ballRadiusPx: Double
+    ): ComboSolution? {
+        require(ballRadiusPx > 0) { "ballRadiusPx must be positive" }
+        if (cue.distanceTo(first) < 2 * ballRadiusPx + 0.5) return null
+        if (first.distanceTo(second) < 2 * ballRadiusPx + 0.5) return null
+        val intermediate = ghostPoint(second, pocket, ballRadiusPx)
+        val firstShot = solveShot(cue, first, intermediate, ballRadiusPx) ?: return null
+        val secondShot = solveShot(firstShot.ghostPoint, second, pocket, ballRadiusPx)
+            ?: return null
+        return ComboSolution(firstShot, secondShot, intermediate)
+    }
+
+    /** Kiss side selection: auto (pick the reachable side), or lock one. */
+    const val KISS_SIDE_AUTO = 0
+    const val KISS_SIDE_LEFT = 1
+    const val KISS_SIDE_RIGHT = 2
+
+    /** Ball elasticity used by the kiss refinement (yasin lead: the game
+     * engine's chipmunk solver uses 0.95 on every ball). */
+    private const val KISS_ELASTICITY = 0.95
+
+    /** Bisection bracket (degrees) and steps for the kiss refinement. */
+    private const val KISS_REFINE_BRACKET_DEG = 30.0
+    private const val KISS_REFINE_STEPS = 24
+
+    /**
+     * Solve a kiss shot: the cue kisses off [kissed] (thin cut) and its
+     * deflection carries it into [target]'s ghost point for [pocket],
+     * potting [target].
+     *
+     * Geometry (yasin/Aim KissShot lead, re-derived here): the ghost
+     * point for the cue must sit one diameter from [kissed] along a
+     * contact normal n, where n makes angle theta = acos(2r / d) with
+     * the kissed -> DEST direction (d = distance kissed -> DEST, DEST =
+     * [target]'s ghost point). Two mirror solutions exist (alpha +/-);
+     * a side is reachable only when the cue approaches from the -n side.
+     * At elasticity 1 the deflection is exactly perpendicular to n; at
+     * the real 0.95 there is a small residual along n, so the closed
+     * form is refined by bisection on the residual (the deflected ray
+     * must pass through DEST). No throw model: the solver has no spin
+     * input, so the throw correction is 0.
+     * Returns null when DEST sits inside the kissed ball, when no
+     * contact point is on the cue's approach side, or when either leg
+     * is impossible.
+     */
+    fun solveKiss(
+        cue: Vec2,
+        kissed: Vec2,
+        target: Vec2,
+        pocket: Vec2,
+        ballRadiusPx: Double,
+        sideLock: Int = KISS_SIDE_AUTO
+    ): KissSolution? {
+        require(ballRadiusPx > 0) { "ballRadiusPx must be positive" }
+        val r = ballRadiusPx
+        val dest = ghostPoint(target, pocket, r)
+        val dx = dest.x - kissed.x
+        val dy = dest.y - kissed.y
+        val d = kotlin.math.sqrt(dx * dx + dy * dy)
+        if (d < 2 * r) return null // DEST inside the kissed ball's footprint
+
+        val theta = acos((2 * r / d).coerceIn(-1.0, 1.0))
+        val phi = kotlin.math.atan2(dy, dx)
+        val alphaA = phi + theta
+        val alphaB = phi - theta
+
+        val approach = kissed - cue
+        val approachLen = approach.norm()
+        val haveApproach = approachLen > 1.0
+        val v1 = if (haveApproach) approach * (1.0 / approachLen) else Vec2(0.0, 0.0)
+        fun reachable(a: Double): Boolean {
+            if (!haveApproach) return true
+            return v1.x * kotlin.math.cos(a) + v1.y * kotlin.math.sin(a) < 0.0
+        }
+        // Pick a side: locked, the only reachable one, or (both reachable)
+        // the side on the same side of the kissed->DEST line as the cue.
+        var alpha: Double
+        when (sideLock) {
+            KISS_SIDE_LEFT -> alpha = alphaA
+            KISS_SIDE_RIGHT -> alpha = alphaB
+            else -> {
+                val okA = reachable(alphaA)
+                val okB = reachable(alphaB)
+                when {
+                    okA && !okB -> alpha = alphaA
+                    okB && !okA -> alpha = alphaB
+                    !okA && !okB -> return null // impossible from this approach
+                    else -> {
+                        val sideRef = dx * (cue.y - kissed.y) - dy * (cue.x - kissed.x)
+                        val crossA = dx * kotlin.math.sin(alphaA) - dy * kotlin.math.cos(alphaA)
+                        alpha = if ((crossA >= 0.0) == (sideRef >= 0.0)) alphaA else alphaB
+                    }
+                }
             }
         }
-        return best
+
+        // Refine against the real elasticity (e = 0.95): the deflected
+        // ray from the ghost point must pass through DEST. Bisection on
+        // the residual, only when the bracket straddles a root.
+        if (haveApproach) {
+            val k = (1.0 + KISS_ELASTICITY) / 2.0
+            fun residual(a: Double): Double {
+                val nx = kotlin.math.cos(a)
+                val ny = kotlin.math.sin(a)
+                val dot = v1.x * nx + v1.y * ny
+                val outX = v1.x - nx * dot * k
+                val outY = v1.y - ny * dot * k
+                val gx = kissed.x + nx * 2 * r
+                val gy = kissed.y + ny * 2 * r
+                return outX * (dest.y - gy) - outY * (dest.x - gx)
+            }
+            val bracket = Math.toRadians(KISS_REFINE_BRACKET_DEG)
+            var lo = alpha - bracket
+            var hi = alpha + bracket
+            var fLo = residual(lo)
+            val fHi = residual(hi)
+            if (fLo * fHi < 0.0) {
+                repeat(KISS_REFINE_STEPS) {
+                    val mid = (lo + hi) / 2.0
+                    val fMid = residual(mid)
+                    if ((fMid >= 0.0) == (fLo >= 0.0)) {
+                        lo = mid
+                        fLo = fMid
+                    } else {
+                        hi = mid
+                    }
+                }
+                alpha = (lo + hi) / 2.0
+            }
+        }
+
+        val nx = kotlin.math.cos(alpha)
+        val ny = kotlin.math.sin(alpha)
+        val ghost = Vec2(kissed.x + nx * 2 * r, kissed.y + ny * 2 * r)
+        val contact = Vec2(kissed.x + nx * r, kissed.y + ny * r)
+
+        // Refined deflection direction (e = 0.95) from the ghost point.
+        // Guards: a near-head-on kiss leaves the cue almost stopped
+        // (tiny out-vector — no usable deflection), and the bisection
+        // root can be anti-parallel (the ray passes through DEST but
+        // points away from it) — both are impossible kisses.
+        val dot = v1.x * nx + v1.y * ny
+        val k = (1.0 + KISS_ELASTICITY) / 2.0
+        val outVec = if (haveApproach) {
+            Vec2(v1.x - nx * dot * k, v1.y - ny * dot * k)
+        } else {
+            Vec2(0.0, 0.0)
+        }
+        if (haveApproach && outVec.norm() < 1e-6) return null // cue stops dead
+        val outDir = if (haveApproach) outVec.normalized() else Vec2(0.0, 0.0)
+        if (haveApproach) {
+            // The deflected ray must head toward DEST, not away from it.
+            val toDest = (dest - ghost).normalized()
+            if (outDir.dot(toDest) <= 0.0) return null
+            // ... and it must actually strike the target: the ray from
+            // the ghost point must pass within one diameter of the
+            // target centre, with the target in front of the ghost.
+            val toTarget = target - ghost
+            if (toTarget.dot(outDir) < 0.0) return null
+            val rayDist = kotlin.math.abs(toTarget.x * outDir.y - toTarget.y * outDir.x)
+            if (rayDist >= 2 * r) return null
+        }
+
+        // First leg: cue -> kissed ball, ghost point = [ghost]. Passing
+        // (kissed - n) as the "pocket" makes solveShot's ghost land
+        // exactly on [ghost].
+        val kissShot = solveShot(cue, kissed, Vec2(kissed.x - nx, kissed.y - ny), r)
+            ?: return null
+        val kissShotRefined = if (haveApproach) {
+            kissShot.copy(
+                deflectionLine = Segment(ghost, ghost + outDir * (2 * r))
+            )
+        } else {
+            kissShot
+        }
+        // Second leg: cue (at the kiss ghost point) -> target -> pocket.
+        val secondShot = solveShot(ghost, target, pocket, r) ?: return null
+        return KissSolution(kissShotRefined, secondShot, ghost, contact)
     }
 
     /** Result of solving one direct (no-bank) shot. */

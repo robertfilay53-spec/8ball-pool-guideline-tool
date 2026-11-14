@@ -192,6 +192,183 @@ class ShotSolverTest {
         val behind = listOf(Vec2(100.0, 50.0), Vec2(100.0, 350.0))
         assertNull(ShotSolver.bestShot(cue, target, behind, 9.0))
     }
+
+    @Test
+    fun `allShots returns every reachable shot best first`() {
+        val cue = Vec2(197.0, 202.0)
+        val target = Vec2(394.0, 202.0)
+        val bad = Vec2(500.0, 50.0)
+        val good = Vec2(666.5, 344.5)
+        val all = ShotSolver.allShots(cue, target, listOf(bad, good), 9.0)
+        assertEquals(2, all.size)
+        assertEquals(good, all[0].targetLine.end)
+        assertEquals(bad, all[1].targetLine.end)
+        assertTrue(all[0].cutAngleDegrees < all[1].cutAngleDegrees)
+    }
+
+    @Test
+    fun `allShots keeps pocket order on a symmetric tie`() {
+        val cue = Vec2(197.0, 202.0)
+        val target = Vec2(394.0, 202.0)
+        // Exactly symmetric about y=202: both cuts are identical, so
+        // the 1-degree tie margin keeps the pocket list order.
+        val topRight = Vec2(666.5, 60.5)
+        val bottomRight = Vec2(666.5, 343.5)
+        val all = ShotSolver.allShots(cue, target, listOf(topRight, bottomRight), 9.0)
+        assertEquals(2, all.size)
+        assertEquals(topRight, all[0].targetLine.end)
+        assertEquals(bottomRight, all[1].targetLine.end)
+        assertEquals(all[0].cutAngleDegrees, all[1].cutAngleDegrees, 1e-6)
+    }
+
+    @Test
+    fun `allShots is empty when nothing is reachable`() {
+        val behind = listOf(Vec2(100.0, 50.0), Vec2(100.0, 350.0))
+        assertTrue(ShotSolver.allShots(Vec2(197.0, 202.0), Vec2(394.0, 202.0), behind, 9.0).isEmpty())
+    }
+}
+
+class ComboKissTest {
+
+    private val r = 10.0
+
+    @Test
+    fun `straight combo chains two ghost points`() {
+        // Cue, first, second, pocket all on one line: G2 = (180,100),
+        // G1 = (80,100), both cuts 0 degrees.
+        val combo = ShotSolver.solveCombo(
+            Vec2(0.0, 100.0), Vec2(100.0, 100.0),
+            Vec2(200.0, 100.0), Vec2(300.0, 100.0), r
+        )
+        assertNotNull(combo)
+        combo!!
+        assertEquals(Vec2(180.0, 100.0), combo.intermediateGhost)
+        assertEquals(Vec2(80.0, 100.0), combo.firstShot.ghostPoint)
+        assertEquals(0.0, combo.firstShot.cutAngleDegrees, 1e-6)
+        assertEquals(Vec2(180.0, 100.0), combo.secondShot.ghostPoint)
+        assertEquals(0.0, combo.secondShot.cutAngleDegrees, 1e-6)
+    }
+
+    @Test
+    fun `combo with a cut on the first ball`() {
+        // First ball cut 51.3 degrees toward G2 (aim (80,100) from
+        // (0,0)); second leg straight.
+        val combo = ShotSolver.solveCombo(
+            Vec2(0.0, 0.0), Vec2(100.0, 100.0),
+            Vec2(200.0, 100.0), Vec2(300.0, 100.0), r
+        )
+        assertNotNull(combo)
+        combo!!
+        assertEquals(Vec2(180.0, 100.0), combo.intermediateGhost)
+        assertEquals(51.3, combo.firstShot.cutAngleDegrees, 0.5)
+        assertEquals(Vec2(180.0, 100.0), combo.secondShot.ghostPoint)
+        assertEquals(0.0, combo.secondShot.cutAngleDegrees, 1e-6)
+    }
+
+    @Test
+    fun `combo is impossible when the first ball cannot reach the second ghost point`() {
+        // First ball sits behind the second relative to the cue: the
+        // first leg needs a 180-degree cut.
+        assertNull(
+            ShotSolver.solveCombo(
+                Vec2(0.0, 100.0), Vec2(200.0, 100.0),
+                Vec2(100.0, 100.0), Vec2(300.0, 100.0), r
+            )
+        )
+    }
+
+    @Test
+    fun `combo is impossible when the balls overlap`() {
+        assertNull(
+            ShotSolver.solveCombo(
+                Vec2(0.0, 100.0), Vec2(100.0, 100.0),
+                Vec2(105.0, 100.0), Vec2(300.0, 100.0), r
+            )
+        )
+    }
+
+    @Test
+    fun `kiss deflects the cue into the target ghost point`() {
+        // Cue left of the kissed ball; the e=0.95 bisection refines the
+        // contact normal so the deflected ray passes exactly through the
+        // red ball's ghost point (180,100) for the top-right pocket.
+        // Refined ghost (104.17, 119.56), contact (102.08, 109.78).
+        val kiss = ShotSolver.solveKiss(
+            Vec2(50.0, 250.0), Vec2(100.0, 100.0),
+            Vec2(200.0, 100.0), Vec2(300.0, 100.0), r
+        )
+        assertNotNull(kiss)
+        kiss!!
+        assertEquals(104.2, kiss.ghostPoint.x, 1.0)
+        assertEquals(119.6, kiss.ghostPoint.y, 1.0)
+        assertEquals(102.1, kiss.contactPoint.x, 1.0)
+        assertEquals(109.8, kiss.contactPoint.y, 1.0)
+        assertEquals(kiss.ghostPoint, kiss.kissShot.ghostPoint)
+        assertEquals(Vec2(180.0, 100.0), kiss.secondShot.ghostPoint)
+        // The refined deflection ray from the ghost point must point at
+        // the target's ghost point (the bisection root).
+        val toGhost = (Vec2(180.0, 100.0) - kiss.ghostPoint).normalized()
+        val defl = kiss.kissShot.deflectionLine.direction()
+        assertEquals(1.0, toGhost.dot(defl), 0.002)
+    }
+
+    @Test
+    fun `kiss without a bracketing root still solves within one ball radius`() {
+        // Cue nearly straight below the kissed ball: the residual does
+        // not change sign across the +/-30 degree bracket, so no
+        // refinement runs and the e=0.95 deflection is ~7 degrees off
+        // the ideal ray — but the ray still strikes the target (16.8 px
+        // off its centre, inside one diameter), so the kiss solves.
+        val kiss = ShotSolver.solveKiss(
+            Vec2(105.0, 200.0), Vec2(100.0, 100.0),
+            Vec2(200.0, 100.0), Vec2(300.0, 100.0), r
+        )
+        assertNotNull(kiss)
+        kiss!!
+        assertEquals(105.0, kiss.ghostPoint.x, 1.0)
+        assertEquals(119.4, kiss.ghostPoint.y, 1.0)
+        assertEquals(Vec2(180.0, 100.0), kiss.secondShot.ghostPoint)
+        val toGhost = (Vec2(180.0, 100.0) - kiss.ghostPoint).normalized()
+        val defl = kiss.kissShot.deflectionLine.direction()
+        assertTrue(toGhost.dot(defl) > 0.99)
+    }
+
+    @Test
+    fun `kiss is impossible when the deflection points away from the target`() {
+        // Cue right of the kissed ball, approaching from the pocket
+        // side: the only reachable contact normal deflects the cue away
+        // from the target's ghost point (anti-parallel ray).
+        assertNull(
+            ShotSolver.solveKiss(
+                Vec2(250.0, 200.0), Vec2(100.0, 100.0),
+                Vec2(200.0, 100.0), Vec2(300.0, 100.0), r
+            )
+        )
+    }
+
+    @Test
+    fun `kiss is impossible when DEST sits inside the kissed ball`() {
+        // Target (115,100) -> pocket (300,100): ghost (95,100) is 5 px
+        // from the kissed ball's centre, inside one diameter.
+        assertNull(
+            ShotSolver.solveKiss(
+                Vec2(105.0, 200.0), Vec2(100.0, 100.0),
+                Vec2(115.0, 100.0), Vec2(300.0, 100.0), r
+            )
+        )
+    }
+
+    @Test
+    fun `kiss is impossible from directly behind the kissed ball`() {
+        // Cue on the pocket side of the kissed ball: neither mirror
+        // contact point is on the cue's approach side.
+        assertNull(
+            ShotSolver.solveKiss(
+                Vec2(0.0, 100.0), Vec2(100.0, 100.0),
+                Vec2(200.0, 100.0), Vec2(300.0, 100.0), r
+            )
+        )
+    }
 }
 
 class TableGeometryTest {

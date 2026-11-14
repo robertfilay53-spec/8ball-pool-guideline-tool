@@ -47,6 +47,11 @@ class LineOverlayManager(
         private const val DEFLECT_COLOR = Color.WHITE
         private const val BANK_COLOR = 0xFF00E5FF.toInt() // cyan
         private const val POCKET_COLOR = 0xFFFF5252.toInt() // red ring
+        /** Non-best candidate shots (PoolAimAssist UX): thin, ~35% alpha
+         * grey. The best shot keeps the full-colour lines — its yellow
+         * target line is the highlight that marks the pick. */
+        private const val CANDIDATE_COLOR = 0x59BDBDBD.toInt() // ~35% grey
+        private const val CANDIDATE_WIDTH_PX = 2f
         private const val AIM_WIDTH_PX = 5f
         private const val LINE_WIDTH_PX = 4f
         private const val RING_WIDTH_PX = 4f
@@ -114,6 +119,22 @@ class LineOverlayManager(
         val shot = result.shot
         val bank = result.bank
         if (shot != null) {
+            // Non-best candidates first (drawn underneath): aim + target
+            // lines only, faint grey — no deflection, no ring, so the
+            // best shot stays unambiguous. PoolAimAssist UX: every
+            // candidate visible, best highlighted (yellow target line).
+            if (store.showAllShots) {
+                for (candidate in result.allShots.drop(1)) {
+                    out += DrawLine(
+                        Segment(map(candidate.aimLine.start), map(candidate.aimLine.end)),
+                        CANDIDATE_COLOR, CANDIDATE_WIDTH_PX
+                    )
+                    out += DrawLine(
+                        Segment(map(candidate.targetLine.start), map(candidate.targetLine.end)),
+                        CANDIDATE_COLOR, CANDIDATE_WIDTH_PX
+                    )
+                }
+            }
             out += DrawLine(
                 Segment(map(shot.aimLine.start), map(shot.aimLine.end)),
                 AIM_COLOR, AIM_WIDTH_PX

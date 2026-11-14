@@ -23,6 +23,7 @@ import com.poolguide.tool.R
 import com.poolguide.tool.capture.CaptureService
 import com.poolguide.tool.capture.PreviewBus
 import com.poolguide.tool.data.CalibrationStore
+import com.poolguide.tool.overlay.OverlayService
 
 /**
  * Main screen: permission flow, start/stop, demo mode, calibration, and the
@@ -43,6 +44,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var previewImage: ImageView
     private lateinit var previewStatus: TextView
     private lateinit var previewSwitch: Switch
+    private lateinit var showAllShotsSwitch: Switch
 
     private val overlayLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -56,13 +58,19 @@ class MainActivity : AppCompatActivity() {
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK && result.data != null) {
-            // Pass the token to the service immediately — never hold it.
+            // Pass the token to the capture service immediately — never
+            // hold it. The overlay runs in its own service (FGS split):
+            // start it alongside, it draws the lines from OverlayBus.
             val intent = Intent(this, CaptureService::class.java).apply {
                 action = CaptureService.ACTION_START
                 putExtra(CaptureService.EXTRA_RESULT_CODE, result.resultCode)
                 putExtra(CaptureService.EXTRA_RESULT_DATA, result.data)
             }
             startForegroundService(intent)
+            val overlayIntent = Intent(this, OverlayService::class.java).apply {
+                action = OverlayService.ACTION_START
+            }
+            startForegroundService(overlayIntent)
             setStatus(getString(R.string.status_capturing))
         } else {
             setStatus(getString(R.string.status_capture_denied))
@@ -78,6 +86,11 @@ class MainActivity : AppCompatActivity() {
         previewImage = findViewById(R.id.preview_image)
         previewStatus = findViewById(R.id.preview_status)
         previewSwitch = findViewById(R.id.preview_switch)
+        showAllShotsSwitch = findViewById(R.id.show_all_shots_switch)
+        showAllShotsSwitch.isChecked = store.showAllShots
+        showAllShotsSwitch.setOnCheckedChangeListener { _, checked ->
+            store.showAllShots = checked
+        }
 
         findViewById<Button>(R.id.btn_start).setOnClickListener { startFlow() }
         findViewById<Button>(R.id.btn_stop).setOnClickListener { stopCapture() }
@@ -174,7 +187,9 @@ class MainActivity : AppCompatActivity() {
         projectionLauncher.launch(manager.createScreenCaptureIntent())
     }
 
-    /** Demo mode needs the overlay permission too (it draws real windows). */
+    /** Demo mode needs the overlay permission too (it draws real windows).
+     * Demo runs in the OverlayService alone (specialUse FGS, no token);
+     * the capture service is not involved. */
     private fun startDemo() {
         if (!Settings.canDrawOverlays(this)) {
             Toast.makeText(this, R.string.overlay_needed, Toast.LENGTH_LONG).show()
@@ -185,18 +200,24 @@ class MainActivity : AppCompatActivity() {
             overlayLauncher.launch(intent)
             return
         }
-        val intent = Intent(this, CaptureService::class.java).apply {
-            action = CaptureService.ACTION_DEMO
+        val intent = Intent(this, OverlayService::class.java).apply {
+            action = OverlayService.ACTION_DEMO
         }
         startForegroundService(intent)
         setStatus(getString(R.string.status_demo))
     }
 
     private fun stopCapture() {
-        val intent = Intent(this, CaptureService::class.java).apply {
+        // The two services run as a pair: stop both, so the lines never
+        // outlive the capture (and vice versa).
+        val stopCapture = Intent(this, CaptureService::class.java).apply {
             action = CaptureService.ACTION_STOP
         }
-        startService(intent)
+        startService(stopCapture)
+        val stopOverlay = Intent(this, OverlayService::class.java).apply {
+            action = OverlayService.ACTION_STOP
+        }
+        startService(stopOverlay)
         setStatus(getString(R.string.status_stopped))
     }
 }

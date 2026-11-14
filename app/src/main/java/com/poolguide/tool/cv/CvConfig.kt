@@ -17,6 +17,18 @@ object CvConfig {
     /** Working width for analysis. Height follows the capture aspect ratio. */
     const val WORK_WIDTH = 720
 
+    /** Capture scale (Scugalug measured targets): the VirtualDisplay is
+     * 0.75x the screen (960x540 for a 1280x720 game) — the pipeline
+     * downscales to 720 wide anyway, so the extra capture pixels only
+     * cost bandwidth and battery. */
+    const val CAPTURE_SCALE = 0.75
+    /** Frame-rate cap (Scugalug measured targets): 15 FPS is enough for
+     * an aim overlay — the table does not move between frames, and
+     * anything faster only heats the phone. The pacer enforces this
+     * (see FramePacer); 1000/15 rounds down to 66 ms. */
+    const val MAX_FPS = 15
+    const val MIN_FRAME_INTERVAL_MS = 1000L / MAX_FPS // 66 ms
+
     /** A frame whose mean grey value is below this is treated as black
      * (FLAG_SECURE blackout or a dead capture). */
     const val BLACK_FRAME_MEAN = 8.0
@@ -80,6 +92,11 @@ object CvConfig {
     /** Contour ball radius range at the working resolution. */
     const val BALL_MIN_RADIUS_PX = 4.0
     const val BALL_MAX_RADIUS_PX = 25.0
+    /** Detected ball radius in px at the 720-wide working resolution
+     * (synthetic demo tables: 16 px at 1280 wide -> ~9 px at 720 wide).
+     * The per-version default in GameProfile; the pipeline uses the
+     * actually detected radii when it has them. */
+    const val BALL_RADIUS_PX_AT_720 = 9.0
     /** A contour is ball-like when area / (pi * r^2) is above this. */
     const val BALL_MIN_CIRCULARITY = 0.55
     /** Two detections closer than this are the same ball (dedup). */

@@ -1,5 +1,6 @@
 package com.poolguide.tool.cv
 
+import com.poolguide.tool.data.GameProfile
 import com.poolguide.tool.geometry.Segment
 import com.poolguide.tool.geometry.ShotSolver
 import com.poolguide.tool.geometry.Vec2
@@ -44,9 +45,12 @@ data class TableRect(
         (topLeft.y + topRight.y + bottomLeft.y + bottomRight.y) / 4.0
     )
 
-    /** Six pockets at fixed fractions of the table rect (corners + side mids). */
-    fun pockets(): List<Vec2> {
-        val inset = width * CvConfig.POCKET_INSET_FRACTION
+    /** Six pockets at fixed fractions of the table rect (corners + side mids).
+     * The fractions come from the per-version [GameProfile] (aimcall lead):
+     * a game update can move the pockets, so the fractions are calibration,
+     * not constants. The no-arg form uses the defaults. */
+    fun pockets(profile: GameProfile = GameProfile.DEFAULT): List<Vec2> {
+        val inset = width * profile.pocketInsetFraction
         val midX = (topLeft.x + topRight.x) / 2.0
         return listOf(
             topLeft + Vec2(inset, inset),
@@ -79,6 +83,11 @@ data class DetectionResult(
     val guideline: List<GuidelineSegment>,
     val shot: ShotSolver.ShotSolution?,
     val bank: ShotSolver.BankSolution?,
+    /** Every reachable direct shot, best first (allShots ranking).
+     * Empty when no direct shot exists. The overlay draws the non-best
+     * entries faint when "Show all shots" is on; [shot] is always
+     * allShots.firstOrNull(). */
+    val allShots: List<ShotSolver.ShotSolution> = emptyList(),
     /** Human-readable status for the diagnostic preview. */
     val status: String
 ) {

@@ -74,6 +74,11 @@ class CvPipelineInstrumentedTest {
         )
         assertTrue("cut angle out of range: ${shot.cutAngleDegrees}", shot.cutAngleDegrees in 20.0..45.0)
         assertFalse("shot must not be a thin cut", shot.isThinCut)
+        // All-shots ranking: the best shot is allShots.first(), and the
+        // green table has more than one reachable pocket.
+        assertTrue("allShots must not be empty", result.allShots.isNotEmpty())
+        assertEquals("best shot must be allShots.first()", shot, result.allShots.first())
+        assertTrue("expected >1 candidate shot, got ${result.allShots.size}", result.allShots.size > 1)
     }
 
     @Test
