@@ -328,6 +328,25 @@ screen. Nothing about the game is changed.**
     phantom is still detected and tagged STRIPE. If no ball carries
     the CUE group the pick falls back to the first white ball.
 
+22. **The ghost-ball ring marks where the cue ball must arrive.**
+    Since v1.0.26 the live overlay draws a green ring of one ball
+    radius centred on the shown shot's ghost point, the cue ball's
+    centre at impact, for every shot family (direct, bank, kick,
+    combo, kiss) and in EDIT mode too. The ring touches the target
+    ball exactly, so the player aims the cue ball at a visible
+    circle that kisses the target instead of guessing where the aim
+    line ends. Practice mode already drew this circle; the live
+    overlay now agrees with it. One ring per shown shot, on the
+    first leg's ghost only: for a combo or kiss the second leg's
+    ghost is the first ball's arrival point, and its aim line
+    already ends there. Non-best candidates get no ring, like they
+    get no pocket ring and no labels. The ring hides with the lines
+    (auto-hide, hide toggle, table lock, black frame) and follows
+    the frozen shot in EDIT mode. It is geometry, like the lines:
+    it shows where the cue ball must be at impact, not whether
+    the shot will drop. Cut angle, thin-cut warning, and the
+    blocked-path flag still carry the make judgement.
+
 ## How it works
 
 ```
@@ -345,7 +364,7 @@ MediaProjection + VirtualDisplay (960x540, foreground service)
      one-rail and two-rail banks and kicks ranked the same way, first
      clear shown; the shown shot is flagged "Path blocked" when another
      ball sits on its path)
-  -> one small TYPE_APPLICATION_OVERLAY window per line (best shot in
+  -> one small TYPE_APPLICATION_OVERLAY window per line or ring (best shot in
      full colour, other candidates faint — PoolAimAssist UX)
 ```
 
@@ -451,7 +470,8 @@ detection fails, which never happens on the 15 harness tables.
    on the main screen if you only want the best shot. Use **Hide guides**
    on the floating bubble while shooting. If the lines are wrong, tap
    **Edit** on the bubble and drag the green (cue) and yellow (ghost)
-   handles to correct them, then tap **Done**.
+   handles to correct them, then tap **Done**. The green ring is the ghost
+   ball: where the cue ball's centre must be at impact.
 
 **Demo mode** (no game needed): the app ships with two synthetic table
 images and runs the full pipeline + overlay on them, so you can verify the
