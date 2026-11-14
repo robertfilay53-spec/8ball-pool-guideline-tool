@@ -99,11 +99,11 @@ class OverlayInstrumentedTest {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
 
         // One tag window per detected ball, in ball order — and the
-        // pinned line/label counts do not move (4 lines, 2 labels:
+        // pinned line/label counts do not move (5 lines, 2 labels:
         // angle + pocket distance — for this straight best shot).
         store.showAllShots = false
         instrumentation.runOnMainSync { manager.update(shotResultWithBalls()) }
-        assertEquals("expected 4 line windows", 4, manager.lineWindowCount)
+        assertEquals("expected 5 line windows", 5, manager.lineWindowCount)
         assertEquals("expected 2 label windows", 2, manager.labelWindowCount)
         assertEquals("expected 3 tag windows", 3, manager.tagWindowCount)
         assertEquals(listOf("C", "S", "?"), manager.tagTexts)
@@ -139,17 +139,17 @@ class OverlayInstrumentedTest {
         val manager = LineOverlayManager(ctx, store)
         val instrumentation = InstrumentationRegistry.getInstrumentation()
 
-        // A shot draws 4 windows: aim, target, deflection, pocket ring.
+        // A shot draws 5 windows: aim, target, deflection, pocket ring, ghost ring.
         // With "Show all shots" on, the 2 extra candidates add 2 faint
-        // windows each (aim + target): 4 + 4 = 8.
+        // windows each (aim + target): 5 + 4 = 9.
         store.showAllShots = true
         instrumentation.runOnMainSync { manager.update(shotResult()) }
-        assertEquals("expected 8 line windows with all shots", 8, manager.lineWindowCount)
+        assertEquals("expected 9 line windows with all shots", 9, manager.lineWindowCount)
 
-        // Toggle off: only the best shot's 4 windows.
+        // Toggle off: only the best shot's 5 windows.
         store.showAllShots = false
         instrumentation.runOnMainSync { manager.update(shotResult()) }
-        assertEquals("expected 4 line windows with all shots off", 4, manager.lineWindowCount)
+        assertEquals("expected 5 line windows with all shots off", 5, manager.lineWindowCount)
         store.showAllShots = true
 
         // Hide toggle removes them all.
@@ -160,7 +160,7 @@ class OverlayInstrumentedTest {
         // Black frame removes them too.
         store.guidesHidden = false
         instrumentation.runOnMainSync { manager.update(shotResult()) }
-        assertEquals(8, manager.lineWindowCount)
+        assertEquals(9, manager.lineWindowCount)
         val black = shotResult().copy(isCaptureBlack = true, shot = null, guideline = emptyList())
         instrumentation.runOnMainSync { manager.update(black) }
         assertEquals("black frame must remove all line windows", 0, manager.lineWindowCount)
@@ -185,9 +185,9 @@ class OverlayInstrumentedTest {
         instrumentation.runOnMainSync { manager.update(unlocked) }
         assertEquals("unlocked table must draw no lines", 0, manager.lineWindowCount)
 
-        // Locked table: the same result draws all 8 windows.
+        // Locked table: the same result draws all 9 windows.
         instrumentation.runOnMainSync { manager.update(shotResult()) }
-        assertEquals("locked table must draw lines", 8, manager.lineWindowCount)
+        assertEquals("locked table must draw lines", 9, manager.lineWindowCount)
 
         // Losing the lock hides them again (table moved / lost).
         instrumentation.runOnMainSync { manager.update(unlocked) }
@@ -210,16 +210,16 @@ class OverlayInstrumentedTest {
         val manager = LineOverlayManager(ctx, store)
         val instrumentation = InstrumentationRegistry.getInstrumentation()
 
-        // Live mode: best shot + 2 faint candidates = 8 windows.
+        // Live mode: best shot + 2 faint candidates = 9 windows.
         instrumentation.runOnMainSync { manager.update(shotResult()) }
-        assertEquals(8, manager.lineWindowCount)
+        assertEquals(9, manager.lineWindowCount)
         assertEquals(0, manager.handleWindowCount)
         assertFalse(manager.isEditMode)
 
-        // Enter edit mode: best shot only (4 windows) + 2 handles.
+        // Enter edit mode: best shot only (5 windows) + 2 handles.
         instrumentation.runOnMainSync { manager.toggleEditMode() }
         assertTrue(manager.isEditMode)
-        assertEquals(4, manager.lineWindowCount)
+        assertEquals(5, manager.lineWindowCount)
         assertEquals(2, manager.handleWindowCount)
 
         // Drag the ghost anchor 10 px right (working coords): the
@@ -232,22 +232,22 @@ class OverlayInstrumentedTest {
         assertEquals(frozen.ghostPoint.x + 10.0, edited.ghostPoint.x, 0.0)
         assertEquals(frozen.targetLine.end.x, edited.targetLine.end.x, 0.0)
         assertEquals(frozen.targetLine.end.y, edited.targetLine.end.y, 0.0)
-        assertEquals(4, manager.lineWindowCount)
+        assertEquals(5, manager.lineWindowCount)
 
         // Edit mode keeps drawing even with no guideline (the user is
         // editing precisely because detection missed): 20 frames with
         // no guideline must not hide the lines.
         val noGuideline = shotResult().copy(guideline = emptyList())
         repeat(20) { instrumentation.runOnMainSync { manager.update(noGuideline) } }
-        assertEquals(4, manager.lineWindowCount)
+        assertEquals(5, manager.lineWindowCount)
         assertEquals(2, manager.handleWindowCount)
 
-        // Leaving edit mode resumes live detection (8 windows again).
+        // Leaving edit mode resumes live detection (9 windows again).
         instrumentation.runOnMainSync { manager.toggleEditMode() }
         assertFalse(manager.isEditMode)
         assertEquals(0, manager.handleWindowCount)
         instrumentation.runOnMainSync { manager.update(shotResult()) }
-        assertEquals(8, manager.lineWindowCount)
+        assertEquals(9, manager.lineWindowCount)
 
         instrumentation.runOnMainSync { manager.removeAll() }
     }
@@ -400,7 +400,7 @@ class OverlayInstrumentedTest {
         val manager = LineOverlayManager(ctx, store)
         val instrumentation = InstrumentationRegistry.getInstrumentation()
 
-        // A direct shot draws 4 line windows + 2 labels (the angle
+        // A direct shot draws 5 line windows + 2 labels (the angle
         // label and the pocket-distance label, v1.0.15 — the shot is
         // not thin, so no warning). The angle text is the shot's own
         // cut angle, one decimal; the distance is the total path in
@@ -410,7 +410,7 @@ class OverlayInstrumentedTest {
         val result = shotResult()
         store.showAllShots = false
         instrumentation.runOnMainSync { manager.update(result) }
-        assertEquals(4, manager.lineWindowCount)
+        assertEquals(5, manager.lineWindowCount)
         assertEquals(2, manager.labelWindowCount)
         assertEquals(
             listOf(CutAngleLabel.format(result.shot!!.cutAngleDegrees), "29.6 bd"),
@@ -426,7 +426,7 @@ class OverlayInstrumentedTest {
         // Unhide brings both back.
         store.guidesHidden = false
         instrumentation.runOnMainSync { manager.update(result) }
-        assertEquals(4, manager.lineWindowCount)
+        assertEquals(5, manager.lineWindowCount)
         assertEquals(2, manager.labelWindowCount)
 
         // Black frame removes both as well.
@@ -457,7 +457,7 @@ class OverlayInstrumentedTest {
         val result = thinShotResult()
         assertTrue(result.shot!!.isThinCut)
         instrumentation.runOnMainSync { manager.update(result) }
-        assertEquals(4, manager.lineWindowCount)
+        assertEquals(5, manager.lineWindowCount)
         assertEquals("thin shot needs angle + warning + distance labels", 3, manager.labelWindowCount)
         assertEquals(
             listOf("82.8°", "Thin cut 82.8°", "5.9 bd"),
@@ -601,12 +601,12 @@ class OverlayInstrumentedTest {
         val manager = LineOverlayManager(ctx, store)
         val instrumentation = InstrumentationRegistry.getInstrumentation()
 
-        // A one-rail bank draws 5 line windows: aim, 2 bank
-        // segments, pocket ring, and 1 rail-contact marker. Labels
+        // A one-rail bank draws 6 line windows: aim, 2 bank
+        // segments, pocket ring, ghost ring, and 1 rail-contact marker. Labels
         // are the angle (30.8 deg) and the distance (45.5 bd).
         val result = bankResult()
         instrumentation.runOnMainSync { manager.update(result) }
-        assertEquals("bank needs aim + 2 path + ring + 1 marker", 5, manager.lineWindowCount)
+        assertEquals("bank needs aim + 2 path + 2 rings + 1 marker", 6, manager.lineWindowCount)
         assertEquals(2, manager.labelWindowCount)
         assertEquals(
             listOf("30.8°", "45.5 bd"),
@@ -622,7 +622,7 @@ class OverlayInstrumentedTest {
         // Unhide brings the marker back.
         store.guidesHidden = false
         instrumentation.runOnMainSync { manager.update(result) }
-        assertEquals(5, manager.lineWindowCount)
+        assertEquals(6, manager.lineWindowCount)
 
         instrumentation.runOnMainSync { manager.removeAll() }
         assertEquals(0, manager.lineWindowCount)
@@ -639,11 +639,11 @@ class OverlayInstrumentedTest {
         val manager = LineOverlayManager(ctx, store)
         val instrumentation = InstrumentationRegistry.getInstrumentation()
 
-        // A one-rail kick draws 6 line windows: aim, kicked path,
-        // target, deflection, pocket ring, and 1 rail-contact marker.
+        // A one-rail kick draws 7 line windows: aim, kicked path,
+        // target, deflection, pocket ring, ghost ring, and 1 rail-contact marker.
         val result = kickResult()
         instrumentation.runOnMainSync { manager.update(result) }
-        assertEquals("kick needs 4 lines + ring + 1 marker", 6, manager.lineWindowCount)
+        assertEquals("kick needs 4 lines + 2 rings + 1 marker", 7, manager.lineWindowCount)
         assertEquals(2, manager.labelWindowCount)
         assertEquals(
             listOf("2.3°", "50.0 bd"),
@@ -665,11 +665,11 @@ class OverlayInstrumentedTest {
         val manager = LineOverlayManager(ctx, store)
         val instrumentation = InstrumentationRegistry.getInstrumentation()
 
-        // A two-rail bank draws 7 line windows: aim, 3 bank
-        // segments, pocket ring, and 2 rail-contact markers.
+        // A two-rail bank draws 8 line windows: aim, 3 bank
+        // segments, pocket ring, ghost ring, and 2 rail-contact markers.
         val result = bank2Result()
         instrumentation.runOnMainSync { manager.update(result) }
-        assertEquals("bank2 needs 4 lines + ring + 2 markers", 7, manager.lineWindowCount)
+        assertEquals("bank2 needs 4 lines + 2 rings + 2 markers", 8, manager.lineWindowCount)
         assertEquals(2, manager.labelWindowCount)
         assertEquals(
             listOf("12.6°", "29.7 bd"),
@@ -691,12 +691,12 @@ class OverlayInstrumentedTest {
         val manager = LineOverlayManager(ctx, store)
         val instrumentation = InstrumentationRegistry.getInstrumentation()
 
-        // A two-rail kick draws 8 line windows: aim, 2 kicked
-        // segments, target, deflection, pocket ring, and 2
+        // A two-rail kick draws 9 line windows: aim, 2 kicked
+        // segments, target, deflection, pocket ring, ghost ring, and 2
         // rail-contact markers.
         val result = kick2Result()
         instrumentation.runOnMainSync { manager.update(result) }
-        assertEquals("kick2 needs 5 lines + ring + 2 markers", 8, manager.lineWindowCount)
+        assertEquals("kick2 needs 5 lines + 2 rings + 2 markers", 9, manager.lineWindowCount)
         assertEquals(2, manager.labelWindowCount)
         assertEquals(
             listOf("24.6°", "32.7 bd"),
@@ -803,14 +803,14 @@ class OverlayInstrumentedTest {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
 
         // A combo draws 6 leg segments (aim/target/deflection
-        // per leg) + 1 pocket ring, and one angle label per leg —
+        // per leg) + 1 pocket ring + 1 ghost ring, and one angle label per leg.
         // the thin first leg adds its warning label — plus one
         // pocket-distance label last (v1.0.15): the whole chain
         // travels 16.0 ball diameters (dist15-probe).
         val result = comboResult()
         assertTrue(result.combo!!.firstShot.isThinCut)
         instrumentation.runOnMainSync { manager.update(result) }
-        assertEquals(7, manager.lineWindowCount)
+        assertEquals(8, manager.lineWindowCount)
         assertEquals(4, manager.labelWindowCount)
         assertEquals(
             listOf("84.8°", "Thin cut 84.8°", "60.3°", "16.0 bd"),
@@ -841,7 +841,7 @@ class OverlayInstrumentedTest {
         val manager = LineOverlayManager(ctx, store)
         val instrumentation = InstrumentationRegistry.getInstrumentation()
 
-        // A kiss draws the same 6 + 1 windows, with one angle
+        // A kiss draws the same 6 + 2 windows, with one angle
         // label per leg and no warning (neither leg is thin), plus
         // one pocket-distance label last (v1.0.15): the whole chain
         // travels 33.8 ball diameters (dist15-probe).
@@ -849,7 +849,7 @@ class OverlayInstrumentedTest {
         assertTrue(!result.kiss!!.kissShot.isThinCut)
         assertTrue(!result.kiss!!.secondShot.isThinCut)
         instrumentation.runOnMainSync { manager.update(result) }
-        assertEquals(7, manager.lineWindowCount)
+        assertEquals(8, manager.lineWindowCount)
         assertEquals(3, manager.labelWindowCount)
         assertEquals(
             listOf("78.2°", "11.9°", "33.8 bd"),
@@ -878,7 +878,7 @@ class OverlayInstrumentedTest {
         // first leg's aim-line midpoint (53.5,57.0).
         val result = comboResult().copy(blockedBy = Vec2(53.5, 57.0))
         instrumentation.runOnMainSync { manager.update(result) }
-        assertEquals(7, manager.lineWindowCount)
+        assertEquals(8, manager.lineWindowCount)
         assertEquals(5, manager.labelWindowCount)
         assertEquals(
             listOf("84.8°", "Thin cut 84.8°", "60.3°", "Path blocked", "16.0 bd"),
@@ -905,7 +905,7 @@ class OverlayInstrumentedTest {
         // aim-line midpoint (56.3,57.9).
         val result = kissResult().copy(blockedBy = Vec2(56.3, 57.9))
         instrumentation.runOnMainSync { manager.update(result) }
-        assertEquals(7, manager.lineWindowCount)
+        assertEquals(8, manager.lineWindowCount)
         assertEquals(4, manager.labelWindowCount)
         assertEquals(
             listOf("78.2°", "11.9°", "Path blocked", "33.8 bd"),
@@ -940,7 +940,7 @@ class OverlayInstrumentedTest {
         // Re-enabling the switch brings the lines back.
         store.bankLinesEnabled = true
         instrumentation.runOnMainSync { manager.update(result) }
-        assertEquals(7, manager.lineWindowCount)
+        assertEquals(8, manager.lineWindowCount)
         assertEquals(4, manager.labelWindowCount)
 
         instrumentation.runOnMainSync { manager.removeAll() }
@@ -990,7 +990,7 @@ class OverlayInstrumentedTest {
         try {
             store.showAllShots = false
             instrumentation.runOnMainSync { manager.update(shotResult()) }
-            assertEquals(4, manager.lineWindowCount)
+            assertEquals(5, manager.lineWindowCount)
             // The fabricated result's three pockets are (600,50),
             // (600,350), (650,200): the best shot is straight to the
             // mid-right pocket, cut 0.0 deg, 29.6 bd.

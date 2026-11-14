@@ -23,6 +23,7 @@ import com.poolguide.tool.data.ShotHistory
 import com.poolguide.tool.geometry.BallGroupTag
 import com.poolguide.tool.geometry.BlockedPathLabel
 import com.poolguide.tool.geometry.CutAngleLabel
+import com.poolguide.tool.geometry.GhostBallRing
 import com.poolguide.tool.geometry.PocketDistanceLabel
 import com.poolguide.tool.geometry.RailContactMarker
 import com.poolguide.tool.geometry.Segment
@@ -137,12 +138,13 @@ class LineOverlayManager(
      * (v1.0.15): one small TextView window per label, managed exactly
      * like the line windows (reuse by index, removed with the lines)
      * so a label can never outlive its shot. Kept separate from
-     * [lineWindows] on purpose: the existing line-window counts (4
-     * for a direct shot, 8 with all shots) are pinned by
-     * instrumented tests and must not change. The distance label IS
-     * a label, so it shares these windows: the pinned label counts
-     * move by +1 per shot (2 for a direct shot, 3 for a thin one) —
-     * see the instrumented tests. */
+     * [lineWindows] on purpose: the existing line-window counts (5
+     * for a direct shot, 9 with all shots: the ghost-ball ring,
+     * v1.0.26, is a line window too) are pinned by instrumented
+     * tests and must not change. The distance label IS a label, so
+     * it shares these windows: the pinned label counts move by +1
+     * per shot (2 for a direct shot, 3 for a thin one); see the
+     * instrumented tests. */
     private val labelWindows = mutableListOf<LabelWindow>()
     /** Group-tag windows (v1.0.14): one small TextView window per
      * detected ball ("C" cue, "8" eight, "S" solid, "ST" stripe,
@@ -373,11 +375,13 @@ class LineOverlayManager(
     }
 
     /** The corrected shot's lines, mapped to screen coordinates. The
-     * pocket ring marks the (unchanged) target pocket. The cut-angle
-     * label and thin-cut warning (v1.0.12) follow the frozen shot's
-     * aim line and cue ball, in the aim green — EDIT mode draws a
-     * direct shot. The pocket-distance label (v1.0.15) sits beside
-     * the pocket ring, in the aim green. */
+     * pocket ring marks the (unchanged) target pocket. The ghost-ball
+     * ring (v1.0.26) marks the cue ball's arrival point, in the aim
+     * green, like the live overlay. The cut-angle label and thin-cut
+     * warning (v1.0.12) follow the frozen shot's aim line and cue
+     * ball, in the aim green. EDIT mode draws a direct shot. The
+     * pocket-distance label (v1.0.15) sits beside the pocket ring,
+     * in the aim green. */
     private fun buildEditLines(
         shot: ShotSolver.ShotSolution,
         result: DetectionResult
@@ -400,7 +404,8 @@ class LineOverlayManager(
             DrawLine(
                 Segment(map(pocket), map(pocket)),
                 POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = RING_RADIUS_PX
-            )
+            ),
+            ghostRing(shot, result, ::map)
         )
         return DrawnOverlay(
             lines = lines,
@@ -647,6 +652,31 @@ class LineOverlayManager(
         handleWindows.clear()
     }
 
+    /** Ghost-ball ring (v1.0.26) for one solved shot: a ball-radius
+     * ring in the aim green, centred on the shot's ghost point,
+     * mapped from working to screen coordinates by [map]. Practice
+     * mode already draws this circle (PracticeView.drawGhost); the
+     * live overlay did not. The centre is the solution's ghostPoint
+     * via [GhostBallRing], never the aim line's end, which for a
+     * kick is the rail contact. Like the pocket ring, the ring uses
+     * the solution's own geometry unsmoothed, so it never drifts
+     * from the point it marks. It hides with the lines (it is a
+     * line window) and is excluded from the group-tag anchors by
+     * the isRing filter, like every other ring. */
+    private fun ghostRing(
+        shot: ShotSolver.ShotSolution,
+        result: DetectionResult,
+        map: (Vec2) -> Vec2
+    ): DrawLine {
+        val radiusScreen =
+            GhostBallRing.radius(result.cueBall?.radiusPx ?: 9.0) * result.scaleToScreenX
+        val ghost = GhostBallRing.center(shot)
+        return DrawLine(
+            Segment(map(ghost), map(ghost)),
+            AIM_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = radiusScreen.toFloat()
+        )
+    }
+
     /** Build the lines to draw, mapped from working to screen coordinates.
      * The best shot's lines go through the jitter smoother (screen
      * coordinates, Bloro's 40 px gate); candidates and the pocket ring
@@ -659,7 +689,9 @@ class LineOverlayManager(
      * on the opposite side from the cut-angle label, only when
      * another ball sits on the shown shot's path — never in EDIT
      * mode, where the drawn shot is the frozen manual aim, not the
-     * live detection the flag belongs to. */
+     * live detection the flag belongs to. The ghost-ball ring
+     * (v1.0.26) sits on the shown shot's ghost point, in the aim
+     * green. The best shot only, never a candidate. */
     private fun buildDrawLines(result: DetectionResult): DrawnOverlay {
         val sx = result.scaleToScreenX
         val sy = result.scaleToScreenY
@@ -730,6 +762,8 @@ class LineOverlayManager(
                 Segment(map(pocket), map(pocket)),
                 POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = RING_RADIUS_PX
             )
+            // Ghost-ball ring (v1.0.26): the cue ball's arrival point.
+            out += ghostRing(shot, result, ::map)
         } else if (bank != null && store.bankLinesEnabled) {
             val smoothed = smoother.smoothList(
                 listOf(
@@ -753,6 +787,8 @@ class LineOverlayManager(
                 Segment(map(pocket), map(pocket)),
                 POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = RING_RADIUS_PX
             )
+            // Ghost-ball ring (v1.0.26): the cue ball's arrival point.
+            out += ghostRing(bank.direct, result, ::map)
             // Rail-contact marker (v1.0.16): the cushion spot the
             // target ball must hit, in the bank cyan.
             out += contactMarkers(bank.bankPath, BANK_COLOR)
@@ -790,6 +826,8 @@ class LineOverlayManager(
                 Segment(map(pocket), map(pocket)),
                 POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = RING_RADIUS_PX
             )
+            // Ghost-ball ring (v1.0.26): the cue ball's arrival point.
+            out += ghostRing(kick.direct, result, ::map)
             // Rail-contact marker (v1.0.16): the cushion spot the cue
             // ball must hit, in the kick magenta.
             out += contactMarkers(kick.kickPath, KICK_COLOR)
@@ -822,6 +860,8 @@ class LineOverlayManager(
                 Segment(map(pocket), map(pocket)),
                 POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = RING_RADIUS_PX
             )
+            // Ghost-ball ring (v1.0.26): the cue ball's arrival point.
+            out += ghostRing(bank2.direct, result, ::map)
             // Rail-contact markers (v1.0.16): both cushion spots, in
             // the bank cyan, in path order.
             out += contactMarkers(bank2.bankPath, BANK_COLOR)
@@ -863,6 +903,8 @@ class LineOverlayManager(
                 Segment(map(pocket), map(pocket)),
                 POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = RING_RADIUS_PX
             )
+            // Ghost-ball ring (v1.0.26): the cue ball's arrival point.
+            out += ghostRing(kick2.direct, result, ::map)
             // Rail-contact markers (v1.0.16): both cushion spots, in
             // the kick magenta, in path order.
             out += contactMarkers(kick2.kickPath, KICK_COLOR)
@@ -912,6 +954,9 @@ class LineOverlayManager(
                 Segment(map(pocket), map(pocket)),
                 POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = RING_RADIUS_PX
             )
+            // Ghost-ball ring (v1.0.26): the cue ball's arrival point
+            // (first leg's ghost only).
+            out += ghostRing(combo.firstShot, result, ::map)
         } else if (result.kiss != null && store.bankLinesEnabled) {
             // Kiss (v1.0.13): cue kisses the first ball thin and its
             // deflection carries it into the second ball's ghost
@@ -958,6 +1003,9 @@ class LineOverlayManager(
                 Segment(map(pocket), map(pocket)),
                 POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = RING_RADIUS_PX
             )
+            // Ghost-ball ring (v1.0.26): the cue ball's arrival point
+            // (kiss leg's ghost only).
+            out += ghostRing(kiss.kissShot, result, ::map)
         }
         return DrawnOverlay(
             out,
