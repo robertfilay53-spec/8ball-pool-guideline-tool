@@ -36,6 +36,9 @@ class PracticeActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btn_mode_direct).setOnClickListener {
             setMode(PracticeState.PracticeMode.DIRECT)
         }
+        findViewById<Button>(R.id.btn_mode_bank).setOnClickListener {
+            setMode(PracticeState.PracticeMode.BANK)
+        }
         findViewById<Button>(R.id.btn_mode_combo).setOnClickListener {
             setMode(PracticeState.PracticeMode.COMBO)
         }
@@ -74,6 +77,22 @@ class PracticeActivity : AppCompatActivity() {
                     getString(R.string.practice_cut_thin, shot.cutAngleDegrees)
                 } else {
                     getString(R.string.practice_cut, shot.cutAngleDegrees)
+                }
+            }
+            is PracticeState.PracticeSolution.Bank -> {
+                val bank = solution.solution
+                if (bank.direct.isThinCut) {
+                    getString(
+                        R.string.practice_bank_thin,
+                        solution.railName,
+                        bank.direct.cutAngleDegrees
+                    )
+                } else {
+                    getString(
+                        R.string.practice_bank,
+                        solution.railName,
+                        bank.direct.cutAngleDegrees
+                    )
                 }
             }
             is PracticeState.PracticeSolution.Combo -> {

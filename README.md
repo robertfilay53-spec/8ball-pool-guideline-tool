@@ -82,15 +82,13 @@ screen. Nothing about the game is changed.**
    app + game version, device model, Android version) to a file you
    pick. Nothing is uploaded and nothing leaves the device unless you
    choose to share the file. The log holds only the last 500 events.
-8. **Practice mode combos and kisses are geometry only.** Practice mode
-   now has Direct, Combo, and Kiss shots (same solver as the live
-   overlay), but it is a drawing aid, not a physics simulator: no
-   spin, no friction throw, no cushion compression, and the bank-shot
-   cushion correction is fitted to synthetic data, so real-table
-   cushion behaviour is unmeasured. Bank shots are not in practice
-   mode yet (they are in the live solver); what you practise here is
-   the aim geometry of direct, combo, and kiss shots, not the exact
-   outcome on a real table.
+8. **Practice mode is geometry only.** Practice mode now has Direct,
+   Bank, Combo, and Kiss shots (same solver as the live overlay), but
+   it is a drawing aid, not a physics simulator: no spin, no friction
+   throw, no cushion compression, and the bank-shot cushion correction
+   is fitted to synthetic data, so real-table cushion behaviour is
+   unmeasured. What you practise here is the aim geometry of direct,
+   bank, combo, and kiss shots, not the exact outcome on a real table.
 
 ## How it works
 

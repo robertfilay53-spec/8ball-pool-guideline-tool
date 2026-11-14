@@ -96,6 +96,14 @@ class PracticeView @JvmOverloads constructor(
         strokeWidth = 4f
         strokeCap = Paint.Cap.ROUND
     }
+    /** Bank path (target -> rail contact -> pocket): cyan, the same
+     * colour the live overlay uses for bank lines. */
+    private val bankPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFF00E5FF.toInt()
+        style = Paint.Style.STROKE
+        strokeWidth = 4f
+        strokeCap = Paint.Cap.ROUND
+    }
     private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = 0xFFFF5252.toInt()
         style = Paint.Style.STROKE
@@ -135,9 +143,11 @@ class PracticeView @JvmOverloads constructor(
             val v = toView(pocket)
             canvas.drawCircle(v.x.toFloat(), v.y.toFloat(), pocketR, pocketPaint)
         }
-        // Solved shot lines (v1.0.6: direct, combo, and kiss modes).
+        // Solved shot lines (v1.0.6: direct, combo, and kiss modes;
+        // v1.0.7: bank mode).
         when (val solution = st.solve()) {
             is PracticeState.PracticeSolution.Direct -> drawShot(canvas, solution.shot)
+            is PracticeState.PracticeSolution.Bank -> drawBank(canvas, solution)
             is PracticeState.PracticeSolution.Combo -> {
                 val combo = solution.solution
                 // First leg's target line ends at the intermediate ghost
@@ -179,6 +189,39 @@ class PracticeView @JvmOverloads constructor(
                 )
             }
         }
+    }
+
+    /** Draw one bank shot the way the live overlay does: the green aim
+     * line from the bank's direct solve, the two cyan bank-path
+     * segments (target -> rail contact -> pocket), the ghost circle at
+     * impact, and the pocket ring at the pocket. The direct solve's
+     * own target line is NOT drawn — it points at the mirrored pocket,
+     * which sits off the table. */
+    private fun drawBank(
+        canvas: Canvas,
+        solution: PracticeState.PracticeSolution.Bank
+    ) {
+        val bank = solution.solution
+        val aimS = toView(bank.direct.aimLine.start)
+        val aimE = toView(bank.direct.aimLine.end)
+        canvas.drawLine(
+            aimS.x.toFloat(), aimS.y.toFloat(),
+            aimE.x.toFloat(), aimE.y.toFloat(), aimPaint
+        )
+        for (segment in bank.bankPath) {
+            val s = toView(segment.start)
+            val e = toView(segment.end)
+            canvas.drawLine(
+                s.x.toFloat(), s.y.toFloat(),
+                e.x.toFloat(), e.y.toFloat(), bankPaint
+            )
+        }
+        drawGhost(canvas, bank.direct.ghostPoint)
+        val pocket = toView(bank.bankPath.last().end)
+        canvas.drawCircle(
+            pocket.x.toFloat(), pocket.y.toFloat(),
+            (BALL_RADIUS_PX * 1.8 * scale).toFloat(), ringPaint
+        )
     }
 
     /** Draw one shot's aim, target, and deflection lines plus the

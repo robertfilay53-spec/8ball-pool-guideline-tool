@@ -47,6 +47,13 @@
             android:text="@string/practice_mode_direct" />
 
         <Button
+            android:id="@+id/btn_mode_bank"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/practice_mode_bank" />
+
+        <Button
             android:id="@+id/btn_mode_combo"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
