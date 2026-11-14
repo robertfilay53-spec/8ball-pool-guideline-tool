@@ -61,6 +61,65 @@ object ShotSolver {
         })
     }
 
+    /** Compare two cut angles with the tie margin (shared by the
+     * ranked-list functions): within [TIE_MARGIN_DEGREES] the two
+     * shots tie and list order decides, so sub-degree detection
+     * noise cannot flip a symmetric layout. */
+    private fun cutOrder(a: Double, b: Double): Int = when {
+        a < b - TIE_MARGIN_DEGREES -> -1
+        b < a - TIE_MARGIN_DEGREES -> 1
+        else -> 0
+    }
+
+    /** Every reachable one-rail bank across [pockets] and [rails],
+     * best (smallest direct cut angle) first. The same ranking
+     * as [allShots], so the live pipeline can re-rank banks the
+     * way v1.0.21 re-ranked direct shots. The one-rail bank
+     * fallback applies no corner guards (unchanged from v1.0.3).
+     * The sort is stable, so equal keys keep pocket/rail order. */
+    fun allBanks(
+        cue: Vec2,
+        target: Vec2,
+        pockets: List<Vec2>,
+        rails: List<Rail>,
+        ballRadiusPx: Double
+    ): List<BankSolution> {
+        val solved = pockets.flatMap { pocket ->
+            rails.mapNotNull { solveBank(cue, target, pocket, it, ballRadiusPx) }
+        }
+        return solved.sortedWith(Comparator { a, b ->
+            cutOrder(a.direct.cutAngleDegrees, b.direct.cutAngleDegrees)
+        })
+    }
+
+    /** Every reachable one-rail kick across [pockets] and [rails],
+     * best (smallest direct cut angle) first. The same ranking
+     * as [allShots]. [isValidContact] is the corner guard the
+     * live fallback applies to a kick's rail contact (inside the
+     * rail span, four ball radii clear of the corners, not on the
+     * pocket): the geometry module takes it as a predicate so the
+     * table rect stays out of the solver. The sort is stable, so
+     * equal keys keep pocket/rail order. */
+    fun allKicks(
+        cue: Vec2,
+        target: Vec2,
+        pockets: List<Vec2>,
+        rails: List<Rail>,
+        ballRadiusPx: Double,
+        isValidContact: (contact: Vec2, railIndex: Int, pocket: Vec2) -> Boolean
+    ): List<KickSolution> {
+        val solved = pockets.flatMap { pocket ->
+            rails.mapIndexedNotNull { index, rail ->
+                val kick = solveKick(cue, target, pocket, rail, ballRadiusPx)
+                    ?: return@mapIndexedNotNull null
+                if (!isValidContact(kick.railContact, index, pocket)) null else kick
+            }
+        }
+        return solved.sortedWith(Comparator { a, b ->
+            cutOrder(a.direct.cutAngleDegrees, b.direct.cutAngleDegrees)
+        })
+    }
+
     /** Result of solving a combo shot: the cue strikes [firstShot]'s
      * target, which strikes [secondShot]'s target into the pocket. */
     data class ComboSolution(

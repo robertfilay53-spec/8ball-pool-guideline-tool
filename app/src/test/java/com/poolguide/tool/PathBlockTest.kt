@@ -366,4 +366,103 @@ class PathBlockTest {
     fun firstClearShot_emptyShotListIsNull() {
         assertNull(PathBlock.firstClearShot(emptyList(), emptyList(), r))
     }
+
+    // ---- firstClearBank / firstClearKick (v1.0.22 re-ranking) ----
+    //
+    // Same fixture (kotlinc probe, probe22/probe22d.kt): the
+    // cut-ranked one-rail banks start 8.59 (mirrored pocket
+    // (1320,340), contact (680,252.2)), 10.99 (mirrored pocket
+    // (1320,20), contact (680,132.9)); the cut-ranked one-rail
+    // kicks start 6.12 (pocket (360,340), contact (201.1,20)),
+    // 18.03 (pocket (360,20), contact (203.5,340)). The kick
+    // list uses the live corner guard (bankContactIsValid) with
+    // the same table the fallback chain uses. Blockers sit on
+    // solved-path midpoints, so they hold for whatever the best
+    // solution is.
+
+    private val rerankTable = com.poolguide.tool.cv.TableRect(
+        Vec2(40.0, 20.0), Vec2(680.0, 20.0),
+        Vec2(680.0, 340.0), Vec2(40.0, 340.0)
+    )
+
+    private fun allKicksGuarded() = ShotSolver.allKicks(
+        cue, target, pockets, rails, r
+    ) { contact, index, pocket ->
+        com.poolguide.tool.cv.bankContactIsValid(
+            contact, index, rerankTable, pocket, r
+        )
+    }
+
+    private fun assertVecNear(expected: Vec2, actual: Vec2, delta: Double = 0.5) {
+        assertEquals(expected.x, actual.x, delta)
+        assertEquals(expected.y, actual.y, delta)
+    }
+
+    @Test
+    fun firstClearBank_returnsBestWhenNothingIsBlocked() {
+        val all = ShotSolver.allBanks(cue, target, pockets, rails, r)
+        val pick = PathBlock.firstClearBank(all, emptyList(), r)
+        assertEquals(8.59, pick!!.direct.cutAngleDegrees, 0.05)
+        assertVecNear(Vec2(1320.0, 340.0), pick.direct.targetLine.end)
+        assertVecNear(Vec2(680.0, 252.2), pick.railContact)
+    }
+
+    @Test
+    fun firstClearBank_skipsBlockedBestForNextClearShot() {
+        val all = ShotSolver.allBanks(cue, target, pockets, rails, r)
+        val best = all.first()
+        // Blocker on the best bank's first-leg midpoint (490,226.1).
+        val mid = (best.bankPath[0].start + best.bankPath[0].end) * 0.5
+        val pick = PathBlock.firstClearBank(all, listOf(mid), r)
+        assertEquals(10.99, pick!!.direct.cutAngleDegrees, 0.05)
+        assertVecNear(Vec2(1320.0, 20.0), pick.direct.targetLine.end)
+        assertVecNear(Vec2(680.0, 132.9), pick.railContact)
+    }
+
+    @Test
+    fun firstClearBank_returnsNullWhenEveryBankIsBlocked() {
+        val all = ShotSolver.allBanks(cue, target, pockets, rails, r)
+        // One blocker on each bank's first-leg midpoint.
+        val mids = all.map { (it.bankPath[0].start + it.bankPath[0].end) * 0.5 }
+        assertNull(PathBlock.firstClearBank(all, mids, r))
+    }
+
+    @Test
+    fun firstClearBank_emptyBankListIsNull() {
+        assertNull(PathBlock.firstClearBank(emptyList(), emptyList(), r))
+    }
+
+    @Test
+    fun firstClearKick_returnsBestWhenNothingIsBlocked() {
+        val all = allKicksGuarded()
+        val pick = PathBlock.firstClearKick(all, emptyList(), r)
+        assertEquals(6.12, pick!!.direct.cutAngleDegrees, 0.05)
+        assertVecNear(Vec2(360.0, 340.0), pick.direct.targetLine.end)
+        assertVecNear(Vec2(201.1, 20.0), pick.railContact)
+    }
+
+    @Test
+    fun firstClearKick_skipsBlockedBestForNextClearShot() {
+        val all = allKicksGuarded()
+        val best = all.first()
+        // Blocker on the best kick's second-leg midpoint (247,101.7).
+        val mid = (best.kickPath[1].start + best.kickPath[1].end) * 0.5
+        val pick = PathBlock.firstClearKick(all, listOf(mid), r)
+        assertEquals(18.03, pick!!.direct.cutAngleDegrees, 0.05)
+        assertVecNear(Vec2(360.0, 20.0), pick.direct.targetLine.end)
+        assertVecNear(Vec2(203.5, 340.0), pick.railContact)
+    }
+
+    @Test
+    fun firstClearKick_returnsNullWhenEveryKickIsBlocked() {
+        val all = allKicksGuarded()
+        // One blocker on each kick's first-leg midpoint.
+        val mids = all.map { (it.kickPath[0].start + it.kickPath[0].end) * 0.5 }
+        assertNull(PathBlock.firstClearKick(all, mids, r))
+    }
+
+    @Test
+    fun firstClearKick_emptyKickListIsNull() {
+        assertNull(PathBlock.firstClearKick(emptyList(), emptyList(), r))
+    }
 }

@@ -164,6 +164,78 @@ class CvPipelineInstrumentedTest {
     }
 
     @Test
+    fun greenBankRerankTable_showsFirstClearBank() {
+        // v1.0.22: only three balls, and the red 3-ball is frozen
+        // near the top rail, so no direct shot solves. The best
+        // bank (cut ~6 deg, off the top rail into the top-left
+        // pocket) is blocked by the yellow 1-ball on its second
+        // leg, so the pipeline must show the next clear bank
+        // (cut ~67 deg, into the bottom-middle pocket), with no
+        // blocked flag. The blocked best stays a candidate, it
+        // does not hide the makeable bank.
+        val mat = loadDemoImage("demo_table_green_bank_rerank.png")
+        val pipeline = CvPipeline(1280, 720)
+        var result = pipeline.process(mat)
+        repeat(5) { result = pipeline.process(mat) }
+
+        assertFalse("bank rerank table must not be black", result.isCaptureBlack)
+        assertNotNull("table not found", result.table)
+        assertEquals("6 pockets expected", 6, result.pockets.size)
+        assertNotNull("cue ball not found", result.cueBall)
+        assertTrue("expected >= 3 balls, got ${result.balls.size}", result.balls.size >= 3)
+        // All three placed balls must be present: the cue near
+        // (64, 98), the red target near (64, 60), and the yellow
+        // blocker near (59, 126).
+        for (expected in listOf(Vec2(64.5, 97.6), Vec2(64.5, 60.0), Vec2(58.7, 126.3))) {
+            assertTrue(
+                "expected a ball near $expected, got ${result.balls.map { it.center }}",
+                result.balls.any { it.center.distanceTo(expected) < 30.0 }
+            )
+        }
+        assertTrue("guideline not found", result.guideline.isNotEmpty())
+        assertNull("no direct shot must solve: ${result.status}", result.shot)
+        assertNull("no kick must solve: ${result.status}", result.kick)
+        assertNotNull("no bank solved: ${result.status}", result.bank)
+        val bank = result.bank!!
+        // The solved target is the red ball near (64, 60).
+        val targetEnd = bank.direct.targetLine.start
+        assertTrue(
+            "target is not the red ball: $targetEnd",
+            targetEnd.x in 40.0..90.0 && targetEnd.y in 40.0..85.0
+        )
+        // The shown bank is the CLEAR one (cut ~67 deg), not the
+        // blocked best (~6 deg).
+        assertTrue(
+            "cut angle out of range: ${bank.direct.cutAngleDegrees}",
+            bank.direct.cutAngleDegrees in 60.0..80.0
+        )
+        // The rail contact is on the top rail, near (64, 51).
+        assertTrue(
+            "rail contact is not on the top rail: ${bank.railContact}",
+            bank.railContact.x in 60.0..90.0 && bank.railContact.y in 40.0..65.0
+        )
+        // The ghost is where the cue aims, near (52, 73).
+        val ghost = bank.direct.ghostPoint
+        assertTrue(
+            "ghost is not where the cue aims: $ghost",
+            ghost.x in 40.0..65.0 && ghost.y in 60.0..85.0
+        )
+        // The second leg ends at the REAL pocket (bottom-middle,
+        // near (360, 355)), not the mirrored one.
+        assertEquals("bank path must have 2 legs", 2, bank.bankPath.size)
+        val pocketEnd = bank.bankPath[1].end
+        assertTrue(
+            "second leg does not end at the bottom-middle pocket: $pocketEnd",
+            pocketEnd.x in 340.0..380.0 && pocketEnd.y in 340.0..370.0
+        )
+        // The shown bank's path is clear: no flag, and the status
+        // line names the bank shot without saying it is blocked.
+        assertNull("shown bank must not be flagged blocked", result.blockedBy)
+        assertTrue("status must say bank shot: ${result.status}", result.status.contains("Bank shot (one rail)"))
+        assertFalse("status must not say the path is blocked", result.status.contains("path blocked"))
+    }
+
+    @Test
     fun blueTable_detectsTableAndShot() {
         val mat = loadDemoImage("demo_table_blue.png")
         val pipeline = CvPipeline(1280, 720)

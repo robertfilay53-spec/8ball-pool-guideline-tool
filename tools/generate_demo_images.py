@@ -150,6 +150,21 @@ rerank_balls = [
 make_table(os.path.join(OUT, "demo_table_green_rerank.png"),
            (46, 139, 87), (350, 360), (700, 360), (1200, 90), rerank_balls)
 
+# --- Green bank re-rank table (v1.0.22): only three balls. The cue
+# (115,174) sits below the red 3-ball (115,107), which is frozen
+# near the top rail, so no direct shot solves and the one-rail
+# banks are the only option. The best bank (cut ~6 deg, into the
+# top-left pocket off the top rail) is blocked by the yellow
+# 1-ball at (105,225), which sits on its second leg; the next
+# clear bank cuts ~67 deg into the bottom-middle pocket. The
+# pipeline must show the clear bank, unflagged. The guideline
+# aims at the shown bank's ghost, computed through the MIRRORED
+# pocket (640,-450): the same mirror math ShotSolver uses, so the
+# drawn line points exactly where the solver aims.
+make_table(os.path.join(OUT, "demo_table_green_bank_rerank.png"),
+           (46, 139, 87), (115, 174), (115, 107), (640, -450),
+           [(105, 225, "yellow", False, 1)])
+
 # --- Blue table: cue (300,500) -> red 3-ball (800,200). The aim line is
 # drawn toward the top-left pocket's ghost point, but that pocket is
 # geometrically unreachable (cut ~141 deg, the solver correctly rejects

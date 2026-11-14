@@ -35,9 +35,15 @@ import kotlin.math.sqrt
  * every direct shot is blocked the best stays and is flagged, as
  * before — the demo tables prove it: on the green and blue demo
  * tables every reachable pocket is blocked, so their shown shots
- * are unchanged. Bank, kick, combo, and kiss shots are still
- * flag-only: their fallbacks return a single best shot, not a
- * ranked list, so there is nothing to re-rank within the family.
+ * are unchanged. v1.0.22 re-ranks ONE-RAIL banks and kicks the
+ * same way ([firstClearBank], [firstClearKick]): when no direct
+ * shot solves, the shown one-rail shot is the first clear bank
+ * or kick in cut order, and the bank-vs-kick choice compares
+ * the two first-clear cuts, so the easiest makeable one-rail
+ * shot wins. Two-rail banks/kicks, combo, and kiss shots are
+ * still flag-only: their fallbacks return a single best shot,
+ * not a ranked list, so there is nothing to re-rank within
+ * the family.
  */
 object PathBlock {
 
@@ -140,6 +146,40 @@ object PathBlock {
     ): ShotSolver.ShotSolution? {
         require(ballRadiusPx > 0) { "ballRadiusPx must be positive" }
         return shots.firstOrNull { blockedBy(it, blockers, ballRadiusPx) == null }
+    }
+
+    /** First CLEAR one-rail bank in [banks] (v1.0.22): the first
+     * bank whose path no other ball sits on, in the given order.
+     * The caller passes the cut-ranked [ShotSolver.allBanks]
+     * list, so this is the easiest makeable bank. Returns null
+     * when every bank is blocked (the caller then keeps the best
+     * and flags it) or when [banks] is empty. [blockers] must be
+     * every ball EXCEPT the ones travelling the path (the cue
+     * and the target); a travelling ball passed as a blocker
+     * would flag its own path. */
+    fun firstClearBank(
+        banks: List<ShotSolver.BankSolution>,
+        blockers: List<Vec2>,
+        ballRadiusPx: Double
+    ): ShotSolver.BankSolution? {
+        require(ballRadiusPx > 0) { "ballRadiusPx must be positive" }
+        return banks.firstOrNull { blockedBy(it, blockers, ballRadiusPx) == null }
+    }
+
+    /** First CLEAR one-rail kick in [kicks] (v1.0.22): the first
+     * kick whose path no other ball sits on, in the given order.
+     * The caller passes the cut-ranked [ShotSolver.allKicks]
+     * list, so this is the easiest makeable kick. Returns null
+     * when every kick is blocked (the caller then keeps the best
+     * and flags it) or when [kicks] is empty. Same blocker rule
+     * as [firstClearBank]. */
+    fun firstClearKick(
+        kicks: List<ShotSolver.KickSolution>,
+        blockers: List<Vec2>,
+        ballRadiusPx: Double
+    ): ShotSolver.KickSolution? {
+        require(ballRadiusPx > 0) { "ballRadiusPx must be positive" }
+        return kicks.firstOrNull { blockedBy(it, blockers, ballRadiusPx) == null }
     }
 
     /** One-rail bank: the cue travels the aim line, the target

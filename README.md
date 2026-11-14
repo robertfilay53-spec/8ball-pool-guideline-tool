@@ -283,16 +283,24 @@ screen. Nothing about the game is changed.**
     green and blue demo tables prove it (every reachable pocket
     there is blocked, so their shown shots are unchanged), while
     9 of the 15 harness tables now solve to the second pocket.
-    Bank, kick, combo, and kiss shots are still flag-only: their
-    fallbacks return a single best shot, not a ranked list, so
-    there is nothing to re-rank within the family. Combo and kiss
-    shots are not flagged either: their potting chain has two
-    struck balls and the second leg's path is only defined once
-    the first leg lands. Detection noise (~0.4 px on the synthetic
-    tables) can flip the verdict for a ball sitting within a pixel
-    or two of the one-diameter boundary, and EDIT mode never shows
-    the flag (the frozen shot is the player's manual aim, not the
-    live detection the flag belongs to).
+    Since v1.0.22 the same rule covers the ONE-RAIL families: the
+    shown bank is the first clear bank in cut order and the shown
+    kick is the first clear kick, and the bank-vs-kick choice is
+    made on those first-clear cuts, not on the best cuts. A
+    blocked easiest bank no longer hides a clear kick (or the
+    other way round). When every bank or every kick is blocked the
+    best of that family stays the shown shot and is flagged, as
+    before. Two-rail banks, two-rail kicks, combo, and kiss shots
+    are still flag-only: their fallbacks return a single best
+    shot, not a ranked list, so there is nothing to re-rank within
+    the family. Combo and kiss shots are not flagged either: their
+    potting chain has two struck balls and the second leg's path
+    is only defined once the first leg lands. Detection noise
+    (~0.4 px on the synthetic tables) can flip the verdict for a
+    ball sitting within a pixel or two of the one-diameter
+    boundary, and EDIT mode never shows the flag (the frozen shot
+    is the player's manual aim, not the live detection the flag
+    belongs to).
 
 21. **The cue ball is picked by group, not by colour.** Since v1.0.20
     the pipeline picks the ball the group classifier calls CUE; the
@@ -315,6 +323,7 @@ MediaProjection + VirtualDisplay (960x540, foreground service)
   -> shot solver (ghost ball, cut angle, tangent, mirror-pocket banks
      (one- and two-rail), mirror-ghost kicks (one- and two-rail), combo + kiss
      shots; every reachable pocket ranked, first clear pocket shown;
+     one-rail banks and kicks ranked the same way, first clear shown;
      the shown shot is flagged "Path blocked" when another ball sits
      on its path)
   -> one small TYPE_APPLICATION_OVERLAY window per line (best shot in
