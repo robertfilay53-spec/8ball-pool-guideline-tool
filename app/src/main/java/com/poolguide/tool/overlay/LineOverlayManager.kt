@@ -649,7 +649,7 @@ class LineOverlayManager(
                 MotionEvent.ACTION_UP -> {
                     when (drag.onUp(event.eventTime)) {
                         BubbleDrag.Outcome.Tap -> toggleGuidesHidden()
-                        BubbleDrag.Outcome.Drag -> {
+                        is BubbleDrag.Outcome.Drag -> {
                             val width = if (layout.width > 0) layout.width
                             else layout.measuredWidth
                             params.x = BubbleDrag.snapX(
