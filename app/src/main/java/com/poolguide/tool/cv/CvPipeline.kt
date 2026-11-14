@@ -312,15 +312,19 @@ class CvPipeline(
 
     /**
      * Pick the target ball (nearest ball along the guideline ray from the cue
-     * ball; nearest ball overall when no guideline is visible) and the pocket
-     * with the smallest cut angle, then solve. Falls back through the
+     * ball; nearest ball overall when no guideline is visible) and the first
+     * clear pocket in cut order, then solve. Falls back through the
      * chain in [solveFallback] when no direct shot is possible: one-rail
      * bank or kick, two-rail bank, two-rail kick, combo, then kiss.
      *
      * Ranking (best shot stays honest): direct first, then the better of
      * the one-rail bank and the one-rail kick, then two-rail banks as a
      * last resort, then two-rail kicks as the last resort after that,
-     * then combos, then kisses as the last resort of all. A bank and
+     * then combos, then kisses as the last resort of all. Within the
+     * direct family the shown shot is the first CLEAR pocket in cut
+     * order (v1.0.21 re-ranking): a blocked easiest pocket never
+     * hides a makeable one, and when every direct shot is blocked
+     * the best stays and is flagged. A bank and
      * a kick are both one-rail shots ranked by the same number — the
      * direct cut angle of the underlying solve, the codebase's
      * established difficulty proxy — so the smaller cut wins, and a
@@ -359,15 +363,21 @@ class CvPipeline(
 
         // Every direct shot, best first: smallest cut angle, first-listed
         // pocket wins ties within the tie margin (a symmetric layout must
-        // not flip on sub-degree detection noise). The best is
-        // allShots.firstOrNull(); the overlay draws the rest faint.
+        // not flip on sub-degree detection noise). The shown shot is the
+        // first CLEAR one in that order (v1.0.21 re-ranking): a blocked
+        // easiest pocket never hides a makeable one. When every direct
+        // shot is blocked the best stays and is flagged, as before.
+        // The result list is reordered so the shown shot is first (the
+        // overlay draws allShots.drop(1) faint, and [shot] is always
+        // allShots.firstOrNull()).
         val all = ShotSolver.allShots(cue.center, target.center, pockets, radius)
-        val best = all.firstOrNull()
-        if (best != null) {
-            val blocked = PathBlock.blockedBy(best, others, radius)
-            val warn = if (best.isThinCut) " — thin cut, very low margin" else ""
+        val shown = PathBlock.firstClearShot(all, others, radius) ?: all.firstOrNull()
+        val ranked = if (shown != null) listOf(shown) + all.filter { it !== shown } else all
+        if (shown != null) {
+            val blocked = PathBlock.blockedBy(shown, others, radius)
+            val warn = if (shown.isThinCut) " — thin cut, very low margin" else ""
             return SolveOutcome(
-                best, null, all, "Shot to pocket$warn${blockedSuffix(blocked)}",
+                shown, null, ranked, "Shot to pocket$warn${blockedSuffix(blocked)}",
                 blockedBy = blocked
             )
         }

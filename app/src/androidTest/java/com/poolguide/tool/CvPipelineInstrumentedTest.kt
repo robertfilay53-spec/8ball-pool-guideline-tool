@@ -10,6 +10,7 @@ import com.poolguide.tool.geometry.Vec2
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -106,6 +107,60 @@ class CvPipelineInstrumentedTest {
             blocker.distanceTo(Vec2(506.25, 140.62)) < 30.0
         )
         assertTrue("status must say the path is blocked", result.status.contains("path blocked"))
+    }
+
+    @Test
+    fun greenRerankTable_showsFirstClearPocket() {
+        // v1.0.21: same layout as the green table, but the orange
+        // 13-ball is moved off the bottom-right target line, so the
+        // best pocket (top-right, cut ~31 deg) stays blocked by the
+        // yellow 1-ball while the bottom-right pocket (cut ~31 deg)
+        // is clear. The pipeline must show the bottom-right shot,
+        // with no blocked flag — the blocked best stays a faint
+        // candidate, it does not hide the makeable pocket.
+        val mat = loadDemoImage("demo_table_green_rerank.png")
+        val pipeline = CvPipeline(1280, 720)
+        var result = pipeline.process(mat)
+        repeat(5) { result = pipeline.process(mat) }
+
+        assertFalse("rerank table must not be black", result.isCaptureBlack)
+        assertNotNull("table not found", result.table)
+        assertEquals("6 pockets expected", 6, result.pockets.size)
+        assertNotNull("cue ball not found", result.cueBall)
+        assertTrue("expected >= 8 balls, got ${result.balls.size}", result.balls.size >= 8)
+        assertTrue("guideline not found", result.guideline.isNotEmpty())
+        assertNotNull("no shot solved: ${result.status}", result.shot)
+        val shot = result.shot!!
+        // The solved target is still the red ball near (394, 202).
+        val targetEnd = shot.targetLine.start
+        assertTrue(
+            "target is not the red ball: $targetEnd",
+            targetEnd.x in 360.0..430.0 && targetEnd.y in 170.0..235.0
+        )
+        // The pocket is the BOTTOM-right corner near (676, 355),
+        // not the blocked top-right one.
+        val pocket = shot.targetLine.end
+        assertTrue(
+            "pocket is not the bottom-right corner: $pocket",
+            pocket.x in 620.0..720.0 && pocket.y in 320.0..390.0
+        )
+        assertTrue("cut angle out of range: ${shot.cutAngleDegrees}", shot.cutAngleDegrees in 20.0..45.0)
+        assertFalse("shot must not be a thin cut", shot.isThinCut)
+        // The shown shot is allShots.first(), and the blocked
+        // top-right shot is still among the candidates.
+        assertTrue("allShots must not be empty", result.allShots.isNotEmpty())
+        assertEquals("best shot must be allShots.first()", shot, result.allShots.first())
+        assertTrue("expected >1 candidate shot, got ${result.allShots.size}", result.allShots.size > 1)
+        assertTrue(
+            "blocked top-right shot must stay a candidate: ${result.allShots.map { it.targetLine.end }}",
+            result.allShots.any {
+                it.targetLine.end.x in 620.0..720.0 && it.targetLine.end.y in 20.0..90.0
+            }
+        )
+        // The shown (bottom-right) path is clear: no flag, and the
+        // status line says nothing about a blocked path.
+        assertNull("shown shot must not be flagged blocked", result.blockedBy)
+        assertFalse("status must not say the path is blocked", result.status.contains("path blocked"))
     }
 
     @Test

@@ -119,9 +119,11 @@ data class DetectionResult(
     /** Best kiss (v1.0.13), set only when no combo solves either:
      * the last resort of all. A kiss never displaces a combo. */
     val kiss: ShotSolver.KissSolution? = null,
-    /** Every reachable direct shot, best first (allShots ranking).
-     * Empty when no direct shot exists. The overlay draws the non-best
-     * entries faint when "Show all shots" is on; [shot] is always
+    /** Every reachable direct shot, shown shot first (v1.0.21):
+     * the first CLEAR shot in cut order heads the list, then the
+     * remaining shots in cut order. Empty when no direct shot
+     * exists. The overlay draws the non-best entries faint when
+     * "Show all shots" is on; [shot] is always
      * allShots.firstOrNull(). */
     val allShots: List<ShotSolver.ShotSolution> = emptyList(),
     /** Blocked-path flag (v1.0.19): the centre of the ball sitting

@@ -268,30 +268,31 @@ screen. Nothing about the game is changed.**
     tap Save. Applying a preset fills the screen only; nothing is
     kept until Save.
 
-20. **A blocked path is flagged, not re-ranked.** Since v1.0.19
-    the tool checks whether another detected ball sits on the
-    shown shot's path (within one ball diameter of the cue's aim
-    line or the potted ball's path, for direct, bank, and kick
-    shots) and flags it: a "Path blocked" label over the table in
-    the warning amber, "— path blocked by another ball" on the
-    status line, and "— blocked" on the shot-history line. The
-    line itself stays drawn — the flag is a warning, not a
-    re-ranking: the best shot stays the best shot even when it is
-    blocked, and the faint candidate lines are not flagged. That
-    is deliberate, not an oversight: the project's own fixtures
-    depict blocked shots (the green demo table's best shot has the
-    yellow 1-ball sitting 1 px off the target line, and 11 of the
-    15 harness tables inherit that layout), so re-ranking to a
-    clear pocket would invalidate the demo and harness baselines.
-    Re-ranking is a later slice, once the fixtures are rebuilt
-    with clear paths. Combo and kiss shots are not flagged in
-    v1.0.19 either: their potting chain has two struck balls and
-    the second leg's path is only defined once the first leg
-    lands. Detection noise (~0.4 px on the synthetic tables) can
-    flip the verdict for a ball sitting within a pixel or two of
-    the one-diameter boundary, and EDIT mode never shows the flag
-    (the frozen shot is the player's manual aim, not the live
-    detection the flag belongs to).
+20. **A blocked path is flagged — and the shown shot is the first
+    clear pocket.** Since v1.0.19 the tool checks whether another
+    detected ball sits on the shown shot's path (within one ball
+    diameter of the cue's aim line or the potted ball's path, for
+    direct, bank, and kick shots) and flags it: a "Path blocked"
+    label over the table in the warning amber, "— path blocked by
+    another ball" on the status line, and "— blocked" on the
+    shot-history line. Since v1.0.21 the shown DIRECT shot is the
+    first clear pocket in cut order: a blocked easiest pocket no
+    longer hides a makeable one, and the blocked best stays drawn
+    faint among the candidates. When every direct shot is blocked
+    the best stays the shown shot and is flagged, as before — the
+    green and blue demo tables prove it (every reachable pocket
+    there is blocked, so their shown shots are unchanged), while
+    9 of the 15 harness tables now solve to the second pocket.
+    Bank, kick, combo, and kiss shots are still flag-only: their
+    fallbacks return a single best shot, not a ranked list, so
+    there is nothing to re-rank within the family. Combo and kiss
+    shots are not flagged either: their potting chain has two
+    struck balls and the second leg's path is only defined once
+    the first leg lands. Detection noise (~0.4 px on the synthetic
+    tables) can flip the verdict for a ball sitting within a pixel
+    or two of the one-diameter boundary, and EDIT mode never shows
+    the flag (the frozen shot is the player's manual aim, not the
+    live detection the flag belongs to).
 
 21. **The cue ball is picked by group, not by colour.** Since v1.0.20
     the pipeline picks the ball the group classifier calls CUE; the
@@ -313,8 +314,9 @@ MediaProjection + VirtualDisplay (960x540, foreground service)
         -> HoughLinesP (30/15/8) -> verifier -> robust refit -> LineTracker
   -> shot solver (ghost ball, cut angle, tangent, mirror-pocket banks
      (one- and two-rail), mirror-ghost kicks (one- and two-rail), combo + kiss
-     shots; every reachable pocket ranked, best first; the shown shot is
-     flagged "Path blocked" when another ball sits on its path)
+     shots; every reachable pocket ranked, first clear pocket shown;
+     the shown shot is flagged "Path blocked" when another ball sits
+     on its path)
   -> one small TYPE_APPLICATION_OVERLAY window per line (best shot in
      full colour, other candidates faint — PoolAimAssist UX)
 ```

@@ -124,6 +124,32 @@ green_balls = [
 make_table(os.path.join(OUT, "demo_table_green.png"),
            (46, 139, 87), (350, 360), (700, 360), (1200, 90), green_balls)
 
+# --- Green re-rank table (v1.0.21): same layout as the green table,
+# but the orange 13-ball is moved off the bottom-right target line
+# (from (980,520) to (1150,450)), so the best pocket (top-right,
+# cut ~31 deg) stays blocked by the yellow 1-ball while the
+# bottom-right pocket (cut ~31 deg) is clear. The pipeline must
+# show the bottom-right shot. The guideline still points at the
+# red 3-ball toward the top-right ghost, as on the green table.
+# (1150,450) is 134 px clear of the nearest path and Hough-detects
+# at the app's param2=15; the first tried spot (1100,480) missed
+# Hough by a hair (downscale phase), and (1050,500) missed too —
+# see cv-harness probe21c_ball_spot.py.
+rerank_balls = [
+    (900, 250, "yellow", False, 1),
+    (950, 420, "blue", False, 2),
+    (500, 200, "orange", False, 5),
+    (600, 500, "purple", False, 4),
+    (850, 520, "black", False, 8),
+    (420, 480, "green", False, 6),
+    (1050, 320, "yellow", True, 9),
+    (760, 180, "blue", True, 10),
+    (300, 250, "red", True, 11),
+    (1150, 450, "orange", True, 13),
+]
+make_table(os.path.join(OUT, "demo_table_green_rerank.png"),
+           (46, 139, 87), (350, 360), (700, 360), (1200, 90), rerank_balls)
+
 # --- Blue table: cue (300,500) -> red 3-ball (800,200). The aim line is
 # drawn toward the top-left pocket's ghost point, but that pocket is
 # geometrically unreachable (cut ~141 deg, the solver correctly rejects

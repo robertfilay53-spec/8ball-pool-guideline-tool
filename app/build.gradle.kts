@@ -15,8 +15,8 @@ android {
         // friction, while the code still handles Android 15 runtime behaviour
         // (partial screen sharing, overlay enablement) correctly.
         targetSdk = 34
-        versionCode = 21
-        versionName = "1.0.20"
+        versionCode = 22
+        versionName = "1.0.21"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // x86_64 is included on purpose: the CI emulator tests run on x86_64.
