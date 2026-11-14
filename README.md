@@ -194,6 +194,22 @@ screen. Nothing about the game is changed.**
     drawn, and hide with them (auto-hide, hide toggle, table lock,
     black frame).
 
+16. **The pocket distance is a power proxy, not a make guarantee.**
+    Since v1.0.15 the live overlay shows the total shot distance
+    beside the pocket ring ("29.6 bd" — ball diameters), in the
+    shot family's colour, so the player judges power, not just
+    direction. It is the total path the potting chain travels: cue
+    ball to impact, then each struck ball to the next impact or the
+    pocket (a table is about 44 ball diameters long, so the number
+    reads at a glance). It does NOT account for spin, throw, rail
+    friction, or speed loss at each impact — a long bank at "42.1
+    bd" needs more than a straight "5.9 bd" pot, but the number
+    alone cannot tell the player exactly how hard to hit. It is
+    geometry, not physics. Practice mode shows the same number at
+    the same pocket, so practice and live agree. The label hides
+    with the lines (auto-hide, hide toggle, table lock, black
+    frame) and follows the frozen shot in EDIT mode.
+
 ## How it works
 
 ```

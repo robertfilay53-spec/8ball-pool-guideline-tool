@@ -97,12 +97,12 @@ class OverlayInstrumentedTest {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
 
         // One tag window per detected ball, in ball order — and the
-        // pinned line/label counts do not move (4 lines, 1 angle
-        // label for this straight best shot).
+        // pinned line/label counts do not move (4 lines, 2 labels:
+        // angle + pocket distance — for this straight best shot).
         store.showAllShots = false
         instrumentation.runOnMainSync { manager.update(shotResultWithBalls()) }
         assertEquals("expected 4 line windows", 4, manager.lineWindowCount)
-        assertEquals("expected 1 label window", 1, manager.labelWindowCount)
+        assertEquals("expected 2 label windows", 2, manager.labelWindowCount)
         assertEquals("expected 3 tag windows", 3, manager.tagWindowCount)
         assertEquals(listOf("C", "S", "?"), manager.tagTexts)
 
@@ -398,30 +398,34 @@ class OverlayInstrumentedTest {
         val manager = LineOverlayManager(ctx, store)
         val instrumentation = InstrumentationRegistry.getInstrumentation()
 
-        // A direct shot draws 4 line windows + 1 angle label (the
-        // shot is not thin, so no warning). The label text is the
-        // shot's own cut angle, one decimal.
+        // A direct shot draws 4 line windows + 2 labels (the angle
+        // label and the pocket-distance label, v1.0.15 — the shot is
+        // not thin, so no warning). The angle text is the shot's own
+        // cut angle, one decimal; the distance is the total path in
+        // ball diameters, pinned against the solver (dist15-probe):
+        // cue (100, 200) -> target (300, 200) -> pocket (650, 200)
+        // travels 29.6 ball diameters.
         val result = shotResult()
         store.showAllShots = false
         instrumentation.runOnMainSync { manager.update(result) }
         assertEquals(4, manager.lineWindowCount)
-        assertEquals(1, manager.labelWindowCount)
+        assertEquals(2, manager.labelWindowCount)
         assertEquals(
-            listOf(CutAngleLabel.format(result.shot!!.cutAngleDegrees)),
+            listOf(CutAngleLabel.format(result.shot!!.cutAngleDegrees), "29.6 bd"),
             manager.labelTexts
         )
 
-        // Hide toggle removes the label with the lines.
+        // Hide toggle removes the labels with the lines.
         store.guidesHidden = true
         instrumentation.runOnMainSync { manager.update(result) }
         assertEquals(0, manager.lineWindowCount)
-        assertEquals("hide must remove the label too", 0, manager.labelWindowCount)
+        assertEquals("hide must remove the labels too", 0, manager.labelWindowCount)
 
         // Unhide brings both back.
         store.guidesHidden = false
         instrumentation.runOnMainSync { manager.update(result) }
         assertEquals(4, manager.lineWindowCount)
-        assertEquals(1, manager.labelWindowCount)
+        assertEquals(2, manager.labelWindowCount)
 
         // Black frame removes both as well.
         val black = result.copy(isCaptureBlack = true, shot = null, guideline = emptyList())
@@ -444,14 +448,54 @@ class OverlayInstrumentedTest {
         val manager = LineOverlayManager(ctx, store)
         val instrumentation = InstrumentationRegistry.getInstrumentation()
 
-        // A thin shot draws the angle label AND the warning label.
+        // A thin shot draws the angle label AND the warning label,
+        // plus the pocket-distance label last (v1.0.15): cue (620,
+        // 260) -> target (620, 300) -> bottom-right pocket travels
+        // 5.9 ball diameters (dist15-probe).
         val result = thinShotResult()
         assertTrue(result.shot!!.isThinCut)
         instrumentation.runOnMainSync { manager.update(result) }
         assertEquals(4, manager.lineWindowCount)
-        assertEquals("thin shot needs angle + warning labels", 2, manager.labelWindowCount)
+        assertEquals("thin shot needs angle + warning + distance labels", 3, manager.labelWindowCount)
         assertEquals(
-            listOf("82.8°", "Thin cut 82.8°"),
+            listOf("82.8°", "Thin cut 82.8°", "5.9 bd"),
+            manager.labelTexts
+        )
+
+        instrumentation.runOnMainSync { manager.removeAll() }
+        assertEquals(0, manager.labelWindowCount)
+    }
+
+    @Test
+    fun pocketDistanceLabel_showsBesideRingAndFollowsEditMode() {
+        val ctx = appContext()
+        assertTrue(
+            "overlay permission must be granted for this test",
+            Settings.canDrawOverlays(ctx)
+        )
+        val store = CalibrationStore(ctx).apply { guidesHidden = false }
+        val manager = LineOverlayManager(ctx, store)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+
+        // The best shot is straight into the middle-right pocket
+        // (cut 0.0 deg): angle label first, distance label last,
+        // "29.6 bd" pinned against the solver (dist15-probe).
+        val result = shotResult()
+        store.showAllShots = false
+        instrumentation.runOnMainSync { manager.update(result) }
+        assertEquals(2, manager.labelWindowCount)
+        assertEquals(
+            listOf("0.0°", "29.6 bd"),
+            manager.labelTexts
+        )
+
+        // EDIT mode freezes the same direct shot: the distance label
+        // follows the frozen shot, beside the (unchanged) pocket ring.
+        instrumentation.runOnMainSync { manager.toggleEditMode() }
+        assertTrue(manager.isEditMode)
+        assertEquals(2, manager.labelWindowCount)
+        assertEquals(
+            listOf("0.0°", "29.6 bd"),
             manager.labelTexts
         )
 
@@ -533,14 +577,16 @@ class OverlayInstrumentedTest {
 
         // A combo draws 6 leg segments (aim/target/deflection
         // per leg) + 1 pocket ring, and one angle label per leg —
-        // the thin first leg adds its warning label.
+        // the thin first leg adds its warning label — plus one
+        // pocket-distance label last (v1.0.15): the whole chain
+        // travels 16.0 ball diameters (dist15-probe).
         val result = comboResult()
         assertTrue(result.combo!!.firstShot.isThinCut)
         instrumentation.runOnMainSync { manager.update(result) }
         assertEquals(7, manager.lineWindowCount)
-        assertEquals(3, manager.labelWindowCount)
+        assertEquals(4, manager.labelWindowCount)
         assertEquals(
-            listOf("84.8°", "Thin cut 84.8°", "60.3°"),
+            listOf("84.8°", "Thin cut 84.8°", "60.3°", "16.0 bd"),
             manager.labelTexts
         )
 
@@ -569,15 +615,17 @@ class OverlayInstrumentedTest {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
 
         // A kiss draws the same 6 + 1 windows, with one angle
-        // label per leg and no warning (neither leg is thin).
+        // label per leg and no warning (neither leg is thin), plus
+        // one pocket-distance label last (v1.0.15): the whole chain
+        // travels 33.8 ball diameters (dist15-probe).
         val result = kissResult()
         assertTrue(!result.kiss!!.kissShot.isThinCut)
         assertTrue(!result.kiss!!.secondShot.isThinCut)
         instrumentation.runOnMainSync { manager.update(result) }
         assertEquals(7, manager.lineWindowCount)
-        assertEquals(2, manager.labelWindowCount)
+        assertEquals(3, manager.labelWindowCount)
         assertEquals(
-            listOf("78.2°", "11.9°"),
+            listOf("78.2°", "11.9°", "33.8 bd"),
             manager.labelTexts
         )
 
@@ -610,7 +658,7 @@ class OverlayInstrumentedTest {
         store.bankLinesEnabled = true
         instrumentation.runOnMainSync { manager.update(result) }
         assertEquals(7, manager.lineWindowCount)
-        assertEquals(3, manager.labelWindowCount)
+        assertEquals(4, manager.labelWindowCount)
 
         instrumentation.runOnMainSync { manager.removeAll() }
         assertEquals(0, manager.labelWindowCount)
