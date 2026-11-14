@@ -465,4 +465,114 @@ class PathBlockTest {
     fun firstClearKick_emptyKickListIsNull() {
         assertNull(PathBlock.firstClearKick(emptyList(), emptyList(), r))
     }
+
+    // ---- firstClearTwoRailBank / firstClearTwoRailKick (v1.0.23) ----
+    //
+    // Layouts verified against the real solver with kotlinc before
+    // the tests were written (see probe23/probe23k.kt and
+    // probe23l.kt). The two-rail lists use the live corner guard
+    // (bankContactIsValid) with the same table the fallback chain
+    // uses. Blockers sit on solved-path midpoints, so they hold
+    // for whatever the best solution is.
+    //
+    // Banks, cue (90,50) -> target (50,60): cuts 3.66 (real
+    // pocket bottom-middle, contacts left (40,62.9) + right
+    // (680,247.6)), 47.43 (top-right, contacts (40,69.2) +
+    // (333.3,340)), 71.63 (top-middle, contacts (40,78.2) +
+    // (184,340)). Kicks, cue (150,50) -> target (50,60): cuts
+    // 5.16, 26.72, 50.41, all into the top-left pocket with the
+    // same ghost (54.4,77.5), differing in rail pairs.
+
+    private fun allTwoRailBanksGuarded(cue: Vec2, target: Vec2) =
+        ShotSolver.allTwoRailBanks(
+            cue, target, pockets, rails, r
+        ) { contact, index, pocket ->
+            com.poolguide.tool.cv.bankContactIsValid(
+                contact, index, rerankTable, pocket, r
+            )
+        }
+
+    private fun allTwoRailKicksGuarded(cue: Vec2, target: Vec2) =
+        ShotSolver.allTwoRailKicks(
+            cue, target, pockets, rails, r
+        ) { contact, index, pocket ->
+            com.poolguide.tool.cv.bankContactIsValid(
+                contact, index, rerankTable, pocket, r
+            )
+        }
+
+    @Test
+    fun firstClearTwoRailBank_returnsBestWhenNothingIsBlocked() {
+        val all = allTwoRailBanksGuarded(Vec2(90.0, 50.0), Vec2(50.0, 60.0))
+        val pick = PathBlock.firstClearTwoRailBank(all, emptyList(), r)
+        assertEquals(3.66, pick!!.direct.cutAngleDegrees, 0.05)
+        assertVecNear(Vec2(360.0, 340.0), pick.bankPath[2].end)
+        assertVecNear(Vec2(40.0, 62.9), pick.railContacts[0])
+        assertVecNear(Vec2(680.0, 247.6), pick.railContacts[1])
+    }
+
+    @Test
+    fun firstClearTwoRailBank_skipsBlockedBestForNextClearShot() {
+        val all = allTwoRailBanksGuarded(Vec2(90.0, 50.0), Vec2(50.0, 60.0))
+        val best = all.first()
+        // Blocker on the best bank's second-leg midpoint (360,155.3).
+        val mid = (best.bankPath[1].start + best.bankPath[1].end) * 0.5
+        val pick = PathBlock.firstClearTwoRailBank(all, listOf(mid), r)
+        assertEquals(47.43, pick!!.direct.cutAngleDegrees, 0.05)
+        assertVecNear(Vec2(680.0, 20.0), pick.bankPath[2].end)
+        assertVecNear(Vec2(40.0, 69.2), pick.railContacts[0])
+        assertVecNear(Vec2(333.3, 340.0), pick.railContacts[1])
+    }
+
+    @Test
+    fun firstClearTwoRailBank_returnsNullWhenEveryBankIsBlocked() {
+        val all = allTwoRailBanksGuarded(Vec2(90.0, 50.0), Vec2(50.0, 60.0))
+        // One blocker on each bank's second-leg midpoint.
+        val mids = all.map { (it.bankPath[1].start + it.bankPath[1].end) * 0.5 }
+        assertNull(PathBlock.firstClearTwoRailBank(all, mids, r))
+    }
+
+    @Test
+    fun firstClearTwoRailBank_emptyBankListIsNull() {
+        assertNull(PathBlock.firstClearTwoRailBank(emptyList(), emptyList(), r))
+    }
+
+    @Test
+    fun firstClearTwoRailKick_returnsBestWhenNothingIsBlocked() {
+        val all = allTwoRailKicksGuarded(Vec2(150.0, 50.0), Vec2(50.0, 60.0))
+        val pick = PathBlock.firstClearTwoRailKick(all, emptyList(), r)
+        assertEquals(5.16, pick!!.direct.cutAngleDegrees, 0.05)
+        assertVecNear(Vec2(40.0, 20.0), pick.direct.targetLine.end)
+        assertVecNear(Vec2(145.3, 20.0), pick.railContacts[0])
+        assertVecNear(Vec2(95.4, 340.0), pick.railContacts[1])
+    }
+
+    @Test
+    fun firstClearTwoRailKick_skipsBlockedBestForNextClearShot() {
+        val all = allTwoRailKicksGuarded(Vec2(150.0, 50.0), Vec2(50.0, 60.0))
+        // Blocker at (59,139): on the best kick's third leg, clear
+        // of the second and third kicks (probe23l found 4,294 such
+        // spots; the best kick's second-leg midpoint blocks the
+        // second kick too, their paths cross near (120,180)).
+        val pick = PathBlock.firstClearTwoRailKick(
+            all, listOf(Vec2(59.0, 139.0)), r
+        )
+        assertEquals(26.72, pick!!.direct.cutAngleDegrees, 0.05)
+        assertVecNear(Vec2(40.0, 20.0), pick.direct.targetLine.end)
+        assertVecNear(Vec2(84.7, 340.0), pick.railContacts[0])
+        assertVecNear(Vec2(40.0, 141.3), pick.railContacts[1])
+    }
+
+    @Test
+    fun firstClearTwoRailKick_returnsNullWhenEveryKickIsBlocked() {
+        val all = allTwoRailKicksGuarded(Vec2(150.0, 50.0), Vec2(50.0, 60.0))
+        // One blocker on each kick's second-leg midpoint.
+        val mids = all.map { (it.kickPath[1].start + it.kickPath[1].end) * 0.5 }
+        assertNull(PathBlock.firstClearTwoRailKick(all, mids, r))
+    }
+
+    @Test
+    fun firstClearTwoRailKick_emptyKickListIsNull() {
+        assertNull(PathBlock.firstClearTwoRailKick(emptyList(), emptyList(), r))
+    }
 }

@@ -290,17 +290,22 @@ screen. Nothing about the game is changed.**
     blocked easiest bank no longer hides a clear kick (or the
     other way round). When every bank or every kick is blocked the
     best of that family stays the shown shot and is flagged, as
-    before. Two-rail banks, two-rail kicks, combo, and kiss shots
-    are still flag-only: their fallbacks return a single best
-    shot, not a ranked list, so there is nothing to re-rank within
-    the family. Combo and kiss shots are not flagged either: their
-    potting chain has two struck balls and the second leg's path
-    is only defined once the first leg lands. Detection noise
-    (~0.4 px on the synthetic tables) can flip the verdict for a
-    ball sitting within a pixel or two of the one-diameter
-    boundary, and EDIT mode never shows the flag (the frozen shot
-    is the player's manual aim, not the live detection the flag
-    belongs to).
+    before. Since v1.0.23 the same rule covers the TWO-RAIL
+    families: when no one-rail shot solves either, the shown
+    two-rail bank is the first clear two-rail bank in cut order
+    and the shown two-rail kick the first clear two-rail kick.
+    The two-rail bank is still tried before the two-rail kick,
+    so the re-ranking is within each family, not between them.
+    Combo and kiss shots are still flag-only: their fallbacks
+    return a single best shot, not a ranked list, so there is
+    nothing to re-rank within the family. Combo and kiss shots
+    are not flagged either: their potting chain has two struck
+    balls and the second leg's path is only defined once the
+    first leg lands. Detection noise (~0.4 px on the synthetic
+    tables) can flip the verdict for a ball sitting within a
+    pixel or two of the one-diameter boundary, and EDIT mode
+    never shows the flag (the frozen shot is the player's manual
+    aim, not the live detection the flag belongs to).
 
 21. **The cue ball is picked by group, not by colour.** Since v1.0.20
     the pipeline picks the ball the group classifier calls CUE; the
@@ -323,9 +328,9 @@ MediaProjection + VirtualDisplay (960x540, foreground service)
   -> shot solver (ghost ball, cut angle, tangent, mirror-pocket banks
      (one- and two-rail), mirror-ghost kicks (one- and two-rail), combo + kiss
      shots; every reachable pocket ranked, first clear pocket shown;
-     one-rail banks and kicks ranked the same way, first clear shown;
-     the shown shot is flagged "Path blocked" when another ball sits
-     on its path)
+     one-rail and two-rail banks and kicks ranked the same way, first
+     clear shown; the shown shot is flagged "Path blocked" when another
+     ball sits on its path)
   -> one small TYPE_APPLICATION_OVERLAY window per line (best shot in
      full colour, other candidates faint — PoolAimAssist UX)
 ```
