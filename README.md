@@ -210,6 +210,22 @@ screen. Nothing about the game is changed.**
     with the lines (auto-hide, hide toggle, table lock, black
     frame) and follows the frozen shot in EDIT mode.
 
+17. **The rail-contact marker shows where to hit the cushion, not
+    how hard.** Since v1.0.16 every bank and kick shot draws a small
+    ring on the cushion at each rail contact (cyan for banks,
+    magenta for kicks), so the player aims at a visible spot
+    instead of guessing where the bent line meets the rail. The
+    spot is the solver's own contact point — the joint of the
+    bank/kick path — not a second detection. It is still geometry,
+    not physics: the cushion correction is fitted to synthetic
+    harness data where it measures zero, and real-table cushion
+    behaviour (speed loss, angle change off a rail) is unmeasured,
+    so on a real table the true contact can sit a little off the
+    ring. Practice mode shows the same rings at the same spots, so
+    practice and live agree. Markers hide with the lines (auto-hide,
+    hide toggle, table lock, black frame, bank lines off) and are
+    never drawn for direct, combo, or kiss shots, which touch no rail.
+
 ## How it works
 
 ```
