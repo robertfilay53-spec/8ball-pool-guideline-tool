@@ -1,6 +1,7 @@
 package com.poolguide.tool.ui
 
 import com.poolguide.tool.cv.TableRect
+import com.poolguide.tool.geometry.BallGroup
 import com.poolguide.tool.geometry.Rail
 import com.poolguide.tool.geometry.ShotSolver
 import com.poolguide.tool.geometry.Vec2
@@ -115,7 +116,15 @@ class PracticeState(
         const val TWO_RAIL_CUT_MARGIN_DEGREES = 30.0
     }
 
-    data class PracticeBall(val id: Int, var center: Vec2, val isCue: Boolean)
+    /** One ball on the practice table. The group is known by
+     * construction (v1.0.14): the cue ball is CUE, the other balls
+     * are SOLID (the practice table has no stripe or 8-ball). */
+    data class PracticeBall(
+        val id: Int,
+        var center: Vec2,
+        val isCue: Boolean,
+        val group: BallGroup = if (isCue) BallGroup.CUE else BallGroup.SOLID
+    )
 
     var mode: PracticeMode = PracticeMode.DIRECT
         private set

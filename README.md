@@ -170,6 +170,29 @@ screen. Nothing about the game is changed.**
     inherits whatever error the first leg's detection carries. Each
     leg gets its own cut-angle readout, and a leg over 80 degrees
     gets the thin-cut warning.
+15. **Ball-group tags are classified from the disc, and the
+    stripe/solid split is unproven on a real table.** Since v1.0.14
+    the live overlay shows a small tag next to each detected ball
+    ("C" cue, "8" eight, "S" solid, "ST" stripe, "?" unknown), in
+    the ball's own colour family, placed 2.2 radii off the nearest
+    shot line through the ball so it never covers the line. The
+    classifier samples the ball's disc (2 px grid inside 0.85 of
+    the radius): a ball that is (near-)all white is the cue, a
+    near-black one is the 8-ball, a disc with a clear white band is
+    a stripe, a coloured disc with almost no white is a solid. It
+    says "?" instead of guessing when the disc is too small, cut
+    off by the frame edge, occluded by another ball, or its white
+    fraction sits in the ambiguous middle — a solid showing its
+    number circle reads a white fraction around 0.05-0.16, so it
+    can read "?" on a real table, and that is the honest answer,
+    not a misread. On the 15 synthetic harness tables the
+    classification is exact (see cv-harness/results-v1.0.14-after.json),
+    but the synthetic balls have no number circle and perfect
+    lighting — the phone test is still the real check. Practice mode
+    shows the same tags; its groups are known by construction (cue
+    "C", the other balls "S"). Tags show only while shot lines are
+    drawn, and hide with them (auto-hide, hide toggle, table lock,
+    black frame).
 
 ## How it works
 

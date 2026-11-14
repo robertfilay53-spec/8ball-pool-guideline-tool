@@ -1,6 +1,7 @@
 package com.poolguide.tool.ui
 
 import com.poolguide.tool.cv.TableRect
+import com.poolguide.tool.geometry.BallGroup
 import com.poolguide.tool.geometry.CutAngleLabel
 import com.poolguide.tool.geometry.Vec2
 import org.junit.Assert.assertEquals
@@ -576,5 +577,25 @@ class PracticeStateTest {
         assertTrue(shot.isThinCut)
         assertEquals("82.8°", CutAngleLabel.format(shot.cutAngleDegrees))
         assertEquals("Thin cut 82.8°", CutAngleLabel.warningText(shot.cutAngleDegrees))
+    }
+
+    @Test
+    fun `practice balls carry their group by construction`() {
+        // v1.0.14: the practice table's groups are known — the cue
+        // ball is CUE, the other balls are SOLID (no stripe or
+        // 8-ball on the practice table). The tags in PracticeView
+        // read this field, so the assignment is pinned here.
+        val s = state()
+        assertEquals(BallGroup.CUE, s.cue.group)
+        assertEquals(BallGroup.SOLID, s.target.group)
+        assertEquals(BallGroup.SOLID, s.middle.group)
+        assertEquals("C", s.cue.group.tagText())
+        assertEquals("S", s.target.group.tagText())
+        // Switching mode re-lays out the balls but the groups stay
+        // what they are by construction.
+        s.setMode(PracticeState.PracticeMode.COMBO)
+        assertEquals(BallGroup.CUE, s.cue.group)
+        assertEquals(BallGroup.SOLID, s.middle.group)
+        assertEquals(BallGroup.SOLID, s.target.group)
     }
 }
