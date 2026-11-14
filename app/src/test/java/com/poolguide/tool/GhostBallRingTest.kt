@@ -12,9 +12,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Ghost-ball ring (v1.0.26). All solver numbers pinned against the
- * solver with kotlinc before the tests were written
- * (/tmp/probe26/Probe26.kt, Probe26b.kt).
+ * Ghost-ball ring (v1.0.26; second-leg ring v1.0.27). All solver
+ * numbers pinned against the solver with kotlinc before the tests
+ * were written (/tmp/probe26/Probe26.kt, Probe26b.kt; v1.0.27:
+ * ~/workspace/probe27/Probe27.kt, Probe27b.kt).
  *
  * The ring is a circle of one ball radius centred on the ghost
  * point, the cue ball's centre at impact. The centre is always
@@ -98,17 +99,24 @@ class GhostBallRingTest {
     }
 
     @Test
-    fun `combo ring sits on the first leg ghost only`() {
+    fun `combo rings sit on both legs' ghosts, second at the transfer point`() {
         val combo = ShotSolver.solveCombo(
             Vec2(100.0, 300.0), Vec2(200.0, 300.0), Vec2(300.0, 300.0),
             Vec2(400.0, 300.0), r
         )!!
         assertEquals(Vec2(182.0, 300.0), GhostBallRing.center(combo.firstShot))
         assertEquals(Vec2(282.0, 300.0), combo.secondShot.ghostPoint)
-        // The second leg's ghost is a different point: the slice draws
-        // one ring per shown shot, on the cue ball's arrival only.
+        // The second leg's ghost is a different point: the first
+        // ring marks the cue ball's arrival, the second ring
+        // (v1.0.27) marks the first ball's arrival at the transfer
+        // point between the two balls.
         assertFalse(GhostBallRing.center(combo.firstShot) == combo.secondShot.ghostPoint)
         assertTrue(GhostBallRing.touchesTarget(combo.firstShot, Vec2(200.0, 300.0), r))
+        // The second ghost IS the first leg's target line end: the
+        // first ball must arrive exactly where the first leg aims
+        // it, and the second ring touches the second ball exactly.
+        assertEquals(combo.firstShot.targetLine.end, GhostBallRing.center(combo.secondShot))
+        assertTrue(GhostBallRing.touchesTarget(combo.secondShot, Vec2(300.0, 300.0), r))
     }
 
     @Test
@@ -124,6 +132,24 @@ class GhostBallRingTest {
         assertEquals(331.95, kiss.secondShot.ghostPoint.x, 0.01)
         assertEquals(76.10, kiss.secondShot.ghostPoint.y, 0.01)
         assertTrue(GhostBallRing.touchesTarget(kiss.kissShot, Vec2(60.0, 40.0), r))
+    }
+
+    @Test
+    fun `kiss second leg ring sits on the post-kiss ghost and touches the second ball`() {
+        val kisses = ShotSolver.allKisses(
+            Vec2(55.0, 58.0), Vec2(60.0, 40.0), listOf(Vec2(340.0, 60.0)), pockets, r
+        )
+        assertEquals(1, kisses.size)
+        val kiss = kisses.first()
+        // The second ring (v1.0.27) marks where the cue ball must
+        // arrive after the kiss to pot the second ball: a different
+        // point from the kiss ghost, and the second leg's aim line
+        // ends there.
+        assertEquals(331.95, GhostBallRing.center(kiss.secondShot).x, 0.01)
+        assertEquals(76.10, GhostBallRing.center(kiss.secondShot).y, 0.01)
+        assertFalse(GhostBallRing.center(kiss.secondShot) == GhostBallRing.center(kiss.kissShot))
+        assertEquals(kiss.secondShot.aimLine.end, GhostBallRing.center(kiss.secondShot))
+        assertTrue(GhostBallRing.touchesTarget(kiss.secondShot, Vec2(340.0, 60.0), r))
     }
 
     @Test

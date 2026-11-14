@@ -336,10 +336,11 @@ screen. Nothing about the game is changed.**
     ball exactly, so the player aims the cue ball at a visible
     circle that kisses the target instead of guessing where the aim
     line ends. Practice mode already drew this circle; the live
-    overlay now agrees with it. One ring per shown shot, on the
-    first leg's ghost only: for a combo or kiss the second leg's
-    ghost is the first ball's arrival point, and its aim line
-    already ends there. Non-best candidates get no ring, like they
+    overlay now agrees with it. Since v1.0.27 a combo or kiss draws
+    a second ring on the second leg's ghost: the first ball's
+    arrival point for a combo (the transfer point between the two
+    balls), and the point the cue ball must reach after the kiss
+    for a kiss. Non-best candidates get no ring, like they
     get no pocket ring and no labels. The ring hides with the lines
     (auto-hide, hide toggle, table lock, black frame) and follows
     the frozen shot in EDIT mode. It is geometry, like the lines:

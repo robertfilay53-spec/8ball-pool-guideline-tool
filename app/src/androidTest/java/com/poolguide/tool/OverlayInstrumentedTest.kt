@@ -803,14 +803,16 @@ class OverlayInstrumentedTest {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
 
         // A combo draws 6 leg segments (aim/target/deflection
-        // per leg) + 1 pocket ring + 1 ghost ring, and one angle label per leg.
+        // per leg) + 1 pocket ring + 2 ghost rings (first leg's
+        // ghost and, since v1.0.27, the second leg's ghost), and
+        // one angle label per leg.
         // the thin first leg adds its warning label — plus one
         // pocket-distance label last (v1.0.15): the whole chain
         // travels 16.0 ball diameters (dist15-probe).
         val result = comboResult()
         assertTrue(result.combo!!.firstShot.isThinCut)
         instrumentation.runOnMainSync { manager.update(result) }
-        assertEquals(8, manager.lineWindowCount)
+        assertEquals(9, manager.lineWindowCount)
         assertEquals(4, manager.labelWindowCount)
         assertEquals(
             listOf("84.8°", "Thin cut 84.8°", "60.3°", "16.0 bd"),
@@ -841,7 +843,8 @@ class OverlayInstrumentedTest {
         val manager = LineOverlayManager(ctx, store)
         val instrumentation = InstrumentationRegistry.getInstrumentation()
 
-        // A kiss draws the same 6 + 2 windows, with one angle
+        // A kiss draws the same 6 + 3 windows (6 leg segments, 1
+        // pocket ring, 2 ghost rings since v1.0.27), with one angle
         // label per leg and no warning (neither leg is thin), plus
         // one pocket-distance label last (v1.0.15): the whole chain
         // travels 33.8 ball diameters (dist15-probe).
@@ -849,7 +852,7 @@ class OverlayInstrumentedTest {
         assertTrue(!result.kiss!!.kissShot.isThinCut)
         assertTrue(!result.kiss!!.secondShot.isThinCut)
         instrumentation.runOnMainSync { manager.update(result) }
-        assertEquals(8, manager.lineWindowCount)
+        assertEquals(9, manager.lineWindowCount)
         assertEquals(3, manager.labelWindowCount)
         assertEquals(
             listOf("78.2°", "11.9°", "33.8 bd"),
@@ -878,7 +881,7 @@ class OverlayInstrumentedTest {
         // first leg's aim-line midpoint (53.5,57.0).
         val result = comboResult().copy(blockedBy = Vec2(53.5, 57.0))
         instrumentation.runOnMainSync { manager.update(result) }
-        assertEquals(8, manager.lineWindowCount)
+        assertEquals(9, manager.lineWindowCount)
         assertEquals(5, manager.labelWindowCount)
         assertEquals(
             listOf("84.8°", "Thin cut 84.8°", "60.3°", "Path blocked", "16.0 bd"),
@@ -905,7 +908,7 @@ class OverlayInstrumentedTest {
         // aim-line midpoint (56.3,57.9).
         val result = kissResult().copy(blockedBy = Vec2(56.3, 57.9))
         instrumentation.runOnMainSync { manager.update(result) }
-        assertEquals(8, manager.lineWindowCount)
+        assertEquals(9, manager.lineWindowCount)
         assertEquals(4, manager.labelWindowCount)
         assertEquals(
             listOf("78.2°", "11.9°", "Path blocked", "33.8 bd"),
@@ -940,7 +943,7 @@ class OverlayInstrumentedTest {
         // Re-enabling the switch brings the lines back.
         store.bankLinesEnabled = true
         instrumentation.runOnMainSync { manager.update(result) }
-        assertEquals(8, manager.lineWindowCount)
+        assertEquals(9, manager.lineWindowCount)
         assertEquals(4, manager.labelWindowCount)
 
         instrumentation.runOnMainSync { manager.removeAll() }
