@@ -438,6 +438,12 @@ detection fails, which never happens on the 15 harness tables.
   aim sat 2.71 / 2.01 deg off. The blue table's green 6-ball moved
   along the solved aim line in the same change, so the red ball still
   wins the target pick and the depicted shot stays flagged blocked.
+  The bank table's guideline is the true aim too (fitted 63.29 deg vs
+  the solver's 63.34 deg at full resolution), but it is only ~24 px
+  long at working resolution, below the detector's Hough threshold of
+  30, so the working-res detector never picks it up; that is
+  pre-existing, unchanged by this slice, and the bank test asserts
+  the solve, not the angle.
 - **Android 10-15 checklist** (all implemented in `CaptureService` /
   `OverlayService` / `MainActivity`): `FOREGROUND_SERVICE_MEDIA_PROJECTION`
   declared (12+); `POST_NOTIFICATIONS` requested at runtime (13+); the
