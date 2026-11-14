@@ -11,6 +11,7 @@ import com.poolguide.tool.cv.TableRect
 import com.poolguide.tool.geometry.BallGroupTag
 import com.poolguide.tool.geometry.CutAngleLabel
 import com.poolguide.tool.geometry.PocketDistanceLabel
+import com.poolguide.tool.geometry.RailContactMarker
 import com.poolguide.tool.geometry.Segment
 import com.poolguide.tool.geometry.ShotSolver
 import com.poolguide.tool.geometry.Vec2
@@ -449,6 +450,17 @@ class PracticeView @JvmOverloads constructor(
             pocket.x.toFloat(), pocket.y.toFloat(),
             (BALL_RADIUS_PX * 1.8 * scale).toFloat(), ringPaint
         )
+        // Rail-contact markers (v1.0.16): one ring at each cushion
+        // spot the target ball must hit, in the bank cyan — the same
+        // spots the live overlay marks, so practice and live agree.
+        // Ball-sized, smaller than the pocket ring.
+        for (contact in RailContactMarker.contacts(bankPath)) {
+            val c = toView(contact)
+            canvas.drawCircle(
+                c.x.toFloat(), c.y.toFloat(),
+                (BALL_RADIUS_PX * 1.0 * scale).toFloat(), bankPaint
+            )
+        }
         drawCutAngleLabel(canvas, direct, bankPaint.color)
     }
 
@@ -498,6 +510,16 @@ class PracticeView @JvmOverloads constructor(
             pocket.x.toFloat(), pocket.y.toFloat(),
             (BALL_RADIUS_PX * 1.8 * scale).toFloat(), ringPaint
         )
+        // Rail-contact markers (v1.0.16): one ring at each cushion
+        // spot the cue ball must hit, in the kick magenta — the same
+        // spots the live overlay marks, so practice and live agree.
+        for (contact in RailContactMarker.contacts(kickPath)) {
+            val c = toView(contact)
+            canvas.drawCircle(
+                c.x.toFloat(), c.y.toFloat(),
+                (BALL_RADIUS_PX * 1.0 * scale).toFloat(), kickPaint
+            )
+        }
         drawCutAngleLabel(canvas, direct, kickPaint.color)
     }
 

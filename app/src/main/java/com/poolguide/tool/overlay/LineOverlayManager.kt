@@ -22,6 +22,7 @@ import com.poolguide.tool.data.DiagnosticsLog
 import com.poolguide.tool.geometry.BallGroupTag
 import com.poolguide.tool.geometry.CutAngleLabel
 import com.poolguide.tool.geometry.PocketDistanceLabel
+import com.poolguide.tool.geometry.RailContactMarker
 import com.poolguide.tool.geometry.Segment
 import com.poolguide.tool.geometry.ShotSolver
 import com.poolguide.tool.geometry.Vec2
@@ -74,6 +75,10 @@ class LineOverlayManager(
         /** Pocket-ring radius (v1.0.15): the distance label anchors
          * just past this ring, so the two share one constant. */
         private const val RING_RADIUS_PX = 18f
+        /** Rail-contact marker radius (v1.0.16): smaller than the
+         * pocket ring (a spot on a rail, not a pocket), same stroke
+         * width, in the shot family's colour. */
+        private const val CONTACT_MARKER_RADIUS_PX = 10f
         /** Thin-cut warning (v1.0.12): amber, distinct from every line
          * family (green aim, yellow target, white deflection, cyan
          * bank, magenta kick, red ring) so the warning is never
@@ -622,6 +627,21 @@ class LineOverlayManager(
         val sx = result.scaleToScreenX
         val sy = result.scaleToScreenY
         fun map(p: Vec2) = Vec2(p.x * sx, p.y * sy)
+        /** Rail-contact markers (v1.0.16) for one bank/kick path: one
+         * ring per interior vertex of the path, in the shot family's
+         * colour. The contacts come from the solution's own path
+         * (unsmoothed, like the pocket ring), so a marker never
+         * drifts from the bend it marks the way a smoothed segment
+         * joint could. A marker is a ring, so groupTags excludes it
+         * from the tag-anchor lines and it hides with the lines. */
+        fun contactMarkers(path: List<Segment>, color: Int): List<DrawLine> =
+            RailContactMarker.contacts(path).map { contact ->
+                DrawLine(
+                    Segment(map(contact), map(contact)),
+                    color, RING_WIDTH_PX, isRing = true,
+                    ringRadius = CONTACT_MARKER_RADIUS_PX
+                )
+            }
         val out = mutableListOf<DrawLine>()
         var labels: List<DrawLabel> = emptyList()
 
@@ -692,6 +712,9 @@ class LineOverlayManager(
                 Segment(map(pocket), map(pocket)),
                 POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = RING_RADIUS_PX
             )
+            // Rail-contact marker (v1.0.16): the cushion spot the
+            // target ball must hit, in the bank cyan.
+            out += contactMarkers(bank.bankPath, BANK_COLOR)
         } else if (result.kick != null && store.bankLinesEnabled) {
             // One-rail kick (v1.0.10): the cue ball goes off the rail
             // first, so the cue path has two segments — cue -> rail
@@ -725,6 +748,9 @@ class LineOverlayManager(
                 Segment(map(pocket), map(pocket)),
                 POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = RING_RADIUS_PX
             )
+            // Rail-contact marker (v1.0.16): the cushion spot the cue
+            // ball must hit, in the kick magenta.
+            out += contactMarkers(kick.kickPath, KICK_COLOR)
         } else if (result.bank2 != null && store.bankLinesEnabled) {
             // Two-rail bank (v1.0.9): same cyan rendering as a
             // one-rail bank, with all three path segments so both
@@ -753,6 +779,9 @@ class LineOverlayManager(
                 Segment(map(pocket), map(pocket)),
                 POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = RING_RADIUS_PX
             )
+            // Rail-contact markers (v1.0.16): both cushion spots, in
+            // the bank cyan, in path order.
+            out += contactMarkers(bank2.bankPath, BANK_COLOR)
         } else if (result.kick2 != null && store.bankLinesEnabled) {
             // Two-rail kick (v1.0.11): the cue ball goes off two rails
             // first, so the cue path has three segments — cue -> rail
@@ -790,6 +819,9 @@ class LineOverlayManager(
                 Segment(map(pocket), map(pocket)),
                 POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = RING_RADIUS_PX
             )
+            // Rail-contact markers (v1.0.16): both cushion spots, in
+            // the kick magenta, in path order.
+            out += contactMarkers(kick2.kickPath, KICK_COLOR)
         } else if (result.combo != null && store.bankLinesEnabled) {
             // Combo (v1.0.13): cue -> first ball -> second ball ->
             // pocket, drawn exactly the way practice mode draws it:

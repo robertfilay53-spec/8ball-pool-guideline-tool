@@ -12,6 +12,7 @@ import com.poolguide.tool.cv.DetectionResult
 import com.poolguide.tool.data.CalibrationStore
 import com.poolguide.tool.geometry.BallGroup
 import com.poolguide.tool.geometry.CutAngleLabel
+import com.poolguide.tool.geometry.Rail
 import com.poolguide.tool.geometry.Segment
 import com.poolguide.tool.geometry.ShotSolver
 import com.poolguide.tool.geometry.Vec2
@@ -501,6 +502,231 @@ class OverlayInstrumentedTest {
 
         instrumentation.runOnMainSync { manager.removeAll() }
         assertEquals(0, manager.labelWindowCount)
+    }
+
+    /** Rail-contact markers (v1.0.16). All layouts verified against
+     * the solver with kotlinc before the tests were written
+     * (contact16-probe/Probe.kt + ProbeDist.kt). */
+    private fun bankResult(): DetectionResult {
+        // Bank-default layout, bottom rail to the top-right pocket:
+        // cut 30.77 deg, contact (502.2, 340), distance 45.5 bd.
+        val bank = ShotSolver.solveBank(
+            Vec2(120.0, 80.0), Vec2(480.0, 300.0),
+            Vec2(680.0, 20.0),
+            Rail(Vec2(40.0, 340.0), Vec2(0.0, -1.0)), 9.0
+        )!!
+        return DetectionResult(
+            frameIndex = 1,
+            workingWidth = 720,
+            workingHeight = 405,
+            scaleToScreenX = 1.0,
+            scaleToScreenY = 1.0,
+            isCaptureBlack = false,
+            table = null,
+            pockets = emptyList(),
+            balls = emptyList(),
+            cueBall = null,
+            guideline = listOf(
+                com.poolguide.tool.cv.GuidelineSegment(
+                    Segment(Vec2(120.0, 80.0), Vec2(480.0, 300.0)), 40
+                )
+            ),
+            shot = null,
+            bank = bank,
+            allShots = emptyList(),
+            tableLocked = true,
+            status = "Bank shot to pocket"
+        )
+    }
+
+    private fun kickResult(): DetectionResult {
+        // KickTest layout: cue (120, 80), target (480, 300), right
+        // rail to the bottom-middle pocket: cut 2.34 deg, contact
+        // (680, 241.5), distance 50.0 bd.
+        val kick = ShotSolver.solveKick(
+            Vec2(120.0, 80.0), Vec2(480.0, 300.0),
+            Vec2(360.0, 340.0),
+            Rail(Vec2(680.0, 20.0), Vec2(-1.0, 0.0)), 9.0
+        )!!
+        return bankResult().copy(
+            bank = null,
+            kick = kick,
+            status = "Kick shot to pocket"
+        )
+    }
+
+    private fun bank2Result(): DetectionResult {
+        // TwoRailBankTest layout: cue (580, 300), target (600, 320),
+        // bottom then right rails to the top-middle pocket: cut 12.64
+        // deg, contacts (623.5, 340) and (680, 292), distance 29.7 bd.
+        val bank2 = ShotSolver.solveTwoRailBank(
+            Vec2(580.0, 300.0), Vec2(600.0, 320.0),
+            Vec2(360.0, 20.0),
+            Rail(Vec2(40.0, 340.0), Vec2(0.0, -1.0)),
+            Rail(Vec2(680.0, 20.0), Vec2(-1.0, 0.0)), 9.0
+        )!!
+        return bankResult().copy(
+            bank = null,
+            bank2 = bank2,
+            status = "Two-rail bank shot to pocket"
+        )
+    }
+
+    private fun kick2Result(): DetectionResult {
+        // TwoRailKickTest layout: cue (140, 120), target (60, 120),
+        // top then left rails to the bottom-middle pocket: cut 24.63
+        // deg, contacts (84.3, 20) and (40, 99.5), distance 32.7 bd.
+        val kick2 = ShotSolver.solveTwoRailKick(
+            Vec2(140.0, 120.0), Vec2(60.0, 120.0),
+            Vec2(360.0, 340.0),
+            Rail(Vec2(40.0, 20.0), Vec2(0.0, 1.0)),
+            Rail(Vec2(40.0, 20.0), Vec2(1.0, 0.0)), 9.0
+        )!!
+        return bankResult().copy(
+            bank = null,
+            kick2 = kick2,
+            status = "Two-rail kick shot to pocket"
+        )
+    }
+
+    @Test
+    fun railContactMarkers_bankDrawsOneMarker() {
+        val ctx = appContext()
+        assertTrue(
+            "overlay permission must be granted for this test",
+            Settings.canDrawOverlays(ctx)
+        )
+        val store = CalibrationStore(ctx).apply { guidesHidden = false }
+        val manager = LineOverlayManager(ctx, store)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+
+        // A one-rail bank draws 5 line windows: aim, 2 bank
+        // segments, pocket ring, and 1 rail-contact marker. Labels
+        // are the angle (30.8 deg) and the distance (45.5 bd).
+        val result = bankResult()
+        instrumentation.runOnMainSync { manager.update(result) }
+        assertEquals("bank needs aim + 2 path + ring + 1 marker", 5, manager.lineWindowCount)
+        assertEquals(2, manager.labelWindowCount)
+        assertEquals(
+            listOf("30.8°", "45.5 bd"),
+            manager.labelTexts
+        )
+
+        // Hide toggle removes the marker with the lines.
+        store.guidesHidden = true
+        instrumentation.runOnMainSync { manager.update(result) }
+        assertEquals("hide must remove the marker too", 0, manager.lineWindowCount)
+        assertEquals(0, manager.labelWindowCount)
+
+        // Unhide brings the marker back.
+        store.guidesHidden = false
+        instrumentation.runOnMainSync { manager.update(result) }
+        assertEquals(5, manager.lineWindowCount)
+
+        instrumentation.runOnMainSync { manager.removeAll() }
+        assertEquals(0, manager.lineWindowCount)
+    }
+
+    @Test
+    fun railContactMarkers_kickDrawsOneMarker() {
+        val ctx = appContext()
+        assertTrue(
+            "overlay permission must be granted for this test",
+            Settings.canDrawOverlays(ctx)
+        )
+        val store = CalibrationStore(ctx).apply { guidesHidden = false }
+        val manager = LineOverlayManager(ctx, store)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+
+        // A one-rail kick draws 6 line windows: aim, kicked path,
+        // target, deflection, pocket ring, and 1 rail-contact marker.
+        val result = kickResult()
+        instrumentation.runOnMainSync { manager.update(result) }
+        assertEquals("kick needs 4 lines + ring + 1 marker", 6, manager.lineWindowCount)
+        assertEquals(2, manager.labelWindowCount)
+        assertEquals(
+            listOf("2.3°", "50.0 bd"),
+            manager.labelTexts
+        )
+
+        instrumentation.runOnMainSync { manager.removeAll() }
+        assertEquals(0, manager.lineWindowCount)
+    }
+
+    @Test
+    fun railContactMarkers_twoRailBankDrawsTwoMarkers() {
+        val ctx = appContext()
+        assertTrue(
+            "overlay permission must be granted for this test",
+            Settings.canDrawOverlays(ctx)
+        )
+        val store = CalibrationStore(ctx).apply { guidesHidden = false }
+        val manager = LineOverlayManager(ctx, store)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+
+        // A two-rail bank draws 7 line windows: aim, 3 bank
+        // segments, pocket ring, and 2 rail-contact markers.
+        val result = bank2Result()
+        instrumentation.runOnMainSync { manager.update(result) }
+        assertEquals("bank2 needs 4 lines + ring + 2 markers", 7, manager.lineWindowCount)
+        assertEquals(2, manager.labelWindowCount)
+        assertEquals(
+            listOf("12.6°", "29.7 bd"),
+            manager.labelTexts
+        )
+
+        instrumentation.runOnMainSync { manager.removeAll() }
+        assertEquals(0, manager.lineWindowCount)
+    }
+
+    @Test
+    fun railContactMarkers_twoRailKickDrawsTwoMarkers() {
+        val ctx = appContext()
+        assertTrue(
+            "overlay permission must be granted for this test",
+            Settings.canDrawOverlays(ctx)
+        )
+        val store = CalibrationStore(ctx).apply { guidesHidden = false }
+        val manager = LineOverlayManager(ctx, store)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+
+        // A two-rail kick draws 8 line windows: aim, 2 kicked
+        // segments, target, deflection, pocket ring, and 2
+        // rail-contact markers.
+        val result = kick2Result()
+        instrumentation.runOnMainSync { manager.update(result) }
+        assertEquals("kick2 needs 5 lines + ring + 2 markers", 8, manager.lineWindowCount)
+        assertEquals(2, manager.labelWindowCount)
+        assertEquals(
+            listOf("24.6°", "32.7 bd"),
+            manager.labelTexts
+        )
+
+        instrumentation.runOnMainSync { manager.removeAll() }
+        assertEquals(0, manager.lineWindowCount)
+    }
+
+    @Test
+    fun railContactMarkers_hiddenWhenBankLinesDisabled() {
+        val ctx = appContext()
+        assertTrue(
+            "overlay permission must be granted for this test",
+            Settings.canDrawOverlays(ctx)
+        )
+        val store = CalibrationStore(ctx).apply { guidesHidden = false }
+        val manager = LineOverlayManager(ctx, store)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+
+        // Bank lines off: a bank result draws nothing at all — no
+        // lines, no marker, no labels.
+        val result = bankResult()
+        store.bankLinesEnabled = false
+        instrumentation.runOnMainSync { manager.update(result) }
+        assertEquals("bank lines off must hide the marker too", 0, manager.lineWindowCount)
+        assertEquals(0, manager.labelWindowCount)
+
+        store.bankLinesEnabled = true
+        instrumentation.runOnMainSync { manager.removeAll() }
     }
 
     private fun comboResult(): DetectionResult {
