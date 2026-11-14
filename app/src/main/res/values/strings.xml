@@ -82,5 +82,23 @@
     <string name="calib_brown_hint">Only for brown tables: if the rail is detected as felt, narrow the H range or raise the S/V floors. Leave the defaults for green/blue tables.</string>
     <string name="calib_brown_invalid">Brown window values are invalid — check the ranges (H 0-179, S/V 0-255, low &lt;= high).</string>
 
+    <string name="calib_show_mask">Show felt mask</string>
+    <string name="calib_status_no_frame">No frame available — the status shows once a frame loads.</string>
+    <string name="calib_status_found">Table found with these values.</string>
+    <string name="calib_status_not_found">Table not found with these values — mask covers %1$s%% of the frame.</string>
+    <string name="calib_status_invalid">These values are invalid (low must be at most high) — nothing saved.</string>
+    <string name="calib_h_lo">H low: %1$d (default %2$d)</string>
+    <string name="calib_h_hi">H high: %1$d (default %2$d)</string>
+    <string name="calib_s_lo">S low: %1$d (default %2$d)</string>
+    <string name="calib_s_hi">S high: %1$d (default %2$d)</string>
+    <string name="calib_v_lo">V low: %1$d (default %2$d)</string>
+    <string name="calib_v_hi">V high: %1$d (default %2$d)</string>
+    <string name="calib_thresholds_title">Pocket and ball thresholds</string>
+    <string name="calib_pocket_inset">Pocket inset: %1$.3f (default %2$.3f)</string>
+    <string name="calib_pocket_radius">Pocket radius: %1$.3f (default %2$.3f)</string>
+    <string name="calib_ball_radius">Ball radius at 720 px: %1$.0f px (default %2$.0f px)</string>
+    <string name="btn_reset_defaults">Reset to defaults</string>
+    <string name="calib_defaults_restored">Defaults restored for this game version.</string>
+
     <string name="footer">Sideloaded tool. Not affiliated with Miniclip or 8 Ball Pool. Not a mod: it never touches the game.</string>
 </resources>
