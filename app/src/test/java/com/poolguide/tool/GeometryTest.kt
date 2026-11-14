@@ -492,6 +492,8 @@ class TwoRailBankTest {
     }
 }
 
+class TableGeometryTest {
+
     @Test
     fun `six pockets at the corners and side midpoints`() {
         val table = com.poolguide.tool.cv.TableRect(
