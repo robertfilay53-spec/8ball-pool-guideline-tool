@@ -226,6 +226,22 @@ screen. Nothing about the game is changed.**
     hide toggle, table lock, black frame, bank lines off) and are
     never drawn for direct, combo, or kiss shots, which touch no rail.
 
+18. **The shot history shows what the tool solved, not what you
+    potted.** Since v1.0.17 the main screen keeps the last 8 solved
+    shots the overlay drew ("14:32:05 DIRECT → TL, cut 24.6°,
+    29.6 bd"), newest last, and the diagnostics export carries the
+    same list. A new entry opens only when the solved shot changes —
+    a steady aim records once, not once per frame — so the strip is
+    a review of distinct aims, not a frame log. It records only
+    shots the player actually saw (table locked, lines visible); a
+    black capture, a hidden overlay, or a frozen EDIT-mode shot
+    records nothing. The pocket is named by position (TL/TR/BR/BL/
+    TM/BM), or "?" when the table is not detected. The numbers are
+    the same geometry as the overlay labels — cut angle and total
+    path in ball diameters — so they carry the same limits: no spin,
+    throw, rail friction, or speed loss, and unproven on a real
+    table until the phone test.
+
 ## How it works
 
 ```

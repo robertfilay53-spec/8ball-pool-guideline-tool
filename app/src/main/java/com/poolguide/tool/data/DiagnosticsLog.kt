@@ -101,9 +101,12 @@ object DiagnosticsLog {
         SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZ", Locale.US)
             .format(Date(sessionStartMs))
 
-    /** Full plain-text report: header, then one line per event. */
+    /** Full plain-text report: header, then one line per event,
+     * then the shot history when any shots were recorded (the strip
+     * MainActivity shows live, so the file carries the same record
+     * after the fact). */
     @Synchronized
-    fun buildReport(header: Header): String {
+    fun buildReport(header: Header, shots: List<ShotHistory.ShotEntry> = emptyList()): String {
         val sb = StringBuilder()
         sb.appendLine("Pool Guide diagnostics report")
         sb.appendLine("App version: ${header.appVersion} (${header.appVersionCode})")
@@ -116,6 +119,11 @@ object DiagnosticsLog {
         for (e in events) {
             val detail = if (e.detail.isEmpty()) "" else " ${e.detail}"
             sb.appendLine("[+${e.elapsedMs}ms] ${e.kind}$detail")
+        }
+        if (shots.isNotEmpty()) {
+            sb.appendLine("---")
+            sb.appendLine("Shots: ${shots.size}")
+            for (s in shots) sb.appendLine(ShotHistory.format(s))
         }
         return sb.toString()
     }
