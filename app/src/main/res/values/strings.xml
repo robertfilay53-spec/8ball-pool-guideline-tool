@@ -109,5 +109,12 @@
     <string name="btn_reset_defaults">Reset to defaults</string>
     <string name="calib_defaults_restored">Defaults restored for this game version.</string>
 
+    <string name="calib_preset_title">Table size presets</string>
+    <string name="calib_preset_hint">Load a preset for your table size, then check the mask and tap Save. Presets are starting points — real tables vary, so always verify.</string>
+    <string name="btn_save_preset">Save as preset</string>
+    <string name="calib_preset_choose">Save current values as…</string>
+    <string name="calib_preset_loaded">Preset %1$s loaded — tap Save to keep it.</string>
+    <string name="calib_preset_saved">Preset %1$s saved.</string>
+
     <string name="footer">Sideloaded tool. Not affiliated with Miniclip or 8 Ball Pool. Not a mod: it never touches the game.</string>
 </resources>

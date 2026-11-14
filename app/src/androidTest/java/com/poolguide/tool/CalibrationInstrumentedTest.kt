@@ -8,8 +8,10 @@ import com.poolguide.tool.cv.OpenCvInit
 import com.poolguide.tool.cv.TableDetector
 import com.poolguide.tool.data.CalibrationStore
 import com.poolguide.tool.data.GameProfile
+import com.poolguide.tool.data.TablePreset
 import com.poolguide.tool.geometry.Vec2
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -126,6 +128,60 @@ class CalibrationInstrumentedTest {
         assertEquals(GameProfile.DEFAULT.brownSHi, reset.brownSHi, 0.0)
         assertEquals(GameProfile.DEFAULT.brownVLo, reset.brownVLo, 0.0)
         assertEquals(GameProfile.DEFAULT.brownVHi, reset.brownVHi, 0.0)
+    }
+
+    @Test
+    fun presets_saveReadDeleteFallsBackToBuiltin() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val store = CalibrationStore(context)
+        val version = store.gameVersion
+        store.clearPresets()
+
+        // Built-ins exist before anything is saved.
+        assertEquals(listOf("7ft", "8ft", "9ft"), store.listPresetNames())
+        assertEquals(10.125, store.getPreset("8ft", version).profile.ballRadiusPxAt720, 0.0)
+
+        // Saving an override replaces the built-in on read.
+        val corners = listOf(
+            Vec2(0.1, 0.2), Vec2(0.9, 0.2), Vec2(0.9, 0.8), Vec2(0.1, 0.8)
+        )
+        val saved = TablePreset(
+            "8ft",
+            GameProfile(version, 0.01, 0.03, 12.0,
+                brownHLo = 10.0, brownHHi = 25.0, brownSLo = 120.0,
+                brownSHi = 255.0, brownVLo = 90.0, brownVHi = 255.0),
+            corners
+        )
+        store.savePreset(saved)
+        val readBack = store.getPreset("8ft", version)
+        assertEquals(0.01, readBack.profile.pocketInsetFraction, 0.0)
+        assertEquals(0.03, readBack.profile.pocketRadiusFraction, 0.0)
+        assertEquals(12.0, readBack.profile.ballRadiusPxAt720, 0.0)
+        assertEquals(10.0, readBack.profile.brownHLo, 0.0)
+        assertEquals(0.1, readBack.corners[0].x, 0.001)
+        assertEquals(0.8, readBack.corners[2].y, 0.001)
+
+        // A non-built-in name is listed until deleted.
+        store.savePreset(TablePreset("Bar table", GameProfile.DEFAULT, corners))
+        assertTrue(store.listPresetNames().contains("Bar table"))
+        store.deletePreset("Bar table")
+        assertFalse(store.listPresetNames().contains("Bar table"))
+
+        // Deleting the override falls back to the built-in.
+        store.deletePreset("8ft")
+        assertEquals(10.125, store.getPreset("8ft", version).profile.ballRadiusPxAt720, 0.0)
+        assertEquals(0.0225, store.getPreset("8ft", version).profile.pocketRadiusFraction, 0.0)
+
+        // An unknown name throws instead of silently returning defaults.
+        try {
+            store.getPreset("10ft", version)
+            throw AssertionError("expected IllegalArgumentException for unknown preset")
+        } catch (_: IllegalArgumentException) {
+            // Expected.
+        }
+
+        store.clearPresets()
+        assertEquals(listOf("7ft", "8ft", "9ft"), store.listPresetNames())
     }
 
     @Test

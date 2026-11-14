@@ -14,6 +14,7 @@ import android.widget.SeekBar
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import com.poolguide.tool.R
 import com.poolguide.tool.cv.CalibrationPreview
@@ -21,6 +22,7 @@ import com.poolguide.tool.cv.OpenCvInit
 import com.poolguide.tool.cv.TableDetector
 import com.poolguide.tool.data.CalibrationStore
 import com.poolguide.tool.data.GameProfile
+import com.poolguide.tool.data.TablePreset
 import com.poolguide.tool.geometry.Vec2
 import org.opencv.android.Utils
 import org.opencv.core.Core
@@ -129,6 +131,13 @@ class CalibrationActivity : AppCompatActivity() {
             Toast.makeText(this, R.string.calib_cleared, Toast.LENGTH_SHORT).show()
             finish()
         }
+        // Table-size presets (v1.0.18): one button per size loads that
+        // preset into the sliders + handles; "Save as preset" stores
+        // the current values under the chosen size.
+        findViewById<Button>(R.id.btn_preset_7ft).setOnClickListener { applyPreset("7ft") }
+        findViewById<Button>(R.id.btn_preset_8ft).setOnClickListener { applyPreset("8ft") }
+        findViewById<Button>(R.id.btn_preset_9ft).setOnClickListener { applyPreset("9ft") }
+        findViewById<Button>(R.id.btn_save_preset).setOnClickListener { savePresetDialog() }
 
         // Position the handles once the layout is measured.
         frame.post {
@@ -449,6 +458,46 @@ class CalibrationActivity : AppCompatActivity() {
         store.setTableCorners(corners)
         Toast.makeText(this, R.string.calib_saved, Toast.LENGTH_SHORT).show()
         finish()
+    }
+
+    /** Load a table-size preset into the screen (v1.0.18): sliders +
+     * handles from the preset, then the live status. Fills the screen
+     * only — nothing is persisted until Save, the same contract as
+     * the rest of the screen. */
+    private fun applyPreset(name: String) {
+        val preset = store.getPreset(name)
+        fillSliders(preset.profile)
+        frame.post { placeHandles(preset.corners) }
+        frame.post { refreshPreviewStatus() }
+        Toast.makeText(
+            this, getString(R.string.calib_preset_loaded, name), Toast.LENGTH_SHORT
+        ).show()
+    }
+
+    /** Save the current slider + handle values as one of the three
+     * sizes (v1.0.18): a single-choice dialog, so the player picks
+     * the size to overwrite. An invalid brown window cannot be
+     * saved — the same guard as Save. */
+    private fun savePresetDialog() {
+        val names = TablePreset.BUILTIN_NAMES.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle(R.string.calib_preset_choose)
+            .setItems(names) { _, which ->
+                val profile = currentProfile()
+                if (profile == null) {
+                    Toast.makeText(
+                        this, R.string.calib_brown_invalid, Toast.LENGTH_SHORT
+                    ).show()
+                    return@setItems
+                }
+                val name = names[which]
+                store.savePreset(TablePreset(name, profile, readHandles()))
+                Toast.makeText(
+                    this, getString(R.string.calib_preset_saved, name),
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+            .show()
     }
 
     /** Clear brown window + game profile + table corners for the current

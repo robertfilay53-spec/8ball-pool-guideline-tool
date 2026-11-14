@@ -109,6 +109,51 @@ class CalibrationStore(context: Context) {
         prefs.edit().remove(keyForProfile(version)).apply()
     }
 
+    /** Table-size presets (v1.0.18): named calibration snapshots
+     * ("7ft", "8ft", "9ft"). Built-ins always exist; saving a preset
+     * stores an override under `table_preset_<name>`, and deleting it
+     * falls back to the built-in. The saved name set lives under
+     * KEY_PRESET_NAMES so [listPresetNames] can find overrides. */
+    fun listPresetNames(): List<String> {
+        val saved = prefs.getStringSet(KEY_PRESET_NAMES, emptySet()).orEmpty()
+        return (TablePreset.BUILTIN_NAMES + saved.filter { it !in TablePreset.BUILTIN_NAMES })
+            .distinct()
+    }
+
+    /** The preset for [name]: the saved override when one exists, else
+     * the built-in. Throws for an unknown name. */
+    fun getPreset(name: String, version: String = gameVersion): TablePreset {
+        val raw = prefs.getString(keyForPreset(name), null)
+        TablePreset.parse(raw, name, version)?.let { return it }
+        return TablePreset.builtin(name, version)
+            ?: throw IllegalArgumentException("unknown preset: $name")
+    }
+
+    fun savePreset(preset: TablePreset) {
+        prefs.edit()
+            .putString(keyForPreset(preset.name), preset.serialize())
+            .putStringSet(KEY_PRESET_NAMES, listPresetNames().toSet() + preset.name)
+            .apply()
+    }
+
+    /** Delete the saved override for [name]; the built-in (when one
+     * exists) returns on the next read. */
+    fun deletePreset(name: String) {
+        prefs.edit()
+            .remove(keyForPreset(name))
+            .putStringSet(KEY_PRESET_NAMES, listPresetNames().toSet() - name)
+            .apply()
+    }
+
+    /** Delete every saved preset override (tests); built-ins remain. */
+    fun clearPresets() {
+        val editor = prefs.edit()
+        for (name in listPresetNames()) editor.remove(keyForPreset(name))
+        editor.remove(KEY_PRESET_NAMES).apply()
+    }
+
+    private fun keyForPreset(name: String) = "table_preset_$name"
+
     /** Manual table corners (normalised 0-1), or null for auto-detect. */
     fun getTableCorners(version: String = gameVersion): List<Vec2>? {
         val raw = prefs.getString(keyFor(version), null) ?: return null
@@ -147,6 +192,7 @@ class CalibrationStore(context: Context) {
         const val KEY_SHOW_ALL_SHOTS = "show_all_shots"
         const val KEY_BUBBLE_X = "bubble_x"
         const val KEY_BUBBLE_Y = "bubble_y"
+        const val KEY_PRESET_NAMES = "preset_names"
         const val DEFAULT_GAME_VERSION = "56.35.0"
     }
 }
