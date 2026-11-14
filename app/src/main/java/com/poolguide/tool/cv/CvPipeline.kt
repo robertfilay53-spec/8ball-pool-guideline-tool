@@ -128,9 +128,12 @@ class CvPipeline(
         // it as soon as one succeeds.
         val detected: TableRect?
         val tableFromFallback: Boolean
+        // Local copy: the property is a mutable var, so a null check in
+        // the when condition does not smart-cast it inside the branch.
+        val override = tableOverrideNormalized
         when {
-            tableOverrideNormalized != null -> {
-                detected = normalizedToTable(tableOverrideNormalized)
+            override != null -> {
+                detected = normalizedToTable(override)
                 tableFromFallback = false
             }
             table == null || framesSinceTableCheck >= CvConfig.TABLE_REDETECT_EVERY_N_FRAMES -> {
