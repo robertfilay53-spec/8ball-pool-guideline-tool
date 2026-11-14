@@ -292,6 +292,8 @@ class OverlayInstrumentedTest {
         instrumentation.runOnMainSync {
             manager.applyAnchorDrag(Anchor.GHOST, Vec2(2.0, 0.0))
         }
+        assertTrue("ghost drag must register an override", manager.editHasOverrides)
+        assertTrue("still in edit mode after the drag", manager.isEditMode)
         val edited = manager.editedBank!!
         assertEquals(315.48193812482685, edited.direct.ghostPoint.x, 1e-9)
         assertEquals(40.37380684500539, edited.railContact.x, 1e-9)

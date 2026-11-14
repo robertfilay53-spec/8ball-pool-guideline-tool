@@ -210,6 +210,12 @@ class LineOverlayManager(
     @androidx.annotation.VisibleForTesting
     val editedBank: ShotSolver.BankSolution? get() = manualAim.currentBank()
 
+    /** Test-only: whether any anchor override is registered in EDIT
+     * mode (v1.0.29 diagnostic: distinguishes a drag that never
+     * registered from one the bank re-aim ignores). */
+    @androidx.annotation.VisibleForTesting
+    val editHasOverrides: Boolean get() = manualAim.hasOverrides
+
     /** Test-only: the lock-ring progress currently shown on the bubble
      * (-1 when the bubble does not exist yet). */
     @androidx.annotation.VisibleForTesting
