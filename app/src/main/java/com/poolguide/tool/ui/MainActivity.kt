@@ -25,6 +25,7 @@ import com.poolguide.tool.capture.CaptureService
 import com.poolguide.tool.capture.PreviewBus
 import com.poolguide.tool.data.CalibrationStore
 import com.poolguide.tool.data.DiagnosticsLog
+import com.poolguide.tool.data.ShotHistory
 import com.poolguide.tool.overlay.OverlayService
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -48,6 +49,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusText: TextView
     private lateinit var previewImage: ImageView
     private lateinit var previewStatus: TextView
+    private lateinit var shotHistoryText: TextView
     private lateinit var previewSwitch: Switch
     private lateinit var showAllShotsSwitch: Switch
 
@@ -99,7 +101,7 @@ class MainActivity : AppCompatActivity() {
                 androidVersion = "API ${Build.VERSION.SDK_INT} (${Build.VERSION.RELEASE})",
                 sessionStartIso = DiagnosticsLog.sessionStartIso()
             )
-            val report = DiagnosticsLog.buildReport(header)
+            val report = DiagnosticsLog.buildReport(header, ShotHistory.snapshot())
             contentResolver.openOutputStream(uri)?.use { out ->
                 out.write(report.toByteArray(Charsets.UTF_8))
             }
@@ -117,6 +119,13 @@ class MainActivity : AppCompatActivity() {
         statusText = findViewById(R.id.status_text)
         previewImage = findViewById(R.id.preview_image)
         previewStatus = findViewById(R.id.preview_status)
+        shotHistoryText = findViewById(R.id.shot_history_text)
+        // Shot-history strip (v1.0.17): the overlay records each
+        // solved shot it draws; this refreshes the strip live. The
+        // listener runs on the main thread (the overlay forwards
+        // results there), runOnUiThread is belt and braces.
+        ShotHistory.listener = { runOnUiThread { refreshShotHistory() } }
+        refreshShotHistory()
         previewSwitch = findViewById(R.id.preview_switch)
         showAllShotsSwitch = findViewById(R.id.show_all_shots_switch)
         showAllShotsSwitch.isChecked = store.showAllShots
@@ -157,7 +166,20 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         PreviewBus.listener = null
+        ShotHistory.listener = null
         super.onDestroy()
+    }
+
+    /** Shot-history strip (v1.0.17): the last solved shots the
+     * overlay drew, newest last, or the empty state when nothing
+     * has solved yet. */
+    private fun refreshShotHistory() {
+        val shots = ShotHistory.snapshot()
+        shotHistoryText.text = if (shots.isEmpty()) {
+            getString(R.string.shot_history_empty)
+        } else {
+            shots.joinToString("\n") { ShotHistory.format(it) }
+        }
     }
 
     private fun setStatus(text: String) {

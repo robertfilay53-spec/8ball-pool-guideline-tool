@@ -10,6 +10,7 @@ import com.poolguide.tool.cv.Ball
 import com.poolguide.tool.cv.BallColor
 import com.poolguide.tool.cv.DetectionResult
 import com.poolguide.tool.data.CalibrationStore
+import com.poolguide.tool.data.ShotHistory
 import com.poolguide.tool.geometry.BallGroup
 import com.poolguide.tool.geometry.CutAngleLabel
 import com.poolguide.tool.geometry.Rail
@@ -912,6 +913,63 @@ class OverlayInstrumentedTest {
         assertEquals("no shot must draw no labels", 0, manager.labelWindowCount)
 
         instrumentation.runOnMainSync { manager.removeAll() }
+    }
+
+    /** Shot-history strip (v1.0.17): the overlay records each shot
+     * it draws, once per change — a steady aim records once, a
+     * black frame records nothing, and a different family opens a
+     * new entry. The fabricated result has no table and no pockets,
+     * so the pocket name is "?". */
+    @Test
+    fun shotHistory_recordsDrawnShotOncePerChange() {
+        val ctx = appContext()
+        assertTrue(
+            "overlay permission must be granted for this test",
+            Settings.canDrawOverlays(ctx)
+        )
+        val store = CalibrationStore(ctx).apply { guidesHidden = false }
+        val manager = LineOverlayManager(ctx, store)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        ShotHistory.clear()
+        try {
+            store.showAllShots = false
+            instrumentation.runOnMainSync { manager.update(shotResult()) }
+            assertEquals(4, manager.lineWindowCount)
+            // The fabricated result's three pockets are (600,50),
+            // (600,350), (650,200): the best shot is straight to the
+            // mid-right pocket, cut 0.0 deg, 29.6 bd.
+            val snap = ShotHistory.snapshot()
+            assertEquals("one entry after the first drawn shot", 1, snap.size)
+            assertEquals("DIRECT", snap[0].family)
+            assertEquals("?", snap[0].pocketName)
+            assertEquals(0.0, snap[0].cutAngleDegrees, 0.0)
+            assertEquals(29.56, snap[0].distanceBd, 0.05)
+
+            // Same shot again: deduped, still one entry.
+            instrumentation.runOnMainSync { manager.update(shotResult()) }
+            assertEquals(1, ShotHistory.snapshot().size)
+
+            // Black frame draws nothing and records nothing.
+            val black = shotResult().copy(
+                isCaptureBlack = true, shot = null, guideline = emptyList()
+            )
+            instrumentation.runOnMainSync { manager.update(black) }
+            assertEquals(1, ShotHistory.snapshot().size)
+
+            // A different family opens a second entry (the
+            // fabricated result has no table and no pockets, so the
+            // pocket is "?" here too).
+            instrumentation.runOnMainSync { manager.update(bank2Result()) }
+            val snap2 = ShotHistory.snapshot()
+            assertEquals(2, snap2.size)
+            assertEquals("BANK2", snap2[1].family)
+            assertEquals("?", snap2[1].pocketName)
+            assertEquals(12.64, snap2[1].cutAngleDegrees, 0.05)
+            assertEquals(29.75, snap2[1].distanceBd, 0.05)
+        } finally {
+            ShotHistory.clear()
+            instrumentation.runOnMainSync { manager.removeAll() }
+        }
     }
 
     @Test

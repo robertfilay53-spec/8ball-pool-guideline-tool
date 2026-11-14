@@ -19,6 +19,7 @@ import com.poolguide.tool.cv.BallColor
 import com.poolguide.tool.cv.DetectionResult
 import com.poolguide.tool.data.CalibrationStore
 import com.poolguide.tool.data.DiagnosticsLog
+import com.poolguide.tool.data.ShotHistory
 import com.poolguide.tool.geometry.BallGroupTag
 import com.poolguide.tool.geometry.CutAngleLabel
 import com.poolguide.tool.geometry.PocketDistanceLabel
@@ -325,6 +326,11 @@ class LineOverlayManager(
             removeTagWindows()
             return
         }
+        // Shot history (v1.0.17): record the shot the player just
+        // saw, once per change — a steady aim records once, not once
+        // per frame. EDIT mode returns before this point, so a frozen
+        // shot is never recorded as a live solve.
+        ShotHistory.entryFor(result)?.let { ShotHistory.recordIfChanged(it) }
         applyLines(drawn.lines)
         applyLabels(drawn.labels)
         applyTags(drawn.tags)

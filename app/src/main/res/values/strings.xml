@@ -58,6 +58,8 @@
     <string name="preview_title">Diagnostic preview (what the tool actually sees)</string>
     <string name="preview_switch">Show captured frame</string>
     <string name="show_all_shots">Show all shots (best highlighted, others faint)</string>
+    <string name="shot_history_title">Recent shots (what the tool solved)</string>
+    <string name="shot_history_empty">No shots solved yet — start capture and aim at a ball.</string>
     <string name="preview_ok">Capture looks fine — the table is visible.</string>
     <string name="preview_black">Capture is BLACK. The game is probably using FLAG_SECURE, so the tool cannot see the table. There is no legitimate bypass.</string>
 
