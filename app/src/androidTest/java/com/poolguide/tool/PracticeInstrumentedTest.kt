@@ -78,7 +78,9 @@ class PracticeInstrumentedTest {
             }
         }
     }
-}
+
+    @Test
+    fun practice_modesSolveBankComboAndKiss() {
         ActivityScenario.launch(PracticeActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
                 val state = activity.practiceView.state
