@@ -24,14 +24,15 @@ class PracticeStateTest {
         val s = state()
         val shot = s.solve()
         assertNotNull(shot)
-        // Cue at 25% width, target at 60%: the best pocket is the
-        // bottom-right corner, at about a 29 degree cut.
+        // Cue at 25% width, target at 60%: the top-right and
+        // bottom-right pockets tie at about a 35 degree cut, and the
+        // first-listed pocket wins the tie.
         assertEquals(200.0, s.cue.center.x, 0.0)
         assertEquals(424.0, s.target.center.x, 0.0)
         assertTrue(shot!!.cutAngleDegrees > 20.0)
         assertTrue(shot.cutAngleDegrees < 40.0)
         assertEquals(680.0, shot.targetLine.end.x, 0.0)
-        assertEquals(340.0, shot.targetLine.end.y, 0.0)
+        assertEquals(20.0, shot.targetLine.end.y, 0.0)
     }
 
     @Test
