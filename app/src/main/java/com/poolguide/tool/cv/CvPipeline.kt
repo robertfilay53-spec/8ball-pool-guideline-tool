@@ -303,10 +303,13 @@ class CvPipeline(
          * either: the last resort of all. A kiss never displaces
          * a combo. */
         val kiss: ShotSolver.KissSolution? = null,
-        /** Blocked-path flag (v1.0.19): the centre of the ball sitting
-         * on the shown shot's path, or null when the path is clear.
-         * The overlay draws a "Path blocked" label for it and the
-         * status line says so. Combo/kiss shots are not flagged. */
+        /** Blocked-path flag (v1.0.19, combo/kiss since v1.0.24):
+         * the centre of the ball sitting on the shown shot's
+         * path, or null when the path is clear. The overlay draws
+         * a "Path blocked" label for it and the status line says
+         * so. For a combo or kiss the flag covers the whole
+         * potting chain (see [PathBlock.blockedBy]); the second
+         * ball is never a blocker of its own shot. */
         val blockedBy: Vec2? = null
     )
 
@@ -422,10 +425,22 @@ class CvPipeline(
                     kick2 = fallback.solution, blockedBy = blocked
                 )
             }
-            is FallbackShot.Combo ->
-                SolveOutcome(null, null, emptyList(), "Combo shot to pocket", combo = fallback.solution)
-            is FallbackShot.Kiss ->
-                SolveOutcome(null, null, emptyList(), "Kiss shot to pocket", kiss = fallback.solution)
+            is FallbackShot.Combo -> {
+                val blocked = comboBlockedBy(fallback.solution, others, radius)
+                SolveOutcome(
+                    null, null, emptyList(),
+                    "Combo shot to pocket${blockedSuffix(blocked)}",
+                    combo = fallback.solution, blockedBy = blocked
+                )
+            }
+            is FallbackShot.Kiss -> {
+                val blocked = kissBlockedBy(fallback.solution, others, radius)
+                SolveOutcome(
+                    null, null, emptyList(),
+                    "Kiss shot to pocket${blockedSuffix(blocked)}",
+                    kiss = fallback.solution, blockedBy = blocked
+                )
+            }
             FallbackShot.None ->
                 SolveOutcome(null, null, emptyList(), "No shot found for this ball")
         }

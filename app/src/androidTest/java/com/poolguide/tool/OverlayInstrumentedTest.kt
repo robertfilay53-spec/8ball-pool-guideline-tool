@@ -861,6 +861,62 @@ class OverlayInstrumentedTest {
     }
 
     @Test
+    fun comboResult_blockedPath_showsPathBlockedLabel() {
+        val ctx = appContext()
+        assertTrue(
+            "overlay permission must be granted for this test",
+            Settings.canDrawOverlays(ctx)
+        )
+        val store = CalibrationStore(ctx).apply { guidesHidden = false }
+        val manager = LineOverlayManager(ctx, store)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+
+        // v1.0.24: a blocked combo gains the "Path blocked" label
+        // in the warning amber, between the per-leg angle labels
+        // and the pocket-distance label, the same position as
+        // the single-ball families. The blocker sits on the
+        // first leg's aim-line midpoint (53.5,57.0).
+        val result = comboResult().copy(blockedBy = Vec2(53.5, 57.0))
+        instrumentation.runOnMainSync { manager.update(result) }
+        assertEquals(7, manager.lineWindowCount)
+        assertEquals(5, manager.labelWindowCount)
+        assertEquals(
+            listOf("84.8°", "Thin cut 84.8°", "60.3°", "Path blocked", "16.0 bd"),
+            manager.labelTexts
+        )
+
+        instrumentation.runOnMainSync { manager.removeAll() }
+        assertEquals(0, manager.labelWindowCount)
+    }
+
+    @Test
+    fun kissResult_blockedPath_showsPathBlockedLabel() {
+        val ctx = appContext()
+        assertTrue(
+            "overlay permission must be granted for this test",
+            Settings.canDrawOverlays(ctx)
+        )
+        val store = CalibrationStore(ctx).apply { guidesHidden = false }
+        val manager = LineOverlayManager(ctx, store)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+
+        // v1.0.24: a blocked kiss gains the same label, in the
+        // same position. The blocker sits on the kiss leg's
+        // aim-line midpoint (56.3,57.9).
+        val result = kissResult().copy(blockedBy = Vec2(56.3, 57.9))
+        instrumentation.runOnMainSync { manager.update(result) }
+        assertEquals(7, manager.lineWindowCount)
+        assertEquals(4, manager.labelWindowCount)
+        assertEquals(
+            listOf("78.2°", "11.9°", "Path blocked", "33.8 bd"),
+            manager.labelTexts
+        )
+
+        instrumentation.runOnMainSync { manager.removeAll() }
+        assertEquals(0, manager.labelWindowCount)
+    }
+
+    @Test
     fun comboResult_hiddenWhenBankLinesDisabled() {
         val ctx = appContext()
         assertTrue(

@@ -298,12 +298,20 @@ screen. Nothing about the game is changed.**
     so the re-ranking is within each family, not between them.
     Combo and kiss shots are still flag-only: their fallbacks
     return a single best shot, not a ranked list, so there is
-    nothing to re-rank within the family. Combo and kiss shots
-    are not flagged either: their potting chain has two struck
-    balls and the second leg's path is only defined once the
-    first leg lands. Detection noise (~0.4 px on the synthetic
-    tables) can flip the verdict for a ball sitting within a
-    pixel or two of the one-diameter boundary, and EDIT mode
+    nothing to re-rank within the family. Since v1.0.24 the flag
+    covers COMBO and KISS shots too: a combo is flagged when
+    another ball sits on the cue's aim line, the first ball's
+    path to the second ball's ghost point, or the second ball's
+    path to the pocket; a kiss is flagged when another ball sits
+    on the cue's aim line to the kiss ghost, the deflected cue
+    path to the second ball's ghost point, or the second ball's
+    path to the pocket. The kissed ball's own departure is not
+    checked: it pots nothing and its departure is not on the
+    potting chain. The travelling balls are never counted as
+    blockers of their own shot (the second ball sits at the
+    start of its own target line). Detection noise (~0.4 px on
+    the synthetic tables) can flip the verdict for a ball sitting
+    within a pixel or two of the one-diameter boundary, and EDIT mode
     never shows the flag (the frozen shot is the player's manual
     aim, not the live detection the flag belongs to).
 

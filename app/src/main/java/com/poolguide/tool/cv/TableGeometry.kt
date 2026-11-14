@@ -130,7 +130,8 @@ data class DetectionResult(
      * on the shown shot's path, or null when the path is clear. Set
      * by the pipeline from the other detected balls; the overlay
      * draws a "Path blocked" label for it and the status line says
-     * so. Combo/kiss shots are not flagged (v1.0.19). */
+     * so. Since v1.0.24 combo and kiss shots are flagged too, on
+     * their own potting chain (see PathBlock). */
     val blockedBy: Vec2? = null,
     /** Table-lock gate (v1.0.3, Bloro lead): true once the detected
      * table rect has stayed within 2 px for 75 consecutive frames

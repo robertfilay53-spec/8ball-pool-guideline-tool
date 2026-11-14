@@ -183,6 +183,45 @@ fun solveFallback(
     return FallbackShot.None
 }
 
+/** Blocked-path check for a combo fallback shot (v1.0.24): the
+ * shown combo is flagged when another ball sits on its potting
+ * chain: the cue's aim line, the first ball's path to the
+ * second ball's ghost point, or the second ball's path to the
+ * pocket (see [PathBlock.blockedBy]). [others] is the
+ * pipeline's blocker list (every ball except the cue and the
+ * first ball, which travel the path); the second ball is
+ * removed here, because it sits at the start of its own target
+ * line and would flag its own path. Returns the first blocker
+ * in path order, or null when the chain is clear. */
+fun comboBlockedBy(
+    combo: ShotSolver.ComboSolution,
+    others: List<Vec2>,
+    ballRadiusPx: Double
+): Vec2? {
+    val second = combo.secondShot.targetLine.start
+    return PathBlock.blockedBy(combo, others.filter { it != second }, ballRadiusPx)
+}
+
+/** Blocked-path check for a kiss fallback shot (v1.0.24): the
+ * shown kiss is flagged when another ball sits on its potting
+ * chain: the cue's aim line to the kiss ghost, the deflected
+ * cue path from the ghost to the second ball's ghost point, or
+ * the second ball's path to the pocket (see
+ * [PathBlock.blockedBy]). The kissed ball's own departure is
+ * not on the potting chain and is not checked. [others] is the
+ * pipeline's blocker list (every ball except the cue and the
+ * kissed ball); the second ball is removed here, for the same
+ * self-flag reason as the combo. Returns the first blocker in
+ * path order, or null when the chain is clear. */
+fun kissBlockedBy(
+    kiss: ShotSolver.KissSolution,
+    others: List<Vec2>,
+    ballRadiusPx: Double
+): Vec2? {
+    val second = kiss.secondShot.targetLine.start
+    return PathBlock.blockedBy(kiss, others.filter { it != second }, ballRadiusPx)
+}
+
 /** The v1.0.7 corner guard, shared with PracticeState's bank
  * solve (same numbers, same comment): the contact must lie inside
  * its rail span, four ball radii clear of the corners, and not on
