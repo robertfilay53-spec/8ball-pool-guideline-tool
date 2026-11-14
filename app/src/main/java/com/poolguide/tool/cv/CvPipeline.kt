@@ -121,11 +121,13 @@ class CvPipeline(
         if (blackResult != null) return blackResult
 
         // Table: calibration override wins; else auto-detect on schedule.
-        // Ratio fallback (v1.0.4, Bloro lead): when detection finds no
-        // table at all, guess the rect from the frame size instead of
-        // reporting nothing. The guess is labelled in the result and
-        // the detector retries on schedule, so a real detection replaces
-        // it as soon as one succeeds.
+        // Ratio fallback (v1.0.4, Bloro lead; gated in v1.0.5): when
+        // detection finds no table, the ratio guess may ONLY continue a
+        // lock a real detection already earned, inside the
+        // FALLBACK_CONTINUATION_FRAMES window. On a fresh screen with
+        // no real lock it is never used — the pipeline reports no table
+        // and the overlay draws nothing. A guessed rect can never lock
+        // the table: the lock counts real detections only.
         val detected: TableRect?
         val tableFromFallback: Boolean
         // Local copy: the property is a mutable var, so a null check in
@@ -139,9 +141,16 @@ class CvPipeline(
             table == null || framesSinceTableCheck >= CvConfig.TABLE_REDETECT_EVERY_N_FRAMES -> {
                 framesSinceTableCheck = 0
                 val found = tableDetector.detect(hsv, gameProfile)
-                detected = found
-                    ?: RatioTableGeometry.fallbackTable(workingWidth, workingHeight)
-                tableFromFallback = found == null
+                if (found != null) {
+                    detected = found
+                    tableFromFallback = false
+                } else if (tableLock.canContinueFallback) {
+                    detected = RatioTableGeometry.fallbackTable(workingWidth, workingHeight)
+                    tableFromFallback = true
+                } else {
+                    detected = null
+                    tableFromFallback = false
+                }
             }
             else -> {
                 framesSinceTableCheck++
@@ -183,10 +192,12 @@ class CvPipeline(
         // Table-lock gate (v1.0.3): the overlay draws nothing until the
         // table rect has been stable for 5 s. A calibration override
         // counts as locked immediately — the user placed the corners.
+        // Fallback frames never count toward the lock (v1.0.5): they
+        // only ride out a real lock inside the continuation window.
         val locked = if (tableOverrideNormalized != null && table != null) {
             true
         } else {
-            tableLock.update(table)
+            tableLock.update(table, tableFromFallback)
         }
 
         return DetectionResult(
@@ -206,7 +217,11 @@ class CvPipeline(
             allShots = outcome.allShots,
             tableLocked = locked,
             tableFromFallback = tableFromFallback,
-            status = if (tableFromFallback) outcome.status + " (table: ratio fallback)"
+            // The ring on the control bubble shows this: 1.0 once
+            // locked (an override counts as locked immediately), the
+            // stability fraction while the table is settling.
+            tableLockProgress = if (locked) 1f else tableLock.lockProgress,
+            status = if (tableFromFallback) outcome.status + " (table: ratio fallback — continuing last lock)"
             else outcome.status
         )
     }
@@ -279,7 +294,7 @@ class CvPipeline(
         // reported when there is no table, so a missing table must say
         // so — checking the cue first would report "Cue ball not found"
         // for a frame with no table at all.
-        if (pockets.isEmpty()) return SolveOutcome(null, null, emptyList(), "Table not found")
+        if (pockets.isEmpty()) return SolveOutcome(null, null, emptyList(), "Table not found — guides hidden")
         if (cue == null) return SolveOutcome(null, null, emptyList(), "Cue ball not found")
         val target = pickTarget(cue, balls, guideline)
             ?: return SolveOutcome(null, null, emptyList(), "No target ball in line")

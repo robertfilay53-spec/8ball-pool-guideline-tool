@@ -131,6 +131,13 @@ object CvConfig {
      * 5 s) before the overlay trusts it. */
     const val TABLE_LOCK_FRAMES = 75
     const val TABLE_LOCK_TOLERANCE_PX = 2.0
+    /** Ratio-fallback continuation window (v1.0.5): once a real
+     * detection has locked the table, the fallback rect may stand in
+     * for it for at most this many frames (150 at the 15 FPS cap =
+     * 10 s) while detection is briefly lost. A guess can never lock a
+     * table on its own, and past this window the lock drops and the
+     * pipeline reports no table until a real detection re-locks. */
+    const val FALLBACK_CONTINUATION_FRAMES = 150
 
     // ---- Table (felt) detection ----
     /** Green felt HSV window (OpenCV hue 0-179). V floor 30 (was 50):

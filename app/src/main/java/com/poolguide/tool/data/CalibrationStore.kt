@@ -37,6 +37,22 @@ class CalibrationStore(context: Context) {
         get() = prefs.getBoolean(KEY_SHOW_ALL_SHOTS, true)
         set(value) = prefs.edit().putBoolean(KEY_SHOW_ALL_SHOTS, value).apply()
 
+    /** Control-bubble position in px (TOP|START gravity), or null when
+     * never dragged. Saved on drag release (Bloro: remember_pos). */
+    var bubbleX: Int?
+        get() = if (prefs.contains(KEY_BUBBLE_X)) prefs.getInt(KEY_BUBBLE_X, 0) else null
+        set(value) {
+            if (value == null) prefs.edit().remove(KEY_BUBBLE_X).apply()
+            else prefs.edit().putInt(KEY_BUBBLE_X, value).apply()
+        }
+
+    var bubbleY: Int?
+        get() = if (prefs.contains(KEY_BUBBLE_Y)) prefs.getInt(KEY_BUBBLE_Y, 0) else null
+        set(value) {
+            if (value == null) prefs.edit().remove(KEY_BUBBLE_Y).apply()
+            else prefs.edit().putInt(KEY_BUBBLE_Y, value).apply()
+        }
+
     /** Per-version calibration profile (aimcall lead): pocket inset,
      * pocket radius, ball radius at the working resolution. Stored as
      * "inset,radius,ballRadius" under game_profile_<version>; unknown
@@ -127,6 +143,8 @@ class CalibrationStore(context: Context) {
         const val KEY_GUIDES_HIDDEN = "guides_hidden"
         const val KEY_BANK_ENABLED = "bank_enabled"
         const val KEY_SHOW_ALL_SHOTS = "show_all_shots"
+        const val KEY_BUBBLE_X = "bubble_x"
+        const val KEY_BUBBLE_Y = "bubble_y"
         const val DEFAULT_GAME_VERSION = "56.35.0"
     }
 }
