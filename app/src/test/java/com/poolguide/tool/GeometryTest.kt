@@ -374,6 +374,131 @@ class ComboKissTest {
             )
         )
     }
+
+    // Practice-table layout for the bestCombo/bestKiss ranking
+    // tests (v1.0.13): the middle ball near the top-left corner
+    // pocket with the cue nearly touching it — verified against
+    // the real solver with kotlinc before the tests were written.
+    private val tablePockets = listOf(
+        Vec2(40.0, 20.0), Vec2(680.0, 20.0), Vec2(680.0, 340.0),
+        Vec2(40.0, 340.0), Vec2(360.0, 20.0), Vec2(360.0, 340.0)
+    )
+    private val rankCue = Vec2(55.0, 58.0)
+    private val rankMiddle = Vec2(60.0, 40.0)
+    private val rankR = 9.0
+
+    @Test
+    fun `bestCombo ranks by the second shot's cut angle`() {
+        // Two second balls both pot: (80, 30) cuts 75.8 degrees
+        // on the second leg, (80, 35) cuts 60.3 — the easier
+        // second leg must win, and its intermediate ghost is
+        // (62, 36) into the top-middle pocket.
+        val best = ShotSolver.bestCombo(
+            rankCue, rankMiddle,
+            listOf(Vec2(80.0, 30.0), Vec2(80.0, 35.0)),
+            tablePockets, rankR
+        )
+        assertNotNull(best)
+        best!!
+        assertEquals(60.29, best.secondShot.cutAngleDegrees, 0.1)
+        // The intermediate ghost is (62, 36) up to floating-point
+        // noise from the normalized direction — compare with a
+        // tolerance, not exact equality (exact assertEquals failed
+        // in CI).
+        assertEquals(62.0, best.intermediateGhost.x, 0.5)
+        assertEquals(36.0, best.intermediateGhost.y, 0.5)
+        assertEquals(Vec2(360.0, 20.0), best.secondShot.targetLine.end)
+        val onlyHard = ShotSolver.bestCombo(
+            rankCue, rankMiddle, listOf(Vec2(80.0, 30.0)),
+            tablePockets, rankR
+        )
+        assertNotNull(onlyHard)
+        assertEquals(75.82, onlyHard!!.secondShot.cutAngleDegrees, 0.1)
+    }
+
+    @Test
+    fun `bestCombo returns null when no second ball pots`() {
+        assertNull(
+            ShotSolver.bestCombo(
+                rankCue, rankMiddle, listOf(Vec2(300.0, 200.0)),
+                tablePockets, rankR
+            )
+        )
+        assertNull(
+            ShotSolver.bestCombo(
+                rankCue, rankMiddle, emptyList(), tablePockets, rankR
+            )
+        )
+    }
+
+    @Test
+    fun `bestKiss ranks by the second shot's cut angle`() {
+        // Two second balls both pot: (100, 60) cuts 11.9 degrees
+        // on the second leg, (210, 60) cuts 6.4 — the easier
+        // second leg must win, into the top-right pocket.
+        val best = ShotSolver.bestKiss(
+            rankCue, rankMiddle,
+            listOf(Vec2(100.0, 60.0), Vec2(210.0, 60.0)),
+            tablePockets, rankR
+        )
+        assertNotNull(best)
+        best!!
+        assertEquals(6.39, best.secondShot.cutAngleDegrees, 0.1)
+        assertEquals(Vec2(680.0, 20.0), best.secondShot.targetLine.end)
+        val onlyHard = ShotSolver.bestKiss(
+            rankCue, rankMiddle, listOf(Vec2(100.0, 60.0)),
+            tablePockets, rankR
+        )
+        assertNotNull(onlyHard)
+        assertEquals(11.86, onlyHard!!.secondShot.cutAngleDegrees, 0.1)
+    }
+
+    @Test
+    fun `bestKiss returns null when no second ball pots`() {
+        assertNull(
+            ShotSolver.bestKiss(
+                rankCue, rankMiddle, listOf(Vec2(300.0, 200.0)),
+                tablePockets, rankR
+            )
+        )
+        assertNull(
+            ShotSolver.bestKiss(
+                rankCue, rankMiddle, emptyList(), tablePockets, rankR
+            )
+        )
+    }
+
+    @Test
+    fun `bestCombo and bestKiss return null for overlapping balls`() {
+        // Second ball (65, 42) is 5.4 px from the middle ball —
+        // inside one diameter — so no combo or kiss exists.
+        assertNull(
+            ShotSolver.bestCombo(
+                rankCue, rankMiddle, listOf(Vec2(65.0, 42.0)),
+                tablePockets, rankR
+            )
+        )
+        assertNull(
+            ShotSolver.bestKiss(
+                rankCue, rankMiddle, listOf(Vec2(65.0, 42.0)),
+                tablePockets, rankR
+            )
+        )
+        // Cue overlapping the middle ball: nothing solves either.
+        val overlappingCue = Vec2(61.0, 41.0)
+        assertNull(
+            ShotSolver.bestCombo(
+                overlappingCue, rankMiddle, listOf(Vec2(80.0, 35.0)),
+                tablePockets, rankR
+            )
+        )
+        assertNull(
+            ShotSolver.bestKiss(
+                overlappingCue, rankMiddle, listOf(Vec2(100.0, 60.0)),
+                tablePockets, rankR
+            )
+        )
+    }
 }
 
 class TwoRailBankTest {

@@ -73,6 +73,79 @@ object ShotSolver {
         val intermediateGhost: Vec2
     )
 
+    /**
+     * Best combo across every second ball and every pocket: cue ->
+     * [first] -> [second] -> pocket, ranked by the SECOND shot's cut
+     * angle (easiest pot first) — the same ranking practice mode
+     * uses (PracticeState.solveCombo). The first leg's cut is not
+     * ranked: it is the setup, the pot is the second leg. Returns
+     * null when no second ball pots into any pocket.
+     *
+     * Live-overlay ranking (v1.0.13): a combo is the last resort
+     * before a kiss — the pipeline only tries it after direct,
+     * one-rail bank, one-rail kick, two-rail bank, and two-rail
+     * kick all fail (see CvPipeline.solveFor), so it never
+     * displaces any other shot. The full order, best first, is:
+     * direct > one-rail bank > one-rail kick > two-rail bank >
+     * two-rail kick > combo > kiss.
+     */
+    fun bestCombo(
+        cue: Vec2,
+        first: Vec2,
+        seconds: List<Vec2>,
+        pockets: List<Vec2>,
+        ballRadiusPx: Double
+    ): ComboSolution? {
+        var best: ComboSolution? = null
+        var bestSecondCut = Double.MAX_VALUE
+        for (second in seconds) {
+            for (pocket in pockets) {
+                val combo = solveCombo(cue, first, second, pocket, ballRadiusPx)
+                    ?: continue
+                if (combo.secondShot.cutAngleDegrees < bestSecondCut) {
+                    best = combo
+                    bestSecondCut = combo.secondShot.cutAngleDegrees
+                }
+            }
+        }
+        return best
+    }
+
+    /**
+     * Best kiss across every second ball and every pocket: cue kisses
+     * [kissed] thin and deflects onto [second] -> pocket, ranked by
+     * the SECOND shot's cut angle (easiest pot first) — the same
+     * ranking practice mode uses (PracticeState.solveKiss).
+     *
+     * Live-overlay ranking (v1.0.13): a kiss is the last resort of
+     * all — the pipeline only tries it after a combo fails too
+     * (see CvPipeline.solveFor), so it never displaces a combo or
+     * any other shot. The full order, best first, is: direct >
+     * one-rail bank > one-rail kick > two-rail bank > two-rail
+     * kick > combo > kiss.
+     */
+    fun bestKiss(
+        cue: Vec2,
+        kissed: Vec2,
+        seconds: List<Vec2>,
+        pockets: List<Vec2>,
+        ballRadiusPx: Double
+    ): KissSolution? {
+        var best: KissSolution? = null
+        var bestSecondCut = Double.MAX_VALUE
+        for (second in seconds) {
+            for (pocket in pockets) {
+                val kiss = solveKiss(cue, kissed, second, pocket, ballRadiusPx)
+                    ?: continue
+                if (kiss.secondShot.cutAngleDegrees < bestSecondCut) {
+                    best = kiss
+                    bestSecondCut = kiss.secondShot.cutAngleDegrees
+                }
+            }
+        }
+        return best
+    }
+
     /** Result of solving a kiss shot: the cue kisses off the first ball
      * (thin cut) and its deflection carries it into the second ball's
      * ghost point, potting the second ball. */

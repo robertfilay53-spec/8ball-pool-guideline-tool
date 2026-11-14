@@ -103,6 +103,16 @@ data class DetectionResult(
      * option — it never displaces any other shot in the live
      * overlay. */
     val kick2: ShotSolver.TwoRailKickSolution? = null,
+    /** Best combo (v1.0.13), set only when no direct shot, no
+     * one-rail bank, no one-rail kick, no two-rail bank, and no
+     * two-rail kick solves: the last resort before a kiss. The
+     * picked target is the first ball (the ball the cue strikes);
+     * every other ball is a candidate second ball. A combo never
+     * displaces any other shot in the live overlay. */
+    val combo: ShotSolver.ComboSolution? = null,
+    /** Best kiss (v1.0.13), set only when no combo solves either:
+     * the last resort of all. A kiss never displaces a combo. */
+    val kiss: ShotSolver.KissSolution? = null,
     /** Every reachable direct shot, best first (allShots ranking).
      * Empty when no direct shot exists. The overlay draws the non-best
      * entries faint when "Show all shots" is on; [shot] is always

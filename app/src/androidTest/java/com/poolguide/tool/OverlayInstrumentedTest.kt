@@ -401,6 +401,163 @@ class OverlayInstrumentedTest {
         assertEquals(0, manager.labelWindowCount)
     }
 
+    private fun comboResult(): DetectionResult {
+        // The verified combo layout (v1.0.13): cue (55, 58),
+        // middle (60, 40), second (80, 35) — first leg cuts
+        // 84.8 degrees (thin), second leg 60.3 degrees into the
+        // top-middle pocket.
+        val combo = ShotSolver.bestCombo(
+            Vec2(55.0, 58.0), Vec2(60.0, 40.0),
+            listOf(Vec2(80.0, 35.0)),
+            listOf(
+                Vec2(40.0, 20.0), Vec2(680.0, 20.0), Vec2(680.0, 340.0),
+                Vec2(40.0, 340.0), Vec2(360.0, 20.0), Vec2(360.0, 340.0)
+            ),
+            9.0
+        )!!
+        return DetectionResult(
+            frameIndex = 1,
+            workingWidth = 720,
+            workingHeight = 405,
+            scaleToScreenX = 1.0,
+            scaleToScreenY = 1.0,
+            isCaptureBlack = false,
+            table = null,
+            pockets = emptyList(),
+            balls = emptyList(),
+            cueBall = null,
+            guideline = listOf(
+                com.poolguide.tool.cv.GuidelineSegment(
+                    Segment(Vec2(55.0, 58.0), Vec2(60.0, 40.0)), 40
+                )
+            ),
+            shot = null,
+            bank = null,
+            allShots = emptyList(),
+            tableLocked = true,
+            status = "Combo shot to pocket",
+            combo = combo
+        )
+    }
+
+    private fun kissResult(): DetectionResult {
+        // The verified kiss layout (v1.0.13): cue (55, 58),
+        // middle (60, 40), second (100, 60) — kiss cut 78.2
+        // degrees, second leg 11.9 degrees into the top-right
+        // pocket. No combo exists here, so the kiss is the last
+        // resort.
+        val kiss = ShotSolver.bestKiss(
+            Vec2(55.0, 58.0), Vec2(60.0, 40.0),
+            listOf(Vec2(100.0, 60.0)),
+            listOf(
+                Vec2(40.0, 20.0), Vec2(680.0, 20.0), Vec2(680.0, 340.0),
+                Vec2(40.0, 340.0), Vec2(360.0, 20.0), Vec2(360.0, 340.0)
+            ),
+            9.0
+        )!!
+        return comboResult().copy(
+            kiss = kiss,
+            combo = null,
+            status = "Kiss shot to pocket"
+        )
+    }
+
+    @Test
+    fun comboResult_drawsBothLegsAndLabelsPerLeg() {
+        val ctx = appContext()
+        assertTrue(
+            "overlay permission must be granted for this test",
+            Settings.canDrawOverlays(ctx)
+        )
+        val store = CalibrationStore(ctx).apply { guidesHidden = false }
+        val manager = LineOverlayManager(ctx, store)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+
+        // A combo draws 6 leg segments (aim/target/deflection
+        // per leg) + 1 pocket ring, and one angle label per leg —
+        // the thin first leg adds its warning label.
+        val result = comboResult()
+        assertTrue(result.combo!!.firstShot.isThinCut)
+        instrumentation.runOnMainSync { manager.update(result) }
+        assertEquals(7, manager.lineWindowCount)
+        assertEquals(3, manager.labelWindowCount)
+        assertEquals(
+            listOf("84.8°", "Thin cut 84.8°", "60.3°"),
+            manager.labelTexts
+        )
+
+        // Hide toggle removes the lines and the labels together.
+        store.guidesHidden = true
+        instrumentation.runOnMainSync { manager.update(result) }
+        assertEquals(0, manager.lineWindowCount)
+        assertEquals(
+            "hide must remove the combo labels too",
+            0, manager.labelWindowCount
+        )
+
+        instrumentation.runOnMainSync { manager.removeAll() }
+        assertEquals(0, manager.labelWindowCount)
+    }
+
+    @Test
+    fun kissResult_drawsBothLegsAndLabelsPerLeg() {
+        val ctx = appContext()
+        assertTrue(
+            "overlay permission must be granted for this test",
+            Settings.canDrawOverlays(ctx)
+        )
+        val store = CalibrationStore(ctx).apply { guidesHidden = false }
+        val manager = LineOverlayManager(ctx, store)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+
+        // A kiss draws the same 6 + 1 windows, with one angle
+        // label per leg and no warning (neither leg is thin).
+        val result = kissResult()
+        assertTrue(!result.kiss!!.kissShot.isThinCut)
+        assertTrue(!result.kiss!!.secondShot.isThinCut)
+        instrumentation.runOnMainSync { manager.update(result) }
+        assertEquals(7, manager.lineWindowCount)
+        assertEquals(2, manager.labelWindowCount)
+        assertEquals(
+            listOf("78.2°", "11.9°"),
+            manager.labelTexts
+        )
+
+        instrumentation.runOnMainSync { manager.removeAll() }
+        assertEquals(0, manager.labelWindowCount)
+    }
+
+    @Test
+    fun comboResult_hiddenWhenBankLinesDisabled() {
+        val ctx = appContext()
+        assertTrue(
+            "overlay permission must be granted for this test",
+            Settings.canDrawOverlays(ctx)
+        )
+        val store = CalibrationStore(ctx).apply {
+            guidesHidden = false
+            bankLinesEnabled = false
+        }
+        val manager = LineOverlayManager(ctx, store)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+
+        // Combo and kiss are fallback lines, so the bank-lines
+        // switch gates them like the other fallback families.
+        val result = comboResult()
+        instrumentation.runOnMainSync { manager.update(result) }
+        assertEquals(0, manager.lineWindowCount)
+        assertEquals(0, manager.labelWindowCount)
+
+        // Re-enabling the switch brings the lines back.
+        store.bankLinesEnabled = true
+        instrumentation.runOnMainSync { manager.update(result) }
+        assertEquals(7, manager.lineWindowCount)
+        assertEquals(3, manager.labelWindowCount)
+
+        instrumentation.runOnMainSync { manager.removeAll() }
+        assertEquals(0, manager.labelWindowCount)
+    }
+
     @Test
     fun noShot_showsNoLabels() {
         val ctx = appContext()
