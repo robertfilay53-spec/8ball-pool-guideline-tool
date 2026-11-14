@@ -10,7 +10,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** Offline practice mode (v1.0.4, Cheto lead; combo/kiss modes v1.0.6). */
+/** Offline practice mode (v1.0.4, Cheto lead; combo/kiss modes v1.0.6; bank mode v1.0.7). */
 @RunWith(AndroidJUnit4::class)
 class PracticeInstrumentedTest {
 
@@ -45,11 +45,28 @@ class PracticeInstrumentedTest {
     }
 
     @Test
-    fun practice_modesSolveComboAndKiss() {
+    fun practice_modesSolveBankComboAndKiss() {
         ActivityScenario.launch(PracticeActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
                 val state = activity.practiceView.state
                 assertNotNull("practice state must exist", state)
+
+                // Bank via the mode button: two balls, bank solves off
+                // the bottom rail to the top-right pocket.
+                activity.findViewById<android.widget.Button>(R.id.btn_mode_bank)
+                    .performClick()
+                assertEquals(PracticeState.PracticeMode.BANK, state!!.mode)
+                assertEquals(2, state.balls().size)
+                val bank = state.solve()
+                assertTrue(
+                    "bank default must solve",
+                    bank is PracticeState.PracticeSolution.Bank
+                )
+                assertEquals(
+                    "bottom",
+                    (bank as PracticeState.PracticeSolution.Bank).railName
+                )
+                activity.practiceView.invalidate()
 
                 // Combo via the mode button: three balls, combo solves.
                 activity.findViewById<android.widget.Button>(R.id.btn_mode_combo)

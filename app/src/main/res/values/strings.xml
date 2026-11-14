@@ -32,11 +32,14 @@
     <string name="practice_no_shot">No shot — drag the balls into line.</string>
     <string name="practice_cut">Cut %.0f deg to pocket.</string>
     <string name="practice_cut_thin">Cut %.0f deg (thin cut — very low margin) to pocket.</string>
+    <string name="practice_bank">Bank off the %1$s rail — cut %2$.0f deg to pocket.</string>
+    <string name="practice_bank_thin">Bank off the %1$s rail — cut %2$.0f deg (thin cut — very low margin) to pocket.</string>
     <string name="practice_combo">Combo to pocket — first cut %.0f deg, second cut %.0f deg.</string>
     <string name="practice_combo_thin">Combo to pocket — first cut %.0f deg (thin cut — very low margin), second cut %.0f deg.</string>
     <string name="practice_kiss">Kiss to pocket — kiss cut %.0f deg, second cut %.0f deg.</string>
     <string name="practice_kiss_thin">Kiss to pocket — kiss cut %.0f deg (thin cut — very low margin), second cut %.0f deg.</string>
     <string name="practice_mode_direct">Direct</string>
+    <string name="practice_mode_bank">Bank</string>
     <string name="practice_mode_combo">Combo</string>
     <string name="practice_mode_kiss">Kiss</string>
     <string name="practice_reset">Reset layout</string>

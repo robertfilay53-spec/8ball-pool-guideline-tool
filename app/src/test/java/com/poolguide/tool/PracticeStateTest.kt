@@ -8,7 +8,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Offline practice-table state (v1.0.4, Cheto lead; combo/kiss modes v1.0.6). */
+/** Offline practice-table state (v1.0.4, Cheto lead; combo/kiss modes v1.0.6; bank mode v1.0.7). */
 class PracticeStateTest {
 
     private fun state() = PracticeState(
@@ -97,6 +97,79 @@ class PracticeStateTest {
         val s = state()
         s.moveBall(1, s.cue.center)
         assertNull(s.solve())
+    }
+
+    // ---- v1.0.7: bank mode ----
+
+    @Test
+    fun `bank default layout solves off the bottom rail to the top-right pocket`() {
+        val s = state()
+        s.setMode(PracticeState.PracticeMode.BANK)
+        val solution = s.solve()
+        assertTrue(solution is PracticeState.PracticeSolution.Bank)
+        val bank = solution as PracticeState.PracticeSolution.Bank
+        // Verified against the solver before the change: bottom rail,
+        // top-right pocket, cut 30.8 deg, contact (502.2, 340.0).
+        assertEquals("bottom", bank.railName)
+        assertTrue(bank.solution.direct.cutAngleDegrees > 29.0)
+        assertTrue(bank.solution.direct.cutAngleDegrees < 32.0)
+        assertEquals(502.2, bank.solution.railContact.x, 0.5)
+        assertEquals(340.0, bank.solution.railContact.y, 0.0)
+        assertEquals(680.0, bank.solution.bankPath.last().end.x, 0.0)
+        assertEquals(20.0, bank.solution.bankPath.last().end.y, 0.0)
+        // The bank path is target -> rail contact -> pocket, and the
+        // direct aim ends at the ghost point, not the mirrored pocket.
+        assertEquals(2, bank.solution.bankPath.size)
+        assertEquals(480.0, bank.solution.bankPath[0].start.x, 0.0)
+        assertEquals(300.0, bank.solution.bankPath[0].start.y, 0.0)
+        assertTrue(!bank.solution.direct.isThinCut)
+    }
+
+    @Test
+    fun `bank mode has two balls and the middle is not selectable`() {
+        val s = state()
+        s.setMode(PracticeState.PracticeMode.BANK)
+        assertEquals(2, s.balls().size)
+        assertEquals(120.0, s.cue.center.x, 0.0)
+        assertEquals(80.0, s.cue.center.y, 0.0)
+        assertEquals(480.0, s.target.center.x, 0.0)
+        assertEquals(300.0, s.target.center.y, 0.0)
+        s.select(2)
+        assertEquals(0, s.selectedId)
+        assertNull(s.ballAt(Vec2(320.0, 180.0)))
+    }
+
+    @Test
+    fun `bank overlapping balls have no shot`() {
+        val s = state()
+        s.setMode(PracticeState.PracticeMode.BANK)
+        s.moveBall(1, s.cue.center)
+        assertNull(s.solve())
+    }
+
+    @Test
+    fun `bank reset restores the bank layout`() {
+        val s = state()
+        s.setMode(PracticeState.PracticeMode.BANK)
+        s.moveBall(1, Vec2(500.0, 100.0))
+        s.select(1)
+        s.reset()
+        assertEquals(120.0, s.cue.center.x, 0.0)
+        assertEquals(480.0, s.target.center.x, 0.0)
+        assertEquals(300.0, s.target.center.y, 0.0)
+        assertEquals(0, s.selectedId)
+    }
+
+    @Test
+    fun `switching to bank and back restores the direct layout`() {
+        val s = state()
+        s.setMode(PracticeState.PracticeMode.BANK)
+        assertTrue(s.solve() is PracticeState.PracticeSolution.Bank)
+        s.setMode(PracticeState.PracticeMode.DIRECT)
+        assertEquals(2, s.balls().size)
+        assertEquals(200.0, s.cue.center.x, 0.0)
+        assertEquals(424.0, s.target.center.x, 0.0)
+        assertTrue(s.solve() is PracticeState.PracticeSolution.Direct)
     }
 
     // ---- v1.0.6: combo mode ----
