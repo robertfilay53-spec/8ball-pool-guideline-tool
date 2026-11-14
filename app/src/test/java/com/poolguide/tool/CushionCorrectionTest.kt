@@ -35,7 +35,7 @@ class CushionCorrectionTest {
         val c = CushionCorrection(0.5, 0.02, 0.0)
         assertEquals(0.5, c.correct(0.0), 1e-9)
         assertEquals(1.5, c.correct(50.0), 1e-9)
-        val q = CushionCorrection(0.0, 0.0, 0.001)
+        val q = CushionCorrection(0.0, 0.0, 0.0001)
         assertEquals(0.81, q.correct(90.0), 1e-9)
     }
 

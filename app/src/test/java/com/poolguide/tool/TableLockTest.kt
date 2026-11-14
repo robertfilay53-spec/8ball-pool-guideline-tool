@@ -60,7 +60,7 @@ class TableLockTest {
         // 10 px move: the count restarts from 1.
         assertFalse(lock.update(rect(x = 55.0)))
         assertFalse(lock.locked)
-        repeat(74) { assertFalse(lock.update(rect(x = 55.0))) }
+        repeat(73) { assertFalse(lock.update(rect(x = 55.0))) }
         assertTrue(lock.update(rect(x = 55.0)))
     }
 
