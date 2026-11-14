@@ -242,6 +242,20 @@ screen. Nothing about the game is changed.**
     throw, rail friction, or speed loss, and unproven on a real
     table until the phone test.
 
+19. **Table-size presets are starting points, not measurements.**
+    Since v1.0.18 the Calibrate screen has 7ft / 8ft / 9ft presets:
+    tapping one loads that size's values into the sliders and
+    handles, and "Save as preset" stores the current values under
+    the chosen size. The built-ins scale the 9ft default by the
+    table-length ratio (9/8 for 8ft, 9/7 for 7ft) on the
+    size-dependent values only — ball radius and pocket radius;
+    the brown felt window never scales, and the corners are the
+    same defaults for every size. Pocket cut, cloth, and camera
+    height all vary between real tables, so a preset never promises
+    a lock: always check the felt mask and the status line, and
+    tap Save. Applying a preset fills the screen only; nothing is
+    kept until Save.
+
 ## How it works
 
 ```
@@ -353,7 +367,8 @@ detection fails, which never happens on the 15 harness tables.
    - **Screen capture** (the system dialog — start the capture from the app,
      then switch to the game).
 4. First run: **Calibrate table** (drag the four red handles to the table
-   corners, or tap Re-detect). Calibration is stored per game version.
+   corners, or tap Re-detect; or load a 7ft / 8ft / 9ft preset for your
+   table size, then check the mask). Calibration is stored per game version.
 5. Play. The green line is your aim, the yellow line is the target ball's
    path, the white line is the cue ball's deflection, the red ring is the
    pocket. Every other reachable pocket is also drawn, faint grey — the
@@ -439,7 +454,8 @@ app/src/main/java/com/poolguide/tool/
   overlay/    LineView, LineOverlayManager, OverlayService, ManualAim
               (one small window per line; specialUse foreground svc;
               EDIT mode: frozen shot + draggable cue/ghost anchors)
-  data/       CalibrationStore, GameProfile (per-version calibration)
+  data/       CalibrationStore, GameProfile (per-version calibration),
+              TablePreset (7ft/8ft/9ft table-size presets)
   ui/         MainActivity, CalibrationActivity, PracticeState,
               PracticeView, PracticeActivity (offline practice table)
 app/src/main/assets/demo/  synthetic tables + black frame (tests + demo mode)
