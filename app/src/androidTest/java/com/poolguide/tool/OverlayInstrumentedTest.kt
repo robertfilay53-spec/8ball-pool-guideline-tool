@@ -270,7 +270,7 @@ class OverlayInstrumentedTest {
         // Live mode: the bank draws 6 windows (aim + 2 bank legs +
         // pocket ring + ghost ring + contact marker) and 2 labels
         // (angle + pocket distance).
-        instrumentation.runOnMainSync { manager.update(bankResult()) }
+        instrumentation.runOnMainSync { manager.update(bankEditResult()) }
         assertEquals(6, manager.lineWindowCount)
         assertEquals(2, manager.labelWindowCount)
         assertEquals(0, manager.handleWindowCount)
@@ -311,7 +311,7 @@ class OverlayInstrumentedTest {
         instrumentation.runOnMainSync { manager.toggleEditMode() }
         assertFalse(manager.isEditMode)
         assertEquals(0, manager.handleWindowCount)
-        instrumentation.runOnMainSync { manager.update(bankResult()) }
+        instrumentation.runOnMainSync { manager.update(bankEditResult()) }
         assertEquals(6, manager.lineWindowCount)
 
         instrumentation.runOnMainSync { manager.removeAll() }
@@ -422,7 +422,7 @@ class OverlayInstrumentedTest {
      * baseBank: ghost (313.48193812482685,211.92632987965453), cut 3.13 deg,
      * contact (73.91304347826087,0.0).
      * No direct shot exists, so the shown shot is the bank. */
-    private fun bankResult(): DetectionResult {
+    private fun bankEditResult(): DetectionResult {
         val bank = ShotSolver.solveBank(
             Vec2(450.0, 320.0), Vec2(300.0, 200.0), Vec2(40.0, 30.0),
             Rail(Vec2(0.0, 0.0), Vec2(0.0, 1.0)), 9.0
