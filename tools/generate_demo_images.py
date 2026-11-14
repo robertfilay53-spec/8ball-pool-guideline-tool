@@ -165,6 +165,29 @@ make_table(os.path.join(OUT, "demo_table_green_bank_rerank.png"),
            (46, 139, 87), (115, 174), (115, 107), (640, -450),
            [(105, 225, "yellow", False, 1)])
 
+# --- Green combo flag table (v1.0.24): the cue (98,156) sits
+# nearly touching the red 3-ball (107,124) near the top-left corner,
+# so no direct shot and no bank or kick solves (verified against
+# the real solver with the DETECTED pockets: all six direct cuts
+# null, zero one-rail and two-rail banks/kicks). The pipeline must
+# show the combo into the top-middle pocket (first cut ~84.4 deg,
+# second ~60.7 deg). The yellow 1-ball at (267,109) sits on the
+# combo's third leg (second ball -> pocket), so the combo must be
+# flagged blocked. The guideline is aimed with a fake pocket
+# (-13,550) so it points along the cue -> middle-ball line: the
+# combo's aim ghost lies behind the cue, so a real pocket would
+# point the line away from the ball the cue actually strikes. The
+# cluster is shifted 30 px down from the pure-geometry fixture so
+# every ball sits on the felt (the unshifted fixture straddles the
+# top rail and the detector skips balls outside the felt); shifts
+# of 35 px or more let a one-rail kick solve, so 30 px is the
+# window. Working-res positions: cue (55,88), middle (60,70),
+# second (80,65), blocker (150,61).
+make_table(os.path.join(OUT, "demo_table_green_combo_flag.png"),
+           (46, 139, 87), (98, 156), (107, 124), (-13, 550),
+           [(142, 116, "orange", True, 13),
+            (267, 109, "yellow", False, 1)])
+
 # --- Blue table: cue (300,500) -> red 3-ball (800,200). The aim line is
 # drawn toward the top-left pocket's ghost point, but that pocket is
 # geometrically unreachable (cut ~141 deg, the solver correctly rejects

@@ -236,6 +236,69 @@ class CvPipelineInstrumentedTest {
     }
 
     @Test
+    fun greenComboFlagTable_showsBlockedCombo() {
+        // v1.0.24: the cue sits nearly touching the red 3-ball near
+        // the top-left corner, so no direct shot and no bank or kick
+        // solves. The pipeline must show the combo into the
+        // top-middle pocket (first cut ~84.4 deg, second ~60.7 deg),
+        // flagged blocked by the yellow 1-ball on its third leg.
+        // The cluster is shifted 30 px down from the pure-geometry
+        // fixture so every ball sits on the felt; the layout was
+        // verified against the real solver with the detected
+        // pockets before the image was drawn (see
+        // tools/generate_demo_images.py).
+        val mat = loadDemoImage("demo_table_green_combo_flag.png")
+        val pipeline = CvPipeline(1280, 720)
+        var result = pipeline.process(mat)
+        repeat(5) { result = pipeline.process(mat) }
+
+        assertFalse("combo flag table must not be black", result.isCaptureBlack)
+        assertNotNull("table not found", result.table)
+        assertEquals("6 pockets expected", 6, result.pockets.size)
+        assertNotNull("cue ball not found", result.cueBall)
+        assertTrue("expected >= 4 balls, got ${result.balls.size}", result.balls.size >= 4)
+        // All four placed balls must be present: the cue near
+        // (55,88), the red target near (60,70), the orange second
+        // ball near (80,65), and the yellow blocker near (150,61).
+        for (expected in listOf(Vec2(55.0, 88.0), Vec2(60.0, 70.0), Vec2(80.0, 65.0), Vec2(150.0, 61.4))) {
+            assertTrue(
+                "expected a ball near $expected, got ${result.balls.map { it.center }}",
+                result.balls.any { it.center.distanceTo(expected) < 15.0 }
+            )
+        }
+        assertNull("no direct shot must solve: ${result.status}", result.shot)
+        assertNull("no bank must solve: ${result.status}", result.bank)
+        assertNull("no kick must solve: ${result.status}", result.kick)
+        assertNull("no two-rail bank must solve: ${result.status}", result.bank2)
+        assertNull("no two-rail kick must solve: ${result.status}", result.kick2)
+        assertNotNull("no combo solved: ${result.status}", result.combo)
+        val combo = result.combo!!
+        // The picked target is the red ball near (60,70).
+        val targetStart = combo.firstShot.targetLine.start
+        assertTrue(
+            "combo target is not the red ball: $targetStart",
+            targetStart.distanceTo(Vec2(60.0, 70.0)) < 15.0
+        )
+        assertTrue(
+            "first cut out of range: ${combo.firstShot.cutAngleDegrees}",
+            combo.firstShot.cutAngleDegrees in 75.0..90.0
+        )
+        assertTrue(
+            "second cut out of range: ${combo.secondShot.cutAngleDegrees}",
+            combo.secondShot.cutAngleDegrees in 50.0..70.0
+        )
+        // The shown combo is flagged: the blocker sits on its
+        // third leg (second ball -> pocket).
+        assertNotNull("combo must be flagged blocked", result.blockedBy)
+        assertTrue(
+            "blockedBy is not the yellow ball: ${result.blockedBy}",
+            result.blockedBy!!.distanceTo(Vec2(150.0, 61.4)) < 15.0
+        )
+        assertTrue("status must say combo shot: ${result.status}", result.status.contains("Combo shot"))
+        assertTrue("status must say the path is blocked: ${result.status}", result.status.contains("path blocked"))
+    }
+
+    @Test
     fun blueTable_detectsTableAndShot() {
         val mat = loadDemoImage("demo_table_blue.png")
         val pipeline = CvPipeline(1280, 720)

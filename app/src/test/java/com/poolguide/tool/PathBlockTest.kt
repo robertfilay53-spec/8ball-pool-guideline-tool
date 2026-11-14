@@ -575,4 +575,140 @@ class PathBlockTest {
     fun firstClearTwoRailKick_emptyKickListIsNull() {
         assertNull(PathBlock.firstClearTwoRailKick(emptyList(), emptyList(), r))
     }
+
+    // ---- combo / kiss blocked-path flag (v1.0.24) ----
+    //
+    // Layouts verified against the real solver with kotlinc before
+    // the tests were written (see probe24/Probe24.kt): cue (55,58),
+    // first ball (60,40), second ball (80,35): combo cuts 84.76 /
+    // 60.29 into the top-middle pocket; second ball (100,60): kiss
+    // cuts 78.19 / 11.86 into the top-right pocket. Blockers sit on
+    // solved-path midpoints, so they hold for whatever the best
+    // solution is.
+
+    private val chainCue = Vec2(55.0, 58.0)
+    private val chainFirst = Vec2(60.0, 40.0)
+    private val chainComboSecond = Vec2(80.0, 35.0)
+    private val chainKissSecond = Vec2(100.0, 60.0)
+
+    private fun combo24() = ShotSolver.bestCombo(
+        chainCue, chainFirst, listOf(chainComboSecond), pockets, r
+    )!!
+
+    private fun kiss24() = ShotSolver.bestKiss(
+        chainCue, chainFirst, listOf(chainKissSecond), pockets, r
+    )!!
+
+    @Test
+    fun combo_blockerOnEachLegIsReturned() {
+        val combo = combo24()
+        // Aim line mid (53.5,57.0), first-ball leg mid (61.0,38.0),
+        // second-ball target-line mid (220.0,27.5).
+        val legs = listOf(
+            combo.firstShot.aimLine,
+            combo.firstShot.targetLine,
+            combo.secondShot.targetLine
+        )
+        for (leg in legs) {
+            val mid = (leg.start + leg.end) * 0.5
+            assertEquals(mid, PathBlock.blockedBy(combo, listOf(mid), r))
+        }
+        assertNull(PathBlock.blockedBy(combo, emptyList(), r))
+    }
+
+    @Test
+    fun combo_grazeAtExactlyTwoRadiiIsClear() {
+        val combo = combo24()
+        // Second leg midpoint (220.0,27.5), offset perpendicular by
+        // exactly one diameter (18.0 px): a graze, not a hit.
+        val leg = combo.secondShot.targetLine
+        val mid = (leg.start + leg.end) * 0.5
+        val perp = leg.direction().perp()
+        val graze = Vec2(mid.x + perp.x * 2 * r, mid.y + perp.y * 2 * r)
+        assertNull(PathBlock.blockedBy(combo, listOf(graze), r))
+        val inside = Vec2(
+            mid.x + perp.x * (2 * r - 0.1), mid.y + perp.y * (2 * r - 0.1)
+        )
+        assertEquals(inside, PathBlock.blockedBy(combo, listOf(inside), r))
+    }
+
+    @Test
+    fun combo_firstBlockerAlongPathWins() {
+        val combo = combo24()
+        // A blocker on the aim line beats one on the second leg.
+        val mid0 = (combo.firstShot.aimLine.start + combo.firstShot.aimLine.end) * 0.5
+        val mid2 = (combo.secondShot.targetLine.start + combo.secondShot.targetLine.end) * 0.5
+        assertEquals(
+            mid0, PathBlock.blockedBy(combo, listOf(mid2, mid0), r)
+        )
+    }
+
+    @Test
+    fun combo_travellingBallsWouldFlagTheirOwnPath() {
+        // The first ball sits on the second leg's aim line and the
+        // second ball sits at the start of its own target line, so
+        // passing either as a blocker flags its own path. This is
+        // why the pipeline never passes them (see comboBlockedBy).
+        val combo = combo24()
+        assertEquals(
+            chainFirst, PathBlock.blockedBy(combo, listOf(chainFirst), r)
+        )
+        assertEquals(
+            chainComboSecond,
+            PathBlock.blockedBy(combo, listOf(chainComboSecond), r)
+        )
+    }
+
+    @Test
+    fun kiss_blockerOnEachLegIsReturned() {
+        val kiss = kiss24()
+        // Aim line mid (56.3,57.9), deflected-leg mid (69.8,59.5),
+        // second-ball target-line mid (390.0,40.0).
+        val legs = listOf(
+            kiss.kissShot.aimLine,
+            kiss.secondShot.aimLine,
+            kiss.secondShot.targetLine
+        )
+        for (leg in legs) {
+            val mid = (leg.start + leg.end) * 0.5
+            assertEquals(mid, PathBlock.blockedBy(kiss, listOf(mid), r))
+        }
+        assertNull(PathBlock.blockedBy(kiss, emptyList(), r))
+    }
+
+    @Test
+    fun kiss_ballOnKissedDepartureRayDoesNotBlock() {
+        // A ball 40 px past the kissed ball along its departure
+        // direction is not on the potting chain: the kissed ball's
+        // departure is not checked.
+        val kiss = kiss24()
+        val dir = kiss.kissShot.targetLine.direction()
+        val onRay = Vec2(
+            chainFirst.x + dir.x * 40.0, chainFirst.y + dir.y * 40.0
+        )
+        assertNull(PathBlock.blockedBy(kiss, listOf(onRay), r))
+    }
+
+    @Test
+    fun kiss_firstBlockerAlongPathWins() {
+        val kiss = kiss24()
+        // A blocker on the aim line beats one on the second leg.
+        val mid0 = (kiss.kissShot.aimLine.start + kiss.kissShot.aimLine.end) * 0.5
+        val mid2 = (kiss.secondShot.targetLine.start + kiss.secondShot.targetLine.end) * 0.5
+        assertEquals(
+            mid0, PathBlock.blockedBy(kiss, listOf(mid2, mid0), r)
+        )
+    }
+
+    @Test
+    fun kiss_secondBallWouldFlagItsOwnPath() {
+        // The second ball sits at the start of its own target line,
+        // so passing it as a blocker flags its own path. This is
+        // why the pipeline never passes it (see kissBlockedBy).
+        val kiss = kiss24()
+        assertEquals(
+            chainKissSecond,
+            PathBlock.blockedBy(kiss, listOf(chainKissSecond), r)
+        )
+    }
 }

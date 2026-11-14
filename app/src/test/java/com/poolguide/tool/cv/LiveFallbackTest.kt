@@ -393,4 +393,50 @@ class LiveFallbackTest {
             com.poolguide.tool.geometry.PathBlock.blockedBy(bank, blockers, r)
         )
     }
+
+    // ---- combo / kiss blocked-path flag (v1.0.24) ----
+    //
+    // The helpers take the pipeline's blocker list (every ball
+    // except the cue and the first/kissed ball) and remove the
+    // second ball, which sits at the start of its own target
+    // line and would flag its own path. Values pinned by the
+    // kotlinc probe (probe24/Probe24.kt).
+
+    @Test
+    fun `comboBlockedBy ignores the second ball and returns a real blocker`() {
+        val combo = ShotSolver.bestCombo(
+            cue, middle, listOf(Vec2(80.0, 35.0)), pockets, r
+        )!!
+        // The second ball is IN the pipeline's blocker list, and
+        // the chain is clear without it: no flag.
+        assertNull(comboBlockedBy(combo, listOf(Vec2(80.0, 35.0)), r))
+        // A blocker on the first ball's leg midpoint (61.0,38.0)
+        // is returned even with the second ball in the list.
+        val mid = (combo.firstShot.targetLine.start +
+            combo.firstShot.targetLine.end) * 0.5
+        assertVec(Vec2(61.0, 38.0), mid)
+        assertVec(
+            Vec2(61.0, 38.0),
+            comboBlockedBy(combo, listOf(Vec2(80.0, 35.0), mid), r)!!
+        )
+    }
+
+    @Test
+    fun `kissBlockedBy ignores the second ball and returns a real blocker`() {
+        val kiss = ShotSolver.bestKiss(
+            cue, middle, listOf(Vec2(100.0, 60.0)), pockets, r
+        )!!
+        // The second ball is IN the pipeline's blocker list, and
+        // the chain is clear without it: no flag.
+        assertNull(kissBlockedBy(kiss, listOf(Vec2(100.0, 60.0)), r))
+        // A blocker on the deflected leg's midpoint (69.8,59.5)
+        // is returned even with the second ball in the list.
+        val mid = (kiss.secondShot.aimLine.start +
+            kiss.secondShot.aimLine.end) * 0.5
+        assertVec(Vec2(69.8, 59.5), mid)
+        assertVec(
+            Vec2(69.8, 59.5),
+            kissBlockedBy(kiss, listOf(Vec2(100.0, 60.0), mid), r)!!
+        )
+    }
 }

@@ -50,6 +50,14 @@ import kotlin.math.sqrt
  * family, not between them. Combo and kiss shots are still
  * flag-only: their fallbacks return a single best shot, not a
  * ranked list, so there is nothing to re-rank within the family.
+ * v1.0.24 FLAGS combo and kiss shots too ([blockedBy] overloads
+ * below): the potting chain has two struck balls, so the check
+ * has its own definition per family: the cue's path, the
+ * first/kissed ball's path, and the potted ball's path, and
+ * the travelling balls are never passed as blockers, or they
+ * would flag their own path (the second ball sits at the start
+ * of its own target line; the first ball sits on the second
+ * leg's aim line).
  */
 object PathBlock {
 
@@ -260,5 +268,62 @@ object PathBlock {
         ballRadiusPx: Double
     ): Vec2? = firstBlockerOnPath(
         kick.kickPath + listOf(kick.direct.targetLine), blockers, ballRadiusPx
+    )
+
+    /** Combo (v1.0.24): three struck balls, three travelled legs.
+     * The cue travels the first leg's aim line (cue -> first
+     * ghost); the first ball travels its target line (first ball
+     * -> second ball's ghost point, the intermediate ghost. The
+     * first leg is solved against the intermediate ghost, so its
+     * target line IS the first ball's path); and the second ball
+     * travels the second leg's target line (second ball ->
+     * pocket). [blockers] must be every ball EXCEPT the cue, the
+     * first ball, and the second ball: the second ball sits at
+     * the start of its own target line and the first ball sits
+     * on the second leg's aim line, so passing either as a
+     * blocker would flag its own path. */
+    fun blockedBy(
+        combo: ShotSolver.ComboSolution,
+        blockers: List<Vec2>,
+        ballRadiusPx: Double
+    ): Vec2? = firstBlockerOnPath(
+        listOf(
+            combo.firstShot.aimLine,
+            combo.firstShot.targetLine,
+            combo.secondShot.targetLine
+        ),
+        blockers, ballRadiusPx
+    )
+
+    /** Kiss (v1.0.24): the cue travels the kiss leg's aim line
+     * (cue -> kiss ghost), then deflects along the second leg's
+     * aim line (kiss ghost -> second ball's ghost point), and
+     * the second ball travels the second leg's target line
+     * (second ball -> pocket). The kissed ball's own departure
+     * line is NOT checked: it pots nothing and its departure is
+     * not on the potting chain. The kissed ball only matters if
+     * it sits on one of the three checked legs, in which case it
+     * is flagged as a blocker like any other ball. [blockers]
+     * must be every ball EXCEPT the cue, the kissed ball, and
+     * the second ball: all three travel the chain, and a
+     * travelling ball passed as a blocker would flag its own
+     * path (the second ball sits at the start of its own target
+     * line). The kissed ball sits exactly one diameter from the
+     * kiss ghost, on the boundary of the deflected leg. The
+     * probe layout measures that distance at 18.000 px for
+     * r = 9.0, so including it would make the verdict depend on
+     * sub-pixel refinement noise; it is excluded, like the
+     * other travelling balls. */
+    fun blockedBy(
+        kiss: ShotSolver.KissSolution,
+        blockers: List<Vec2>,
+        ballRadiusPx: Double
+    ): Vec2? = firstBlockerOnPath(
+        listOf(
+            kiss.kissShot.aimLine,
+            kiss.secondShot.aimLine,
+            kiss.secondShot.targetLine
+        ),
+        blockers, ballRadiusPx
     )
 }

@@ -529,9 +529,10 @@ class LineOverlayManager(
      * shot's path is clear ([DetectionResult.blockedBy] is null).
      * [aimScreen] is the smoothed first segment (aim line) in
      * screen coordinates, the same segment the cut-angle label is
-     * built from. Combo/kiss shots are not flagged in v1.0.19, so
-     * this is only called from the direct, bank, kick, two-rail
-     * bank, and two-rail kick branches. */
+     * built from. Since v1.0.24 this is also called from the
+     * combo and kiss branches: their potting chains are flagged
+     * the same way as the single-ball families, with the label
+     * on the first leg's aim line. */
     private fun blockedLabel(
         aimScreen: Segment,
         result: DetectionResult
@@ -900,6 +901,7 @@ class LineOverlayManager(
             out += DrawLine(smoothed[5], DEFLECT_COLOR, LINE_WIDTH_PX)
             labels = labelsFor(combo.firstShot, smoothed[0], result, AIM_COLOR) +
                 labelsFor(combo.secondShot, smoothed[3], result, AIM_COLOR) +
+                listOfNotNull(blockedLabel(smoothed[0], result)) +
                 distanceLabel(
                     PocketDistanceLabel.pathSegments(combo),
                     combo.secondShot.targetLine.end, combo.secondShot.targetLine,
@@ -945,6 +947,7 @@ class LineOverlayManager(
             out += DrawLine(smoothed[5], DEFLECT_COLOR, LINE_WIDTH_PX)
             labels = labelsFor(kiss.kissShot, smoothed[0], result, AIM_COLOR) +
                 labelsFor(kiss.secondShot, smoothed[3], result, AIM_COLOR) +
+                listOfNotNull(blockedLabel(smoothed[0], result)) +
                 distanceLabel(
                     PocketDistanceLabel.pathSegments(kiss),
                     kiss.secondShot.targetLine.end, kiss.secondShot.targetLine,
