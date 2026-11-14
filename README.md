@@ -56,7 +56,13 @@ screen. Nothing about the game is changed.**
    recalibratable per game version from the Calibrate screen (sliders)
    if a real brown table needs it. The bank- and kick-shot cushion
    correction is fitted to the synthetic harness data, where it
-   measures zero; real-table cushion behaviour is unmeasured.
+   measures zero; real-table cushion behaviour is unmeasured. A
+   stripe ball's white number band can also read as a second white
+   ball: on the blue demo table it is detected at the stripe ball's
+   centre and picked as the cue (the first white ball wins), so the
+   solved shot there is phantom-cue -> real-cue, not the depicted
+   shot — found while testing v1.0.19, and cue identification is its
+   own later slice.
 5. **EDIT mode's anchor handles are touchable on purpose.** The Edit button
    on the floating bubble freezes the current shot and shows two draggable
    handles (cue + ghost) so you can correct a mis-detection by hand. Those
