@@ -32,6 +32,28 @@
 # v1.0.1 requires uninstall + reinstall once; the signature then stays
 # stable for all future releases. The keystore file itself is never
 # committed; the backup lives outside the repo.
+#
+# Emulator reliability fix (runs 43474188020-43496846803, 7 consecutive
+# infra failures, only 1 of ~9 attempts ever ran tests): the emulator-test
+# job was failing on the runner's emulator/adb layer, never on app code —
+# boot timeout, adb broken pipe, adb device offline (every 2s, never
+# recovers), ShellCommandUnresponsiveException during installDebug.
+# Changes (see workflow-android-EMULATOR-FIX-NOTES.md for the full story):
+#   - KVM udev-rule step added (the runner README requires it; it was
+#     missing from this workflow).
+#   - Target google_apis -> google_atd (Automated Test Device image:
+#     ~40% lighter, no Play services background load).
+#   - Emulator sized down for the 4-vCPU host: cores 4 -> 2,
+#     ram-size 6144M -> 3072M, heap-size 1024M -> 512M.
+#   - ADB_INSTALL_TIMEOUT raised to 10 min (default 4 min is too short
+#     for a loaded CI emulator).
+#   - The test driver moved to scripts/run-instrumented-tests.sh (the
+#     runner executes its `script:` input line by line, so multi-line
+#     shell logic cannot live inline): adb reset + boot wait, install
+#     with retries, overlay grant with retry, test run retried once
+#     ONLY on device-offline (infra), never on a real test failure.
+#   - Job timeout 45 -> 60 min (the one successful run took 41m39s).
+#   - logcat.txt uploaded on failure for diagnosis.
 name: Android CI
 
 on:
@@ -101,7 +123,11 @@ jobs:
   emulator-test:
     runs-on: ubuntu-latest
     needs: build
-    timeout-minutes: 45
+    timeout-minutes: 60
+    env:
+      # Default adb install timeout is 4 minutes — too short for a loaded
+      # CI emulator (ShellCommandUnresponsiveException during installDebug).
+      ADB_INSTALL_TIMEOUT: "10"
     steps:
       - uses: actions/checkout@v4
 
@@ -119,30 +145,38 @@ jobs:
           echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
           echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
 
+      - name: Enable KVM group perms
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v3
 
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
+      - name: Grant execute permission for gradlew and test script
+        run: chmod +x gradlew scripts/run-instrumented-tests.sh
 
       # The overlay tests add real TYPE_APPLICATION_OVERLAY windows, which
       # needs the permission granted first. The script runs line by line.
+      # All retry/health logic lives in scripts/run-instrumented-tests.sh
+      # (the runner executes its `script:` input line by line via
+      # `/usr/bin/sh -c <line>`, so multi-line shell cannot live inline).
       - name: Run instrumented tests on emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
-          target: google_apis
+          target: google_atd
           arch: x86_64
           profile: pixel_7_pro
-          cores: 4
-          ram-size: 6144M
-          heap-size: 1024M
+          cores: 2
+          ram-size: 3072M
+          heap-size: 512M
+          force-avd-creation: true
+          disable-animations: true
           emulator-boot-timeout: 1200
-          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
-          script: |
-            ./gradlew installDebug
-            adb shell appops set --uid com.poolguide.tool SYSTEM_ALERT_WINDOW allow
-            ./gradlew connectedDebugAndroidTest --stacktrace
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none -wipe-data
+          script: bash scripts/run-instrumented-tests.sh
 
       - name: Upload instrumented test reports
         if: always()
@@ -150,4 +184,12 @@ jobs:
         with:
           name: instrumented-test-reports
           path: app/build/reports/androidTests/
+          retention-days: 14
+
+      - name: Upload logcat on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emulator-logcat
+          path: logcat.txt
           retention-days: 14
