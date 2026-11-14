@@ -24,8 +24,10 @@ class ManualAimTest {
 
     // One-rail bank (v1.0.29): cue (450,320) -> target (300,200) ->
     // top rail -> pocket (40,30). Numbers pinned by kotlinc probe
-    // (~/workspace/probe29): ghost (313.5,211.9), cut 3.12979 deg,
-    // rail contact (73.9,0.0), mirrored pocket (40,-30).
+    // (~/workspace/probe29, Probe29b full precision; Vec2.toString
+    // rounds to 1 decimal, so pin raw doubles, never printed coords):
+    // ghost (313.48193812482685,211.92632987965453), cut 3.12979 deg,
+    // rail contact (73.91304347826087,0.0), mirrored pocket (40,-30).
     private val bankCue = Vec2(450.0, 320.0)
     private val bankPocket = Vec2(40.0, 30.0)
     private val topRail = Rail(Vec2(0.0, 0.0), Vec2(0.0, 1.0))
@@ -160,10 +162,10 @@ class ManualAimTest {
         assertFalse(aim.hasOverrides)
         val frozen = aim.currentBank()!!
         assertNull(aim.currentShot())
-        assertEquals(313.5, frozen.direct.ghostPoint.x, 0.0)
-        assertEquals(211.9, frozen.direct.ghostPoint.y, 0.0)
+        assertEquals(313.48193812482685, frozen.direct.ghostPoint.x, 1e-9)
+        assertEquals(211.92632987965453, frozen.direct.ghostPoint.y, 1e-9)
         assertEquals(3.1297902183293265, frozen.direct.cutAngleDegrees, 1e-9)
-        assertEquals(73.9, frozen.railContact.x, 0.0)
+        assertEquals(73.91304347826087, frozen.railContact.x, 1e-9)
         assertEquals(0.0, frozen.railContact.y, 0.0)
         assertEquals(2, frozen.bankPath.size)
         aim.exitEditMode()
@@ -185,9 +187,9 @@ class ManualAimTest {
         assertTrue(aim.hasOverrides)
         assertEquals(450.0, corrected.direct.aimLine.start.x, 0.0)
         assertEquals(340.0, corrected.direct.aimLine.start.y, 0.0)
-        assertEquals(313.5, corrected.direct.ghostPoint.x, 0.0)
-        assertEquals(211.9, corrected.direct.ghostPoint.y, 0.0)
-        assertEquals(73.9, corrected.railContact.x, 0.0)
+        assertEquals(313.48193812482685, corrected.direct.ghostPoint.x, 1e-9)
+        assertEquals(211.92632987965453, corrected.direct.ghostPoint.y, 1e-9)
+        assertEquals(73.91304347826087, corrected.railContact.x, 1e-9)
         assertEquals(1.6755688569763976, corrected.direct.cutAngleDegrees, 1e-9)
         val fresh = ShotSolver.solveBank(
             Vec2(450.0, 340.0), target, bankPocket, topRail, radius
@@ -203,17 +205,17 @@ class ManualAimTest {
         // point, the contact moves along the rail, the pocket stays.
         aim.dragAnchor(Anchor.GHOST, Vec2(2.0, 0.0), table())
         val corrected = aim.currentBank()!!
-        assertEquals(315.5, corrected.direct.ghostPoint.x, 0.0)
-        assertEquals(211.9, corrected.direct.ghostPoint.y, 0.0)
-        assertEquals(40.4, corrected.railContact.x, 0.0)
+        assertEquals(315.48193812482685, corrected.direct.ghostPoint.x, 1e-9)
+        assertEquals(211.92632987965453, corrected.direct.ghostPoint.y, 1e-9)
+        assertEquals(40.37380684500539, corrected.railContact.x, 1e-9)
         assertEquals(0.0, corrected.railContact.y, 0.0)
         assertEquals(1.1704390055855385, corrected.direct.cutAngleDegrees, 1e-9)
         assertEquals(40.0, corrected.bankPath[1].end.x, 0.0)
         assertEquals(30.0, corrected.bankPath[1].end.y, 0.0)
         assertEquals(2, corrected.bankPath.size)
         // Deflection starts at the dragged ghost point.
-        assertEquals(315.5, corrected.direct.deflectionLine.start.x, 0.0)
-        assertEquals(211.9, corrected.direct.deflectionLine.start.y, 0.0)
+        assertEquals(315.48193812482685, corrected.direct.deflectionLine.start.x, 1e-9)
+        assertEquals(211.92632987965453, corrected.direct.deflectionLine.start.y, 1e-9)
     }
 
     @Test
@@ -224,9 +226,9 @@ class ManualAimTest {
         // rail and the contact slides far along it.
         aim.dragAnchor(Anchor.GHOST, Vec2(0.0, 100.0), table())
         val corrected = aim.currentBank()!!
-        assertEquals(313.5, corrected.direct.ghostPoint.x, 0.0)
-        assertEquals(311.9, corrected.direct.ghostPoint.y, 0.0)
-        assertEquals(275.9, corrected.railContact.x, 0.0)
+        assertEquals(313.48193812482685, corrected.direct.ghostPoint.x, 1e-9)
+        assertEquals(311.92632987965453, corrected.direct.ghostPoint.y, 1e-9)
+        assertEquals(275.9092643539319, corrected.railContact.x, 1e-9)
         assertEquals(79.74707625370303, corrected.direct.cutAngleDegrees, 1e-9)
     }
 

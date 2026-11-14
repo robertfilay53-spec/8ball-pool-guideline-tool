@@ -283,8 +283,8 @@ class OverlayInstrumentedTest {
         assertEquals(6, manager.lineWindowCount)
         assertEquals(2, manager.handleWindowCount)
         val frozen = manager.editedBank!!
-        assertEquals(313.5, frozen.direct.ghostPoint.x, 0.0)
-        assertEquals(73.9, frozen.railContact.x, 0.0)
+        assertEquals(313.48193812482685, frozen.direct.ghostPoint.x, 1e-9)
+        assertEquals(73.91304347826087, frozen.railContact.x, 1e-9)
 
         // Drag the ghost anchor 2 px right (working coords): the aim
         // line follows, the contact moves along the rail, the pocket
@@ -293,8 +293,8 @@ class OverlayInstrumentedTest {
             manager.applyAnchorDrag(Anchor.GHOST, Vec2(2.0, 0.0))
         }
         val edited = manager.editedBank!!
-        assertEquals(315.5, edited.direct.ghostPoint.x, 0.0)
-        assertEquals(40.4, edited.railContact.x, 0.0)
+        assertEquals(315.48193812482685, edited.direct.ghostPoint.x, 1e-9)
+        assertEquals(40.37380684500539, edited.railContact.x, 1e-9)
         assertEquals(40.0, edited.bankPath[1].end.x, 0.0)
         assertEquals(30.0, edited.bankPath[1].end.y, 0.0)
         assertEquals(6, manager.lineWindowCount)
@@ -304,8 +304,8 @@ class OverlayInstrumentedTest {
         instrumentation.runOnMainSync {
             manager.applyAnchorDrag(Anchor.GHOST, Vec2(10.0, 0.0))
         }
-        assertEquals(315.5, manager.editedBank!!.direct.ghostPoint.x, 0.0)
-        assertEquals(40.4, manager.editedBank!!.railContact.x, 0.0)
+        assertEquals(315.48193812482685, manager.editedBank!!.direct.ghostPoint.x, 1e-9)
+        assertEquals(40.37380684500539, manager.editedBank!!.railContact.x, 1e-9)
 
         // Leaving edit mode resumes live detection (6 windows again).
         instrumentation.runOnMainSync { manager.toggleEditMode() }
@@ -419,7 +419,8 @@ class OverlayInstrumentedTest {
 
     /** One-rail bank result (v1.0.29): cue (450,320) -> target (300,200)
      * -> top rail -> pocket (40,30). Same numbers as ManualAimTest's
-     * baseBank: ghost (313.5,211.9), cut 3.13 deg, contact (73.9,0.0).
+     * baseBank: ghost (313.48193812482685,211.92632987965453), cut 3.13 deg,
+     * contact (73.91304347826087,0.0).
      * No direct shot exists, so the shown shot is the bank. */
     private fun bankResult(): DetectionResult {
         val bank = ShotSolver.solveBank(
