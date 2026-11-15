@@ -180,9 +180,6 @@ class CvPipeline(
                 tableDetector.feltHsvMean, pocketRadiusPx
             )
         }
-        // v1.0.20: cue by group, not by colour — see CuePicker.
-        val cue = CuePicker.pickCue(balls)
-
         // Guideline: detect every 3rd frame inside the table ROI; between
         // detection frames the last tracked segments are reused.
         val guideline: List<GuidelineSegment> =
@@ -191,6 +188,11 @@ class CvPipeline(
             } else {
                 lastGuideline
             }
+
+        // v1.0.20: cue by group, not by colour. v1.0.40: the ray
+        // fallback needs the guideline, so the pick runs after it is
+        // detected (or reused) — see CuePicker.
+        val cue = CuePicker.pickCue(balls, guideline)
 
         val pockets = table?.pockets(gameProfile) ?: emptyList()
         val outcome = solveFor(cue, balls, pockets, guideline)
