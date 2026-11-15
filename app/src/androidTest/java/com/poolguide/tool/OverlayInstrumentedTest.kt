@@ -332,6 +332,86 @@ class OverlayInstrumentedTest {
     }
 
     @Test
+    fun editMode_kick_freezesKickShowsLegsAndHandles() {
+        val ctx = appContext()
+        assertTrue(
+            "overlay permission must be granted for this test",
+            Settings.canDrawOverlays(ctx)
+        )
+        val store = CalibrationStore(ctx).apply {
+            guidesHidden = false
+            bankLinesEnabled = true
+        }
+        val manager = LineOverlayManager(ctx, store)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+
+        // Live mode: the kick draws 7 windows (aim + kicked leg +
+        // target + deflection + pocket ring + ghost ring + contact
+        // marker) and 2 labels (angle + pocket distance).
+        instrumentation.runOnMainSync { manager.update(kickEditResult()) }
+        assertEquals(7, manager.lineWindowCount)
+        assertEquals(2, manager.labelWindowCount)
+        assertEquals(0, manager.handleWindowCount)
+        assertFalse(manager.isEditMode)
+
+        // Enter edit mode: the frozen kick draws the same 7 windows
+        // (not a collapsed direct shot) + 2 handles.
+        instrumentation.runOnMainSync { manager.toggleEditMode() }
+        assertTrue(manager.isEditMode)
+        assertEquals(7, manager.lineWindowCount)
+        assertEquals(2, manager.handleWindowCount)
+        val frozen = manager.editedKick!!
+        assertEquals(282.0, frozen.direct.ghostPoint.x, 1e-9)
+        assertEquals(200.0, frozen.direct.ghostPoint.y, 1e-9)
+        assertEquals(153.3448275862069, frozen.railContact.x, 1e-9)
+        assertEquals(405.0, frozen.railContact.y, 0.0)
+
+        // Drag the cue anchor 20 px down (working coords): the kick
+        // is re-solved from the corrected cue; the ghost stays where
+        // the solver puts it, the contact slides along the rail.
+        instrumentation.runOnMainSync {
+            manager.applyAnchorDrag(Anchor.CUE, Vec2(0.0, 20.0))
+        }
+        val cueEdited = manager.editedKick!!
+        assertEquals(100.0, cueEdited.direct.aimLine.start.x, 0.0)
+        assertEquals(340.0, cueEdited.direct.aimLine.start.y, 0.0)
+        assertEquals(282.0, cueEdited.direct.ghostPoint.x, 1e-9)
+        assertEquals(143.8148148148148, cueEdited.railContact.x, 1e-9)
+
+        // Drag the ghost anchor 2 px right (working coords): the aim
+        // line follows, the contact moves along the rail, the pocket
+        // stays the same.
+        instrumentation.runOnMainSync {
+            manager.applyAnchorDrag(Anchor.GHOST, Vec2(2.0, 0.0))
+        }
+        assertTrue("ghost drag must register an override", manager.editHasOverrides)
+        assertTrue("still in edit mode after the drag", manager.isEditMode)
+        val edited = manager.editedKick!!
+        assertEquals(284.0, edited.direct.ghostPoint.x, 1e-9)
+        assertEquals(153.9310344827586, edited.railContact.x, 1e-9)
+        assertEquals(680.0, edited.direct.targetLine.end.x, 0.0)
+        assertEquals(200.0, edited.direct.targetLine.end.y, 0.0)
+        assertEquals(7, manager.lineWindowCount)
+
+        // Drag the ghost 273 px further left: the cut would pass
+        // 90 deg, so the last good kick is kept.
+        instrumentation.runOnMainSync {
+            manager.applyAnchorDrag(Anchor.GHOST, Vec2(-273.0, 0.0))
+        }
+        assertEquals(284.0, manager.editedKick!!.direct.ghostPoint.x, 1e-9)
+        assertEquals(153.9310344827586, manager.editedKick!!.railContact.x, 1e-9)
+
+        // Leaving edit mode resumes live detection (7 windows again).
+        instrumentation.runOnMainSync { manager.toggleEditMode() }
+        assertFalse(manager.isEditMode)
+        assertEquals(0, manager.handleWindowCount)
+        instrumentation.runOnMainSync { manager.update(kickEditResult()) }
+        assertEquals(7, manager.lineWindowCount)
+
+        instrumentation.runOnMainSync { manager.removeAll() }
+    }
+
+    @Test
     fun lockRing_showsTableLockProgress() {
         val ctx = appContext()
         assertTrue(
@@ -465,6 +545,44 @@ class OverlayInstrumentedTest {
             allShots = emptyList(),
             tableLocked = true,
             status = "Bank shot (one rail) to pocket"
+        )
+    }
+
+    /** Kick EDIT fixture (v1.0.30): cue (100,320) -> target (300,200)
+     * -> pocket (680,200), off the bottom rail. Same geometry as the
+     * ManualAimTest kick fixture; numbers pinned by kotlinc probe
+     * (~/workspace/probe30): ghost (282.0,200.0), cut
+     * 57.88818512576571 deg, contact (153.3448275862069,405.0). */
+    private fun kickEditResult(): DetectionResult {
+        val kick = ShotSolver.solveKick(
+            Vec2(100.0, 320.0), Vec2(300.0, 200.0), Vec2(680.0, 200.0),
+            Rail(Vec2(0.0, 405.0), Vec2(0.0, -1.0)), 9.0
+        )!!
+        return DetectionResult(
+            frameIndex = 1,
+            workingWidth = 720,
+            workingHeight = 405,
+            scaleToScreenX = 1.0,
+            scaleToScreenY = 1.0,
+            isCaptureBlack = false,
+            table = TableRect(
+                Vec2(0.0, 0.0), Vec2(720.0, 0.0),
+                Vec2(720.0, 405.0), Vec2(0.0, 405.0)
+            ),
+            pockets = emptyList(),
+            balls = emptyList(),
+            cueBall = null,
+            guideline = listOf(
+                com.poolguide.tool.cv.GuidelineSegment(
+                    Segment(Vec2(100.0, 320.0), Vec2(300.0, 200.0)), 40
+                )
+            ),
+            shot = null,
+            bank = null,
+            kick = kick,
+            allShots = emptyList(),
+            tableLocked = true,
+            status = "Kick shot (one rail) to pocket"
         )
     }
 
