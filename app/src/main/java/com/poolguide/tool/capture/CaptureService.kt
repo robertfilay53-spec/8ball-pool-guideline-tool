@@ -34,6 +34,7 @@ import org.opencv.android.Utils
 import org.opencv.core.CvType
 import org.opencv.core.Mat
 import org.opencv.imgproc.Imgproc
+import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -130,21 +131,42 @@ class CaptureService : Service() {
     }
 
     private fun startCapture(intent: Intent) {
-        store = CalibrationStore(this)
-        // Diagnostics session (v1.0.6): a second start while a session
-        // is active is a no-op, so the overlay service starting at
-        // the same time cannot wipe these first events.
-        DiagnosticsLog.start()
-
+        // v1.0.35: attach the on-disk diagnostics sink BEFORE the
+        // session starts, so every breadcrumb from this launch is
+        // mirrored to disk the moment it is recorded and survives a
+        // hard crash (see DiagnosticsLog).
+        DiagnosticsLog.attachFile(File(filesDir, DiagnosticsLog.PREVIOUS_SESSION_FILE))
         // 1. Notification + startForeground FIRST (5s timeout on Android 14+).
         // Live capture always holds a real MediaProjection token, so the
         // mediaProjection type is correct here (and only here).
-        createNotificationChannel()
-        val notif = buildNotification("Starting capture…")
-        startForeground(
-            NOTIF_ID, notif,
-            android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-        )
+        //
+        // v1.0.35: this prelude used to run outside any try/catch, so
+        // a throw in startForeground (the mediaProjection type is
+        // rejected on some streamed devices) killed the process with
+        // no breadcrumb at all, the exact shape of the UptoPlay
+        // crash, where the v1.0.31 breadcrumb never appeared because
+        // the throw happened before the wrapped section. The steps
+        // carry their own names, MainActivity's v1.0.31 pattern.
+        var step = "CalibrationStore"
+        try {
+            store = CalibrationStore(this)
+            // Diagnostics session (v1.0.6): a second start while a session
+            // is active is a no-op, so the overlay service starting at
+            // the same time cannot wipe these first events.
+            DiagnosticsLog.start()
+            step = "createNotificationChannel"
+            createNotificationChannel()
+            step = "buildNotification"
+            val notif = buildNotification("Starting capture…")
+            step = "startForeground"
+            startForeground(
+                NOTIF_ID, notif,
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            )
+        } catch (e: Exception) {
+            failCaptureStart(step, e)
+            return
+        }
 
         // 2. Heavy work only AFTER startForeground. v1.0.31: the whole
         // post-confirm stretch is wrapped. On cloud emulators the
@@ -208,7 +230,12 @@ class CaptureService : Service() {
      * exception type and message), and stop gracefully instead of
      * crashing. The breadcrumb survives in the in-memory log, so the
      * user can export diagnostics afterwards and the next
-     * cloud-emulator run can say exactly what threw. */
+     * cloud-emulator run can say exactly what threw. v1.0.35: the
+     * breadcrumb is also mirrored to disk the moment it is recorded
+     * (DiagnosticsLog), so it survives even a hard crash. This
+     * function itself must never throw: the notification machinery
+     * may be the thing that threw (buildNotification runs inside
+     * updateNotification), so both calls are guarded. */
     private fun failCaptureStart(step: String, e: Exception? = null) {
         val detail = if (e == null) {
             step
@@ -217,8 +244,14 @@ class CaptureService : Service() {
         }
         Log.e(TAG, "capture start failed at $detail", e)
         DiagnosticsLog.record(DiagnosticsLog.Kind.CAPTURE_START_FAILED, detail)
-        updateNotification("Capture failed to start, see diagnostics")
-        stopSelf()
+        try {
+            updateNotification("Capture failed to start, see diagnostics")
+        } catch (_: Exception) {
+        }
+        try {
+            stopSelf()
+        } catch (_: Exception) {
+        }
     }
 
     private fun startMediaProjection(resultCode: Int, resultData: Intent) {
@@ -270,7 +303,15 @@ class CaptureService : Service() {
         cvThread = HandlerThread("poolguide-cv").apply { start() }
         cvHandler = Handler(cvThread!!.looper)
         imageReader!!.setOnImageAvailableListener({ reader ->
-            val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
+            // v1.0.35: acquireLatestImage throws when the reader was
+            // closed concurrently (stopCapture mid-frame). An uncaught
+            // throw on this handler thread would kill the process, so
+            // a failed acquire just drops the frame.
+            val image = try {
+                reader.acquireLatestImage()
+            } catch (_: Exception) {
+                null
+            } ?: return@setOnImageAvailableListener
             try {
                 // 15 FPS cap, checked BEFORE the copy: a dropped frame
                 // costs nothing but the acquire/close.
@@ -390,8 +431,15 @@ class CaptureService : Service() {
     }
 
     private fun updateScreenSize() {
-        val metrics = currentDisplayMetrics()
-        pipeline?.setScreenSize(metrics.widthPixels, metrics.heightPixels)
+        // v1.0.35: a display-change callback must never crash the main
+        // thread (the emulator window resizes constantly on streamed
+        // devices, so this fires often there).
+        try {
+            val metrics = currentDisplayMetrics()
+            pipeline?.setScreenSize(metrics.widthPixels, metrics.heightPixels)
+        } catch (e: Exception) {
+            Log.e(TAG, "updateScreenSize failed", e)
+        }
     }
 
     private fun currentDisplayMetrics(): DisplayMetrics {
@@ -421,11 +469,17 @@ class CaptureService : Service() {
         } catch (_: Exception) {
         }
         // The overlay lives in its own service: stop it too, so the
-        // lines never outlive the capture.
+        // lines never outlive the capture. v1.0.35: starting a service
+        // can throw while the app is being torn down; stopCapture runs
+        // from onDestroy, so it must never throw.
         val stopOverlay = Intent(this, OverlayService::class.java).apply {
             action = OverlayService.ACTION_STOP
         }
-        startService(stopOverlay)
+        try {
+            startService(stopOverlay)
+        } catch (e: Exception) {
+            Log.e(TAG, "failed to stop overlay service", e)
+        }
         stopForeground(STOP_FOREGROUND_REMOVE)
     }
 

@@ -28,6 +28,7 @@ import com.poolguide.tool.data.CalibrationStore
 import com.poolguide.tool.data.DiagnosticsLog
 import com.poolguide.tool.data.ShotHistory
 import com.poolguide.tool.overlay.OverlayService
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -149,6 +150,12 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         store = CalibrationStore(this)
+        // v1.0.35: attach the on-disk diagnostics sink first, so a
+        // breadcrumb from a crashed session is read back on the next
+        // launch and carried into the export (see DiagnosticsLog).
+        // Attaching here also covers the failServiceStart path, which
+        // records before any service has started.
+        DiagnosticsLog.attachFile(File(filesDir, DiagnosticsLog.PREVIOUS_SESSION_FILE))
 
         statusText = findViewById(R.id.status_text)
         previewImage = findViewById(R.id.preview_image)
@@ -297,7 +304,16 @@ class MainActivity : AppCompatActivity() {
         val intent = Intent(this, OverlayService::class.java).apply {
             action = OverlayService.ACTION_DEMO
         }
-        startForegroundService(intent)
+        // v1.0.35: same gap class as the projection path (v1.0.31):
+        // starting a foreground service can throw on a streamed
+        // device. Name the service, leave a breadcrumb, fail
+        // gracefully instead of crashing.
+        try {
+            startForegroundService(intent)
+        } catch (e: Exception) {
+            failServiceStart("OverlayService", e)
+            return
+        }
         setStatus(getString(R.string.status_demo))
     }
 
@@ -317,9 +333,12 @@ class MainActivity : AppCompatActivity() {
 
     /** Diagnostics export (v1.0.6): build the report from the in-memory
      * ring buffer and let the user pick the destination file. With no
-     * session yet (no events at all) there is nothing to export. */
+     * session yet (no events at all) there is nothing to export.
+     * v1.0.35: a previous session that ended without a clean stop also
+     * counts. That is exactly the crashed run the user is trying to
+     * export after relaunching, when the in-memory log is empty. */
     private fun exportDiagnostics() {
-        if (DiagnosticsLog.eventCount() == 0) {
+        if (DiagnosticsLog.eventCount() == 0 && DiagnosticsLog.previousSessionEvents().isEmpty()) {
             Toast.makeText(this, R.string.diagnostics_empty, Toast.LENGTH_SHORT).show()
             return
         }
