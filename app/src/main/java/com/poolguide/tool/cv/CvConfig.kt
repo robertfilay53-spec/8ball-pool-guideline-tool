@@ -91,8 +91,13 @@ object CvConfig {
     const val HOUGH_CIRCLES_MAX_RADIUS = 18
     /** Run HoughCircles every Nth frame (HSV contours run every frame). */
     const val HOUGH_CIRCLES_EVERY_N_FRAMES = 3
-    /** Run the guideline Hough every Nth frame. */
-    const val GUIDELINE_EVERY_N_FRAMES = 2
+    /** Run the guideline Hough every Nth frame. v1.0.38: 2 to 3 — the
+     * tracker already fades a lost segment over 5 frames (alpha 40,
+     * fade 8), so a 3-frame gap is covered; the harness (15 baseline
+     * + 8 adversarial tables) is byte-identical on every accuracy
+     * field at cadence 3, and the baseline mean frame time drops
+     * ~3.5 ms (15.9 to 12.3 ms over 3 runs each, noisy VM). */
+    const val GUIDELINE_EVERY_N_FRAMES = 3
     /** Re-detect the table every Nth frame (or immediately when lost). */
     const val TABLE_REDETECT_EVERY_N_FRAMES = 30
     /** Median blur kernel before HoughCircles. 0 = OFF (v1.0.3): the
