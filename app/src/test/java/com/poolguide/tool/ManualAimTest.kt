@@ -1,6 +1,7 @@
 package com.poolguide.tool.overlay
 
 import com.poolguide.tool.cv.TableRect
+import com.poolguide.tool.geometry.Rail
 import com.poolguide.tool.geometry.ShotSolver
 import com.poolguide.tool.geometry.Vec2
 import org.junit.Assert.assertEquals
@@ -20,6 +21,19 @@ class ManualAimTest {
 
     private fun baseShot() =
         ShotSolver.solveShot(cue, target, pocket, radius)!!
+
+    // One-rail bank (v1.0.29): cue (450,320) -> target (300,200) ->
+    // top rail -> pocket (40,30). Numbers pinned by kotlinc probe
+    // (~/workspace/probe29, Probe29b full precision; Vec2.toString
+    // rounds to 1 decimal, so pin raw doubles, never printed coords):
+    // ghost (313.48193812482685,211.92632987965453), cut 3.12979 deg,
+    // rail contact (73.91304347826087,0.0), mirrored pocket (40,-30).
+    private val bankCue = Vec2(450.0, 320.0)
+    private val bankPocket = Vec2(40.0, 30.0)
+    private val topRail = Rail(Vec2(0.0, 0.0), Vec2(0.0, 1.0))
+
+    private fun baseBank() =
+        ShotSolver.solveBank(bankCue, target, bankPocket, topRail, radius)!!
 
     private fun table() = TableRect(
         Vec2(0.0, 0.0), Vec2(720.0, 0.0),
@@ -105,6 +119,25 @@ class ManualAimTest {
     }
 
     @Test
+    fun `rejected ghost drag after an accepted one keeps the last good shot`() {
+        val aim = ManualAim()
+        aim.enterEditMode(baseShot(), radius)
+        // First drag accepted: ghost moves down 30 px.
+        aim.dragAnchor(Anchor.GHOST, Vec2(0.0, 30.0), table())
+        val edited = aim.currentShot()!!
+        assertEquals(282.0, edited.ghostPoint.x, 0.0)
+        assertEquals(230.0, edited.ghostPoint.y, 0.0)
+        // Second drag rejected (cut > 90 deg): the drag is not
+        // committed, so the last good shot stays instead of snapping
+        // back to the frozen base.
+        aim.dragAnchor(Anchor.GHOST, Vec2(-300.0, 0.0), table())
+        val kept = aim.currentShot()!!
+        assertEquals(282.0, kept.ghostPoint.x, 0.0)
+        assertEquals(230.0, kept.ghostPoint.y, 0.0)
+        assertTrue(aim.hasOverrides)
+    }
+
+    @Test
     fun `anchors clamp inside the table`() {
         val aim = ManualAim()
         aim.enterEditMode(baseShot(), radius)
@@ -134,6 +167,151 @@ class ManualAimTest {
         val aim = ManualAim()
         aim.dragAnchor(Anchor.CUE, Vec2(10.0, 10.0), table())
         assertNull(aim.currentShot())
+        assertNull(aim.currentBank())
         assertFalse(aim.hasOverrides)
+    }
+
+    @Test
+    fun `bank edit freezes the bank, exit clears it`() {
+        val aim = ManualAim()
+        aim.enterEditMode(baseBank(), radius)
+        assertTrue(aim.isEditMode)
+        assertTrue(aim.isBankEdit)
+        assertTrue(aim.hasShot)
+        assertFalse(aim.hasOverrides)
+        val frozen = aim.currentBank()!!
+        assertNull(aim.currentShot())
+        assertEquals(313.48193812482685, frozen.direct.ghostPoint.x, 1e-9)
+        assertEquals(211.92632987965453, frozen.direct.ghostPoint.y, 1e-9)
+        assertEquals(3.1297902183293265, frozen.direct.cutAngleDegrees, 1e-9)
+        assertEquals(73.91304347826087, frozen.railContact.x, 1e-9)
+        assertEquals(0.0, frozen.railContact.y, 0.0)
+        assertEquals(2, frozen.bankPath.size)
+        aim.exitEditMode()
+        assertFalse(aim.isEditMode)
+        assertFalse(aim.isBankEdit)
+        assertFalse(aim.hasShot)
+        assertNull(aim.currentBank())
+    }
+
+    @Test
+    fun `bank cue drag re-solves from the corrected cue`() {
+        val aim = ManualAim()
+        aim.enterEditMode(baseBank(), radius)
+        // Move the cue 20 px down: the ghost point and rail contact
+        // stay put (same bank), but the cut angle changes, and the
+        // re-solve matches a fresh solveBank from the corrected cue.
+        aim.dragAnchor(Anchor.CUE, Vec2(0.0, 20.0), table())
+        val corrected = aim.currentBank()!!
+        assertTrue(aim.hasOverrides)
+        assertEquals(450.0, corrected.direct.aimLine.start.x, 0.0)
+        assertEquals(340.0, corrected.direct.aimLine.start.y, 0.0)
+        assertEquals(313.48193812482685, corrected.direct.ghostPoint.x, 1e-9)
+        assertEquals(211.92632987965453, corrected.direct.ghostPoint.y, 1e-9)
+        assertEquals(73.91304347826087, corrected.railContact.x, 1e-9)
+        assertEquals(1.6755688569763976, corrected.direct.cutAngleDegrees, 1e-9)
+        val fresh = ShotSolver.solveBank(
+            Vec2(450.0, 340.0), target, bankPocket, topRail, radius
+        )!!
+        assertEquals(fresh, corrected)
+    }
+
+    @Test
+    fun `bank ghost drag re-aims and rebuilds the path`() {
+        val aim = ManualAim()
+        aim.enterEditMode(baseBank(), radius)
+        // Drag the ghost 2 px right: aim line ends at the dragged
+        // point, the contact moves along the rail, the pocket stays.
+        aim.dragAnchor(Anchor.GHOST, Vec2(2.0, 0.0), table())
+        val corrected = aim.currentBank()!!
+        assertEquals(315.48193812482685, corrected.direct.ghostPoint.x, 1e-9)
+        assertEquals(211.92632987965453, corrected.direct.ghostPoint.y, 1e-9)
+        assertEquals(40.37380684500539, corrected.railContact.x, 1e-9)
+        assertEquals(0.0, corrected.railContact.y, 0.0)
+        assertEquals(1.1704390055855385, corrected.direct.cutAngleDegrees, 1e-9)
+        assertEquals(40.0, corrected.bankPath[1].end.x, 0.0)
+        assertEquals(30.0, corrected.bankPath[1].end.y, 0.0)
+        assertEquals(2, corrected.bankPath.size)
+        // Deflection starts at the dragged ghost point.
+        assertEquals(315.48193812482685, corrected.direct.deflectionLine.start.x, 1e-9)
+        assertEquals(211.92632987965453, corrected.direct.deflectionLine.start.y, 1e-9)
+    }
+
+    @Test
+    fun `bank ghost drag down the rail moves the contact`() {
+        val aim = ManualAim()
+        aim.enterEditMode(baseBank(), radius)
+        // Drag the ghost 100 px down: the departure turns toward the
+        // rail and the contact slides far along it.
+        aim.dragAnchor(Anchor.GHOST, Vec2(0.0, 100.0), table())
+        val corrected = aim.currentBank()!!
+        assertEquals(313.48193812482685, corrected.direct.ghostPoint.x, 1e-9)
+        assertEquals(311.92632987965453, corrected.direct.ghostPoint.y, 1e-9)
+        assertEquals(275.9092643539319, corrected.railContact.x, 1e-9)
+        assertEquals(79.74707625370303, corrected.direct.cutAngleDegrees, 1e-9)
+    }
+
+    @Test
+    fun `bank ghost drag off the table keeps the last good bank`() {
+        val aim = ManualAim()
+        val base = baseBank()
+        aim.enterEditMode(base, radius)
+        // Drag the ghost 10 px right: the contact would fall off the
+        // left edge of the table (x < 0).
+        aim.dragAnchor(Anchor.GHOST, Vec2(10.0, 0.0), table())
+        assertEquals(base, aim.currentBank())
+    }
+
+    @Test
+    fun `bank rejected ghost drag after an accepted one keeps the last good bank`() {
+        val aim = ManualAim()
+        aim.enterEditMode(baseBank(), radius)
+        // First drag accepted: ghost moves 2 px right, contact slides
+        // along the rail.
+        aim.dragAnchor(Anchor.GHOST, Vec2(2.0, 0.0), table())
+        val edited = aim.currentBank()!!
+        assertEquals(315.48193812482685, edited.direct.ghostPoint.x, 1e-9)
+        assertEquals(40.37380684500539, edited.railContact.x, 1e-9)
+        // Second drag rejected (contact would fall off the table):
+        // the drag is not committed, so the last good bank stays
+        // instead of snapping back to the frozen base.
+        aim.dragAnchor(Anchor.GHOST, Vec2(10.0, 0.0), table())
+        val kept = aim.currentBank()!!
+        assertEquals(315.48193812482685, kept.direct.ghostPoint.x, 1e-9)
+        assertEquals(40.37380684500539, kept.railContact.x, 1e-9)
+        assertTrue(aim.hasOverrides)
+    }
+
+    @Test
+    fun `bank ghost drag past the impossible line keeps the last good bank`() {
+        val aim = ManualAim()
+        val base = baseBank()
+        aim.enterEditMode(base, radius)
+        // Drag the ghost far to the left of the cue: the aim direction
+        // would point away from the pocket (cut > 90 deg).
+        aim.dragAnchor(Anchor.GHOST, Vec2(-300.0, 0.0), table())
+        assertEquals(base, aim.currentBank())
+    }
+
+    @Test
+    fun `bank ghost drag away from the rail keeps the last good bank`() {
+        val aim = ManualAim()
+        val base = baseBank()
+        aim.enterEditMode(base, radius)
+        // Drag the ghost 100 px up: the departure points away from the
+        // top rail, so the ray never meets it.
+        aim.dragAnchor(Anchor.GHOST, Vec2(0.0, -100.0), table())
+        assertEquals(base, aim.currentBank())
+    }
+
+    @Test
+    fun `bank cue drag that cannot bank keeps the last good bank`() {
+        val aim = ManualAim()
+        val base = baseBank()
+        aim.enterEditMode(base, radius)
+        // Drag the cue far left: the corrected cue cannot bank to the
+        // pocket (cut > 90 deg from there).
+        aim.dragAnchor(Anchor.CUE, Vec2(-400.0, 0.0), table())
+        assertEquals(base, aim.currentBank())
     }
 }

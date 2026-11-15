@@ -205,6 +205,17 @@ class LineOverlayManager(
     @androidx.annotation.VisibleForTesting
     val editedShot: ShotSolver.ShotSolution? get() = manualAim.currentShot()
 
+    /** Test-only: the corrected bank currently drawn in EDIT mode
+     * (v1.0.29). Null unless a bank is frozen. */
+    @androidx.annotation.VisibleForTesting
+    val editedBank: ShotSolver.BankSolution? get() = manualAim.currentBank()
+
+    /** Test-only: whether any anchor override is registered in EDIT
+     * mode (v1.0.29 diagnostic: distinguishes a drag that never
+     * registered from one the bank re-aim ignores). */
+    @androidx.annotation.VisibleForTesting
+    val editHasOverrides: Boolean get() = manualAim.hasOverrides
+
     /** Test-only: the lock-ring progress currently shown on the bubble
      * (-1 when the bubble does not exist yet). */
     @androidx.annotation.VisibleForTesting
@@ -217,7 +228,11 @@ class LineOverlayManager(
 
     /** Toggle EDIT mode (the bubble's Edit/Done button). Entering freezes
      * the current shot; leaving resumes the live detection and drops
-     * any corrections. With no shot to edit, the tap does nothing. */
+     * any corrections. With no shot to edit, the tap does nothing.
+     * One-rail bank shots (v1.0.29) freeze the same way: when no direct
+     * shot exists but a bank is shown, EDIT freezes the bank instead.
+     * Kick, two-rail and combo/kiss shots stay out: with neither a
+     * direct shot nor a bank, the tap still does nothing. */
     fun toggleEditMode() {
         if (manualAim.isEditMode) {
             manualAim.exitEditMode()
@@ -229,16 +244,26 @@ class LineOverlayManager(
         }
         val result = lastResult
         val shot = result?.shot
-        if (shot == null) {
-            Toast.makeText(context, R.string.no_shot_to_edit, Toast.LENGTH_SHORT).show()
+        if (shot != null) {
+            smoother.reset()
+            manualAim.enterEditMode(shot, result.cueBall?.radiusPx ?: 9.0)
+            editButton?.text = context.getString(R.string.done_editing)
+            lockRing?.isFrozen = true
+            DiagnosticsLog.record(DiagnosticsLog.Kind.EDIT_ENTER)
+            result.let { updateEditMode(it) }
             return
         }
-        smoother.reset()
-        manualAim.enterEditMode(shot, result.cueBall?.radiusPx ?: 9.0)
-        editButton?.text = context.getString(R.string.done_editing)
-        lockRing?.isFrozen = true
-        DiagnosticsLog.record(DiagnosticsLog.Kind.EDIT_ENTER)
-        result.let { updateEditMode(it) }
+        val bank = result?.bank
+        if (bank != null && store.bankLinesEnabled) {
+            smoother.reset()
+            manualAim.enterEditMode(bank, result.cueBall?.radiusPx ?: 9.0)
+            editButton?.text = context.getString(R.string.done_editing)
+            lockRing?.isFrozen = true
+            DiagnosticsLog.record(DiagnosticsLog.Kind.EDIT_ENTER)
+            result.let { updateEditMode(it) }
+            return
+        }
+        Toast.makeText(context, R.string.no_shot_to_edit, Toast.LENGTH_SHORT).show()
     }
 
     /** Test-only: drag an anchor by a working-coordinate delta, then
@@ -352,6 +377,30 @@ class LineOverlayManager(
             removeHandles()
             return
         }
+        // One-rail bank EDIT (v1.0.29): the frozen bank with its legs.
+        if (manualAim.isBankEdit) {
+            val bank = manualAim.currentBank()
+            if (bank == null) {
+                removeLineWindows()
+                removeLabelWindows()
+                removeTagWindows()
+                removeHandles()
+                return
+            }
+            val drawn = buildEditBankLines(bank, result)
+            if (drawn.lines.isEmpty()) {
+                removeLineWindows()
+                removeLabelWindows()
+                removeTagWindows()
+                removeHandles()
+                return
+            }
+            applyLines(drawn.lines)
+            applyLabels(drawn.labels)
+            applyTags(drawn.tags)
+            ensureHandles(bank.direct, result)
+            return
+        }
         val shot = manualAim.currentShot()
         if (shot == null) {
             removeLineWindows()
@@ -413,6 +462,50 @@ class LineOverlayManager(
                 distanceLabel(
                     PocketDistanceLabel.pathSegments(shot),
                     shot.targetLine.end, shot.targetLine, result, AIM_COLOR
+                ),
+            tags = groupTags(result, lines.filter { !it.isRing }.map { it.segment })
+        )
+    }
+
+    /** The corrected bank's lines, mapped to screen coordinates
+     * (v1.0.29). The aim line stays aim green; the two bank legs, the
+     * cut-angle label and the pocket-distance label are bank cyan, like
+     * the live bank overlay. The pocket ring marks the (unchanged)
+     * target pocket, the ghost-ball ring (v1.0.26) marks the cue ball's
+     * arrival point, and the rail-contact marker (v1.0.16) marks the
+     * cushion spot, all three in the live overlay's positions, so
+     * EDIT draws the bank the live overlay drew, not a direct shot. */
+    private fun buildEditBankLines(
+        bank: ShotSolver.BankSolution,
+        result: DetectionResult
+    ): DrawnOverlay {
+        val sx = result.scaleToScreenX
+        val sy = result.scaleToScreenY
+        fun map(p: Vec2) = Vec2(p.x * sx, p.y * sy)
+        val pocket = bank.bankPath.last().end
+        val aim = Segment(map(bank.direct.aimLine.start), map(bank.direct.aimLine.end))
+        val lines = listOf(
+            DrawLine(aim, AIM_COLOR, AIM_WIDTH_PX),
+            DrawLine(
+                Segment(map(bank.bankPath[0].start), map(bank.bankPath[0].end)),
+                BANK_COLOR, LINE_WIDTH_PX
+            ),
+            DrawLine(
+                Segment(map(bank.bankPath[1].start), map(bank.bankPath[1].end)),
+                BANK_COLOR, LINE_WIDTH_PX
+            ),
+            DrawLine(
+                Segment(map(pocket), map(pocket)),
+                POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = RING_RADIUS_PX
+            ),
+            ghostRing(bank.direct, result, ::map)
+        ) + contactMarkers(bank.bankPath, BANK_COLOR, ::map)
+        return DrawnOverlay(
+            lines = lines,
+            labels = labelsFor(bank.direct, aim, result, BANK_COLOR) +
+                distanceLabel(
+                    PocketDistanceLabel.pathSegments(bank),
+                    bank.bankPath.last().end, bank.bankPath.last(), result, BANK_COLOR
                 ),
             tags = groupTags(result, lines.filter { !it.isRing }.map { it.segment })
         )
@@ -677,6 +770,27 @@ class LineOverlayManager(
         )
     }
 
+    /** Rail-contact markers (v1.0.16) for one bank/kick path: one ring
+     * per interior vertex of the path, in the shot family's colour.
+     * The contacts come from the solution's own path (unsmoothed, like
+     * the pocket ring), so a marker never drifts from the bend it marks
+     * the way a smoothed segment joint could. A marker is a ring, so
+     * groupTags excludes it from the tag-anchor lines and it hides with
+     * the lines. A member since v1.0.29, so the bank EDIT builder can
+     * use it too (it was a local fun of [buildDrawLines] before). */
+    private fun contactMarkers(
+        path: List<Segment>,
+        color: Int,
+        map: (Vec2) -> Vec2
+    ): List<DrawLine> =
+        RailContactMarker.contacts(path).map { contact ->
+            DrawLine(
+                Segment(map(contact), map(contact)),
+                color, RING_WIDTH_PX, isRing = true,
+                ringRadius = CONTACT_MARKER_RADIUS_PX
+            )
+        }
+
     /** Build the lines to draw, mapped from working to screen coordinates.
      * The best shot's lines go through the jitter smoother (screen
      * coordinates, Bloro's 40 px gate); candidates and the pocket ring
@@ -697,21 +811,6 @@ class LineOverlayManager(
         val sx = result.scaleToScreenX
         val sy = result.scaleToScreenY
         fun map(p: Vec2) = Vec2(p.x * sx, p.y * sy)
-        /** Rail-contact markers (v1.0.16) for one bank/kick path: one
-         * ring per interior vertex of the path, in the shot family's
-         * colour. The contacts come from the solution's own path
-         * (unsmoothed, like the pocket ring), so a marker never
-         * drifts from the bend it marks the way a smoothed segment
-         * joint could. A marker is a ring, so groupTags excludes it
-         * from the tag-anchor lines and it hides with the lines. */
-        fun contactMarkers(path: List<Segment>, color: Int): List<DrawLine> =
-            RailContactMarker.contacts(path).map { contact ->
-                DrawLine(
-                    Segment(map(contact), map(contact)),
-                    color, RING_WIDTH_PX, isRing = true,
-                    ringRadius = CONTACT_MARKER_RADIUS_PX
-                )
-            }
         val out = mutableListOf<DrawLine>()
         var labels: List<DrawLabel> = emptyList()
 
@@ -792,7 +891,7 @@ class LineOverlayManager(
             out += ghostRing(bank.direct, result, ::map)
             // Rail-contact marker (v1.0.16): the cushion spot the
             // target ball must hit, in the bank cyan.
-            out += contactMarkers(bank.bankPath, BANK_COLOR)
+            out += contactMarkers(bank.bankPath, BANK_COLOR, ::map)
         } else if (result.kick != null && store.bankLinesEnabled) {
             // One-rail kick (v1.0.10): the cue ball goes off the rail
             // first, so the cue path has two segments — cue -> rail
@@ -831,7 +930,7 @@ class LineOverlayManager(
             out += ghostRing(kick.direct, result, ::map)
             // Rail-contact marker (v1.0.16): the cushion spot the cue
             // ball must hit, in the kick magenta.
-            out += contactMarkers(kick.kickPath, KICK_COLOR)
+            out += contactMarkers(kick.kickPath, KICK_COLOR, ::map)
         } else if (result.bank2 != null && store.bankLinesEnabled) {
             // Two-rail bank (v1.0.9): same cyan rendering as a
             // one-rail bank, with all three path segments so both
@@ -865,7 +964,7 @@ class LineOverlayManager(
             out += ghostRing(bank2.direct, result, ::map)
             // Rail-contact markers (v1.0.16): both cushion spots, in
             // the bank cyan, in path order.
-            out += contactMarkers(bank2.bankPath, BANK_COLOR)
+            out += contactMarkers(bank2.bankPath, BANK_COLOR, ::map)
         } else if (result.kick2 != null && store.bankLinesEnabled) {
             // Two-rail kick (v1.0.11): the cue ball goes off two rails
             // first, so the cue path has three segments — cue -> rail
@@ -908,7 +1007,7 @@ class LineOverlayManager(
             out += ghostRing(kick2.direct, result, ::map)
             // Rail-contact markers (v1.0.16): both cushion spots, in
             // the kick magenta, in path order.
-            out += contactMarkers(kick2.kickPath, KICK_COLOR)
+            out += contactMarkers(kick2.kickPath, KICK_COLOR, ::map)
         } else if (result.combo != null && store.bankLinesEnabled) {
             // Combo (v1.0.13): cue -> first ball -> second ball ->
             // pocket, drawn exactly the way practice mode draws it:

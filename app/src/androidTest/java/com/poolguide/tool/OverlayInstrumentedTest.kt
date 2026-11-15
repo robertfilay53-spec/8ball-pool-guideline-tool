@@ -9,6 +9,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.poolguide.tool.cv.Ball
 import com.poolguide.tool.cv.BallColor
 import com.poolguide.tool.cv.DetectionResult
+import com.poolguide.tool.cv.TableRect
 import com.poolguide.tool.data.CalibrationStore
 import com.poolguide.tool.data.ShotHistory
 import com.poolguide.tool.geometry.BallGroup
@@ -253,6 +254,84 @@ class OverlayInstrumentedTest {
     }
 
     @Test
+    fun editMode_bank_freezesBankShowsLegsAndHandles() {
+        val ctx = appContext()
+        assertTrue(
+            "overlay permission must be granted for this test",
+            Settings.canDrawOverlays(ctx)
+        )
+        val store = CalibrationStore(ctx).apply {
+            guidesHidden = false
+            bankLinesEnabled = true
+        }
+        val manager = LineOverlayManager(ctx, store)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+
+        // Live mode: the bank draws 6 windows (aim + 2 bank legs +
+        // pocket ring + ghost ring + contact marker) and 2 labels
+        // (angle + pocket distance).
+        instrumentation.runOnMainSync { manager.update(bankEditResult()) }
+        assertEquals(6, manager.lineWindowCount)
+        assertEquals(2, manager.labelWindowCount)
+        assertEquals(0, manager.handleWindowCount)
+        assertFalse(manager.isEditMode)
+
+        // Enter edit mode: the frozen bank draws the same 6 windows
+        // (not a collapsed direct shot) + 2 handles.
+        instrumentation.runOnMainSync { manager.toggleEditMode() }
+        assertTrue(manager.isEditMode)
+        assertEquals(6, manager.lineWindowCount)
+        assertEquals(2, manager.handleWindowCount)
+        val frozen = manager.editedBank!!
+        assertEquals(313.48193812482685, frozen.direct.ghostPoint.x, 1e-9)
+        assertEquals(73.91304347826087, frozen.railContact.x, 1e-9)
+
+        // Drag the cue anchor 20 px down (working coords): the bank
+        // is re-solved from the corrected cue; the ghost and the
+        // contact stay where the solver puts them.
+        instrumentation.runOnMainSync {
+            manager.applyAnchorDrag(Anchor.CUE, Vec2(0.0, 20.0))
+        }
+        val cueEdited = manager.editedBank!!
+        assertEquals(450.0, cueEdited.direct.aimLine.start.x, 0.0)
+        assertEquals(340.0, cueEdited.direct.aimLine.start.y, 0.0)
+        assertEquals(313.48193812482685, cueEdited.direct.ghostPoint.x, 1e-9)
+        assertEquals(73.91304347826087, cueEdited.railContact.x, 1e-9)
+
+        // Drag the ghost anchor 2 px right (working coords): the aim
+        // line follows, the contact moves along the rail, the pocket
+        // stays the same.
+        instrumentation.runOnMainSync {
+            manager.applyAnchorDrag(Anchor.GHOST, Vec2(2.0, 0.0))
+        }
+        assertTrue("ghost drag must register an override", manager.editHasOverrides)
+        assertTrue("still in edit mode after the drag", manager.isEditMode)
+        val edited = manager.editedBank!!
+        assertEquals(315.48193812482685, edited.direct.ghostPoint.x, 1e-9)
+        assertEquals(40.37380684500539, edited.railContact.x, 1e-9)
+        assertEquals(40.0, edited.bankPath[1].end.x, 0.0)
+        assertEquals(30.0, edited.bankPath[1].end.y, 0.0)
+        assertEquals(6, manager.lineWindowCount)
+
+        // Drag the ghost 10 px further right: the contact would fall
+        // off the table, so the last good bank is kept.
+        instrumentation.runOnMainSync {
+            manager.applyAnchorDrag(Anchor.GHOST, Vec2(10.0, 0.0))
+        }
+        assertEquals(315.48193812482685, manager.editedBank!!.direct.ghostPoint.x, 1e-9)
+        assertEquals(40.37380684500539, manager.editedBank!!.railContact.x, 1e-9)
+
+        // Leaving edit mode resumes live detection (6 windows again).
+        instrumentation.runOnMainSync { manager.toggleEditMode() }
+        assertFalse(manager.isEditMode)
+        assertEquals(0, manager.handleWindowCount)
+        instrumentation.runOnMainSync { manager.update(bankEditResult()) }
+        assertEquals(6, manager.lineWindowCount)
+
+        instrumentation.runOnMainSync { manager.removeAll() }
+    }
+
+    @Test
     fun lockRing_showsTableLockProgress() {
         val ctx = appContext()
         assertTrue(
@@ -350,6 +429,43 @@ class OverlayInstrumentedTest {
         assertEquals(0, manager.lineWindowCount)
 
         instrumentation.runOnMainSync { manager.removeAll() }
+    }
+
+    /** One-rail bank result (v1.0.29): cue (450,320) -> target (300,200)
+     * -> top rail -> pocket (40,30). Same numbers as ManualAimTest's
+     * baseBank: ghost (313.48193812482685,211.92632987965453), cut 3.13 deg,
+     * contact (73.91304347826087,0.0).
+     * No direct shot exists, so the shown shot is the bank. */
+    private fun bankEditResult(): DetectionResult {
+        val bank = ShotSolver.solveBank(
+            Vec2(450.0, 320.0), Vec2(300.0, 200.0), Vec2(40.0, 30.0),
+            Rail(Vec2(0.0, 0.0), Vec2(0.0, 1.0)), 9.0
+        )!!
+        return DetectionResult(
+            frameIndex = 1,
+            workingWidth = 720,
+            workingHeight = 405,
+            scaleToScreenX = 1.0,
+            scaleToScreenY = 1.0,
+            isCaptureBlack = false,
+            table = TableRect(
+                Vec2(0.0, 0.0), Vec2(720.0, 0.0),
+                Vec2(720.0, 405.0), Vec2(0.0, 405.0)
+            ),
+            pockets = emptyList(),
+            balls = emptyList(),
+            cueBall = null,
+            guideline = listOf(
+                com.poolguide.tool.cv.GuidelineSegment(
+                    Segment(Vec2(450.0, 320.0), Vec2(300.0, 200.0)), 40
+                )
+            ),
+            shot = null,
+            bank = bank,
+            allShots = emptyList(),
+            tableLocked = true,
+            status = "Bank shot (one rail) to pocket"
+        )
     }
 
     /** Thin-cut result (v1.0.12): cue (620, 260), target (620, 300)
