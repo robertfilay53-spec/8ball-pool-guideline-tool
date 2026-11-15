@@ -455,4 +455,185 @@ class ManualAimTest {
         aim.dragAnchor(Anchor.CUE, Vec2(611.0, 76.0), table())
         assertEquals(base, aim.currentKick())
     }
+
+    // Two-rail bank (v1.0.33): cue (580,300) -> target (600,320) ->
+    // bottom then right rails -> pocket (360,20). Numbers pinned by
+    // kotlinc probe (~/workspace/probe33, Probe33 full precision):
+    // ghost (586.2850922803298,308.3423284382803), cut
+    // 12.64117220907829 deg, contacts (623.5294117647059,340.0) and
+    // (680.0,292.0), mirrored pocket (1000.0,660.0).
+    private val bank2Cue = Vec2(580.0, 300.0)
+    private val bank2Target = Vec2(600.0, 320.0)
+    private val bank2Pocket = Vec2(360.0, 20.0)
+    private val bottomRail2 = Rail(Vec2(40.0, 340.0), Vec2(0.0, -1.0))
+    private val rightRail2 = Rail(Vec2(680.0, 20.0), Vec2(-1.0, 0.0))
+
+    private fun baseBank2() =
+        ShotSolver.solveTwoRailBank(
+            bank2Cue, bank2Target, bank2Pocket, bottomRail2, rightRail2, radius
+        )!!
+
+    @Test
+    fun `twoRailBank_freezeShowsLegsAndContacts`() {
+        val aim = ManualAim()
+        aim.enterEditMode(baseBank2(), radius)
+        assertTrue(aim.isEditMode)
+        assertTrue(aim.isTwoRailBankEdit)
+        assertTrue(aim.hasShot)
+        assertFalse(aim.hasOverrides)
+        val frozen = aim.currentTwoRailBank()!!
+        assertNull(aim.currentShot())
+        assertNull(aim.currentBank())
+        assertNull(aim.currentKick())
+        assertEquals(586.2850922803298, frozen.direct.ghostPoint.x, 1e-9)
+        assertEquals(308.3423284382803, frozen.direct.ghostPoint.y, 1e-9)
+        assertEquals(12.64117220907829, frozen.direct.cutAngleDegrees, 1e-9)
+        assertEquals(623.5294117647059, frozen.railContacts[0].x, 1e-9)
+        assertEquals(340.0, frozen.railContacts[0].y, 0.0)
+        assertEquals(680.0, frozen.railContacts[1].x, 0.0)
+        assertEquals(292.0, frozen.railContacts[1].y, 1e-9)
+        assertEquals(1000.0, frozen.mirroredPocket.x, 0.0)
+        assertEquals(660.0, frozen.mirroredPocket.y, 0.0)
+        assertEquals(3, frozen.bankPath.size)
+        assertEquals(360.0, frozen.bankPath[2].end.x, 0.0)
+        assertEquals(20.0, frozen.bankPath[2].end.y, 0.0)
+        aim.exitEditMode()
+        assertFalse(aim.isEditMode)
+        assertFalse(aim.isTwoRailBankEdit)
+        assertFalse(aim.hasShot)
+        assertNull(aim.currentTwoRailBank())
+    }
+
+    @Test
+    fun `twoRailBank_cueDragChangesCutOnly`() {
+        val aim = ManualAim()
+        aim.enterEditMode(baseBank2(), radius)
+        // Move the cue 20 px left: the ghost and both contacts stay
+        // put (same bank: they depend only on target, pocket and
+        // rails, never on the cue), but the cut angle changes.
+        // The cut is pinned to the spec's probe-B value with the
+        // usual 1e-9 tolerance: the frozen rails are recovered by
+        // bisection, so the re-solve's mirrored pocket differs from
+        // a true-rails solve by ~1e-13 and the cut by 3.2e-14 deg
+        // (probe33b), far inside the tolerance. No exact-equality
+        // assert against a fresh true-rails solve: it would fail
+        // on that float noise.
+        aim.dragAnchor(Anchor.CUE, Vec2(-20.0, 0.0), table())
+        val corrected = aim.currentTwoRailBank()!!
+        assertTrue(aim.hasOverrides)
+        assertEquals(560.0, corrected.direct.aimLine.start.x, 0.0)
+        assertEquals(300.0, corrected.direct.aimLine.start.y, 0.0)
+        assertEquals(586.2850922803298, corrected.direct.ghostPoint.x, 1e-9)
+        assertEquals(308.3423284382803, corrected.direct.ghostPoint.y, 1e-9)
+        assertEquals(623.5294117647059, corrected.railContacts[0].x, 1e-9)
+        assertEquals(340.0, corrected.railContacts[0].y, 0.0)
+        assertEquals(680.0, corrected.railContacts[1].x, 0.0)
+        assertEquals(292.0, corrected.railContacts[1].y, 1e-9)
+        assertEquals(22.756206986766507, corrected.direct.cutAngleDegrees, 1e-9)
+    }
+
+    @Test
+    fun `twoRailBank_cueDragPastImpossibleLineRejects`() {
+        val aim = ManualAim()
+        val base = baseBank2()
+        aim.enterEditMode(base, radius)
+        // Drag the cue 20 px down: the solver returns null, because
+        // the cut would be 102.07 deg (over 90).
+        aim.dragAnchor(Anchor.CUE, Vec2(0.0, 20.0), table())
+        assertEquals(base, aim.currentTwoRailBank())
+    }
+
+    @Test
+    fun `twoRailBank_ghostDragMovesBothContacts`() {
+        val aim = ManualAim()
+        aim.enterEditMode(baseBank2(), radius)
+        // Drag the ghost 2 px down: aim line ends at the dragged
+        // point, BOTH contacts move along their rails, the pocket
+        // stays.
+        aim.dragAnchor(Anchor.GHOST, Vec2(0.0, 2.0), table())
+        val corrected = aim.currentTwoRailBank()!!
+        assertEquals(586.2850922803298, corrected.direct.ghostPoint.x, 1e-9)
+        assertEquals(310.3423284382803, corrected.direct.ghostPoint.y, 1e-9)
+        assertEquals(23.560526876418276, corrected.direct.cutAngleDegrees, 1e-9)
+        assertEquals(628.402100096326, corrected.railContacts[0].x, 1e-9)
+        assertEquals(340.0, corrected.railContacts[0].y, 0.0)
+        assertEquals(680.0, corrected.railContacts[1].x, 0.0)
+        assertEquals(303.66613755413914, corrected.railContacts[1].y, 1e-9)
+        assertEquals(360.0, corrected.bankPath[2].end.x, 0.0)
+        assertEquals(20.0, corrected.bankPath[2].end.y, 0.0)
+        assertEquals(3, corrected.bankPath.size)
+        // Deflection starts at the dragged ghost point.
+        assertEquals(586.2850922803298, corrected.direct.deflectionLine.start.x, 1e-9)
+        assertEquals(310.3423284382803, corrected.direct.deflectionLine.start.y, 1e-9)
+    }
+
+    @Test
+    fun `twoRailBank_chainedCueThenGhostDrag`() {
+        val aim = ManualAim()
+        aim.enterEditMode(baseBank2(), radius)
+        // Cue drag first, then ghost drag: the contacts are the SAME
+        // as the ghost-only drag (they depend only on the ghost and
+        // target, never on the cue), but the cut is DIFFERENT: the
+        // aim starts at the corrected cue, so the cut is 13.67 deg,
+        // NOT the 23.56 deg a ghost-only drag gives. A test that
+        // pins 23.56 here is wrong (v1.0.30 kick lesson).
+        aim.dragAnchor(Anchor.CUE, Vec2(-20.0, 0.0), table())
+        aim.dragAnchor(Anchor.GHOST, Vec2(0.0, 2.0), table())
+        val corrected = aim.currentTwoRailBank()!!
+        assertEquals(586.2850922803298, corrected.direct.ghostPoint.x, 1e-9)
+        assertEquals(310.3423284382803, corrected.direct.ghostPoint.y, 1e-9)
+        assertEquals(628.402100096326, corrected.railContacts[0].x, 1e-9)
+        assertEquals(340.0, corrected.railContacts[0].y, 0.0)
+        assertEquals(680.0, corrected.railContacts[1].x, 0.0)
+        assertEquals(303.66613755413914, corrected.railContacts[1].y, 1e-9)
+        assertEquals(13.674160027265291, corrected.direct.cutAngleDegrees, 1e-9)
+    }
+
+    @Test
+    fun `twoRailBank_rejectAfterAcceptKeepsAccepted`() {
+        val aim = ManualAim()
+        aim.enterEditMode(baseBank2(), radius)
+        // First drag accepted: cue moves 20 px left, cut becomes 22.76.
+        aim.dragAnchor(Anchor.CUE, Vec2(-20.0, 0.0), table())
+        val edited = aim.currentTwoRailBank()!!
+        assertEquals(22.756206986766507, edited.direct.cutAngleDegrees, 1e-9)
+        // Second drag rejected (ghost far left, cut 176.24 deg):
+        // the drag is not committed, so the last good bank stays
+        // instead of snapping back to the frozen base.
+        aim.dragAnchor(Anchor.GHOST, Vec2(-300.0, 0.0), table())
+        val kept = aim.currentTwoRailBank()!!
+        assertEquals(586.2850922803298, kept.direct.ghostPoint.x, 1e-9)
+        assertEquals(22.756206986766507, kept.direct.cutAngleDegrees, 1e-9)
+        assertTrue(aim.hasOverrides)
+    }
+
+    @Test
+    fun `twoRailBank_exitClearsFrozen`() {
+        val aim = ManualAim()
+        aim.enterEditMode(baseBank2(), radius)
+        aim.exitEditMode()
+        assertFalse(aim.isEditMode)
+        assertFalse(aim.isTwoRailBankEdit)
+        assertFalse(aim.hasShot)
+        assertNull(aim.currentTwoRailBank())
+    }
+
+    @Test
+    fun `twoRailBank_ghostDragRayMissesSecondRailRejects`() {
+        val aim = ManualAim()
+        val base = baseBank2()
+        aim.enterEditMode(base, radius)
+        // Drag the ghost right until it sits directly above the
+        // target (ghost.x == target.x == 600): the departure runs
+        // straight down to the bottom rail, so the reflected ray
+        // runs straight up, parallel to the right rail, and never
+        // meets it (contact2 is null). Pinned by kotlinc probe
+        // (~/workspace/probe33, T8): the cut would be 67.36 deg,
+        // contact1 (600, 340), reflected direction (0, -1).
+        // The drag is rejected and the frozen base is kept.
+        aim.dragAnchor(Anchor.GHOST, Vec2(13.714907719670236, 0.0), table())
+        assertEquals(base, aim.currentTwoRailBank())
+        assertEquals(586.2850922803298, aim.currentTwoRailBank()!!.direct.ghostPoint.x, 1e-9)
+        assertFalse(aim.hasOverrides)
+    }
 }

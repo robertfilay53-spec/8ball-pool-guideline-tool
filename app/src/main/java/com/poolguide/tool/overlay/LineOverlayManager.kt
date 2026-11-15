@@ -215,6 +215,11 @@ class LineOverlayManager(
     @androidx.annotation.VisibleForTesting
     val editedKick: ShotSolver.KickSolution? get() = manualAim.currentKick()
 
+    /** Test-only: the corrected two-rail bank currently drawn in
+     * EDIT mode (v1.0.33). Null unless a two-rail bank is frozen. */
+    @androidx.annotation.VisibleForTesting
+    val editedBank2: ShotSolver.TwoRailBankSolution? get() = manualAim.currentTwoRailBank()
+
     /** Test-only: whether any anchor override is registered in EDIT
      * mode (v1.0.29 diagnostic: distinguishes a drag that never
      * registered from one the bank re-aim ignores). */
@@ -238,9 +243,11 @@ class LineOverlayManager(
      * shot exists but a bank is shown, EDIT freezes the bank instead.
      * One-rail kick shots (v1.0.30) freeze the same way again: when
      * neither a direct shot nor a bank exists but a kick is shown,
-     * EDIT freezes the kick instead. Two-rail and combo/kiss shots
-     * stay out: with neither a direct shot, a bank, nor a kick, the
-     * tap still does nothing. */
+     * EDIT freezes the kick instead. Two-rail bank shots (v1.0.33)
+     * freeze the same way again: when no direct shot, bank, or kick
+     * exists but a two-rail bank is shown, EDIT freezes the two-rail
+     * bank instead. Two-rail kick and combo/kiss shots stay out:
+     * with none of the four, the tap still does nothing. */
     fun toggleEditMode() {
         if (manualAim.isEditMode) {
             manualAim.exitEditMode()
@@ -275,6 +282,16 @@ class LineOverlayManager(
         if (kick != null && store.bankLinesEnabled) {
             smoother.reset()
             manualAim.enterEditMode(kick, result.cueBall?.radiusPx ?: 9.0)
+            editButton?.text = context.getString(R.string.done_editing)
+            lockRing?.isFrozen = true
+            DiagnosticsLog.record(DiagnosticsLog.Kind.EDIT_ENTER)
+            result.let { updateEditMode(it) }
+            return
+        }
+        val bank2 = result?.bank2
+        if (bank2 != null && store.bankLinesEnabled) {
+            smoother.reset()
+            manualAim.enterEditMode(bank2, result.cueBall?.radiusPx ?: 9.0)
             editButton?.text = context.getString(R.string.done_editing)
             lockRing?.isFrozen = true
             DiagnosticsLog.record(DiagnosticsLog.Kind.EDIT_ENTER)
@@ -443,6 +460,31 @@ class LineOverlayManager(
             ensureHandles(kick.direct, result)
             return
         }
+        // Two-rail bank EDIT (v1.0.33): the frozen two-rail bank
+        // with its three legs.
+        if (manualAim.isTwoRailBankEdit) {
+            val bank2 = manualAim.currentTwoRailBank()
+            if (bank2 == null) {
+                removeLineWindows()
+                removeLabelWindows()
+                removeTagWindows()
+                removeHandles()
+                return
+            }
+            val drawn = buildEditTwoRailBankLines(bank2, result)
+            if (drawn.lines.isEmpty()) {
+                removeLineWindows()
+                removeLabelWindows()
+                removeTagWindows()
+                removeHandles()
+                return
+            }
+            applyLines(drawn.lines)
+            applyLabels(drawn.labels)
+            applyTags(drawn.tags)
+            ensureHandles(bank2.direct, result)
+            return
+        }
         val shot = manualAim.currentShot()
         if (shot == null) {
             removeLineWindows()
@@ -598,6 +640,56 @@ class LineOverlayManager(
                 distanceLabel(
                     PocketDistanceLabel.pathSegments(kick),
                     kick.direct.targetLine.end, kick.direct.targetLine, result, KICK_COLOR
+                ),
+            tags = groupTags(result, lines.filter { !it.isRing }.map { it.segment })
+        )
+    }
+
+    /** The corrected two-rail bank's lines, mapped to screen
+     * coordinates (v1.0.33). The aim line stays aim green; the three
+     * bank legs, the cut-angle label and the pocket-distance label
+     * are bank cyan, like the live two-rail bank overlay. The pocket
+     * ring marks the (unchanged) target pocket, the ghost-ball ring
+     * (v1.0.26) marks the cue ball's arrival point, and the two
+     * rail-contact markers (v1.0.16, one per interior joint of the
+     * 3-segment path) mark the cushion spots, all in the live
+     * overlay's positions, so EDIT draws the two-rail bank the live
+     * overlay drew, not a direct shot. */
+    private fun buildEditTwoRailBankLines(
+        bank2: ShotSolver.TwoRailBankSolution,
+        result: DetectionResult
+    ): DrawnOverlay {
+        val sx = result.scaleToScreenX
+        val sy = result.scaleToScreenY
+        fun map(p: Vec2) = Vec2(p.x * sx, p.y * sy)
+        val pocket = bank2.bankPath.last().end
+        val aim = Segment(map(bank2.direct.aimLine.start), map(bank2.direct.aimLine.end))
+        val lines = listOf(
+            DrawLine(aim, AIM_COLOR, AIM_WIDTH_PX),
+            DrawLine(
+                Segment(map(bank2.bankPath[0].start), map(bank2.bankPath[0].end)),
+                BANK_COLOR, LINE_WIDTH_PX
+            ),
+            DrawLine(
+                Segment(map(bank2.bankPath[1].start), map(bank2.bankPath[1].end)),
+                BANK_COLOR, LINE_WIDTH_PX
+            ),
+            DrawLine(
+                Segment(map(bank2.bankPath[2].start), map(bank2.bankPath[2].end)),
+                BANK_COLOR, LINE_WIDTH_PX
+            ),
+            DrawLine(
+                Segment(map(pocket), map(pocket)),
+                POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = RING_RADIUS_PX
+            ),
+            ghostRing(bank2.direct, result, ::map)
+        ) + contactMarkers(bank2.bankPath, BANK_COLOR, ::map)
+        return DrawnOverlay(
+            lines = lines,
+            labels = labelsFor(bank2.direct, aim, result, BANK_COLOR) +
+                distanceLabel(
+                    PocketDistanceLabel.pathSegments(bank2),
+                    bank2.bankPath.last().end, bank2.bankPath.last(), result, BANK_COLOR
                 ),
             tags = groupTags(result, lines.filter { !it.isRing }.map { it.segment })
         )
