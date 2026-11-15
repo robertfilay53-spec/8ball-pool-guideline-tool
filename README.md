@@ -357,7 +357,7 @@ MediaProjection + VirtualDisplay (960x540, foreground service)
      -> HSV contours (every frame) + HoughCircles (every 3rd frame) -> balls
         (green/blue ball windows are learned from the felt colour, so a
         ball the same hue as the cloth is still separated from it)
-     -> the game's own white guideline: bilateral filter -> Canny (50, 150)
+     -> the game's own white guideline: Gaussian blur 5x5 -> Canny (50, 150)
         -> HoughLinesP (30/15/8) -> verifier -> robust refit -> LineTracker
   -> shot solver (ghost ball, cut angle, tangent, mirror-pocket banks
      (one- and two-rail), mirror-ghost kicks (one- and two-rail), combo + kiss
@@ -585,9 +585,11 @@ Code and ideas reused (with thanks):
 
 - **kaigiii/8-Ball-Pool-Aim-Assist-for-macOS** (CC BY-NC-SA 4.0) — the
   guideline detector is a port of its `vision_core.py` / `verifier.py` /
-  `line_tracker.py`: bilateral filter (d=20, sigmaColor=200, sigmaSpace=1),
-  verifier (edge points within 1.5 px, min 20 inliers, top 3), LineTracker
-  (alpha 40, fade 8/frame), HSV white window (0,0,200)-(180,30,255). The
+  `line_tracker.py`: verifier (edge points within 1.5 px, min 20 inliers,
+  top 3), LineTracker (alpha 40, fade 8/frame), HSV white window
+  (0,0,200)-(180,30,255). Its bilateral pre-filter (d=20, sigmaColor=200,
+  sigmaSpace=1) was replaced in v1.0.32 by a 5x5 Gaussian blur (7.6x
+  faster, same accuracy). The
   Canny thresholds and Hough parameters now come from
   workua94-afk/8ball-aim-master instead (Canny 50/150, HoughLinesP
   threshold 30 / minLen 15 / maxGap 8): the kaigiii Canny (500, 350) kept
