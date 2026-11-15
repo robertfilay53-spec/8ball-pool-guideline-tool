@@ -10,6 +10,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.util.Log
 import android.widget.Button
 import android.widget.ImageView
 import android.widget.Switch
@@ -45,6 +46,10 @@ import java.util.Locale
  */
 class MainActivity : AppCompatActivity() {
 
+    companion object {
+        private const val TAG = "MainActivity"
+    }
+
     private lateinit var store: CalibrationStore
     private lateinit var statusText: TextView
     private lateinit var previewImage: ImageView
@@ -73,15 +78,44 @@ class MainActivity : AppCompatActivity() {
                 putExtra(CaptureService.EXTRA_RESULT_CODE, result.resultCode)
                 putExtra(CaptureService.EXTRA_RESULT_DATA, result.data)
             }
-            startForegroundService(intent)
-            val overlayIntent = Intent(this, OverlayService::class.java).apply {
-                action = OverlayService.ACTION_START
+            // v1.0.31: starting a foreground service can throw (seen
+            // on cloud emulators where the projection token is scoped
+            // to the stream). Name the service that failed, leave a
+            // diagnostics breadcrumb, and fail gracefully instead of
+            // crashing. The user can export diagnostics afterwards.
+            var startingService = "CaptureService"
+            try {
+                startForegroundService(intent)
+                startingService = "OverlayService"
+                val overlayIntent = Intent(this, OverlayService::class.java).apply {
+                    action = OverlayService.ACTION_START
+                }
+                startForegroundService(overlayIntent)
+            } catch (e: Exception) {
+                failServiceStart(startingService, e)
+                return@registerForActivityResult
             }
-            startForegroundService(overlayIntent)
             setStatus(getString(R.string.status_capturing))
         } else {
             setStatus(getString(R.string.status_capture_denied))
         }
+    }
+
+    /** v1.0.31: a foreground-service start threw. Log it, record a
+     * diagnostics breadcrumb naming the service and the exception, and
+     * tell the user the capture did not start. DiagnosticsLog.start()
+     * is a no-op when a session is already active, so a retry after a
+     * failed start appends to the same session. */
+    private fun failServiceStart(service: String, e: Exception) {
+        Log.e(TAG, "failed to start $service", e)
+        DiagnosticsLog.start()
+        DiagnosticsLog.record(
+            DiagnosticsLog.Kind.CAPTURE_START_FAILED,
+            "startForegroundService($service): " +
+                "${e::class.java.simpleName}: ${e.message}"
+        )
+        Toast.makeText(this, R.string.capture_start_failed, Toast.LENGTH_LONG).show()
+        setStatus(getString(R.string.capture_start_failed))
     }
 
     /** Diagnostics export (v1.0.6): the user picks where the report

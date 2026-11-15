@@ -35,7 +35,12 @@ object DiagnosticsLog {
         GUIDES_HIDDEN,
         GUIDES_SHOWN,
         EDIT_ENTER,
-        EDIT_EXIT
+        EDIT_EXIT,
+        /** v1.0.31: a post-confirm capture-startup step threw
+         * (getMediaProjection / createVirtualDisplay / CvPipeline
+         * init). The detail names the failing call, so the next
+         * cloud-emulator run can say what threw. */
+        CAPTURE_START_FAILED
     }
 
     /** One recorded event. [elapsedMs] is milliseconds since [start]. */

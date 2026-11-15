@@ -5,6 +5,7 @@
     <string name="status_ready">Ready. Start capture, then switch to the game.</string>
     <string name="status_capturing">Capturing — aim lines active over the game.</string>
     <string name="status_capture_denied">Screen capture was denied. Tap Start to try again.</string>
+    <string name="capture_start_failed">Capture failed to start. Export diagnostics to see which step failed.</string>
     <string name="status_overlay_denied">Overlay permission was denied. The tool cannot draw lines without it.</string>
     <string name="status_demo">Demo mode — synthetic table, no game needed.</string>
     <string name="status_stopped">Stopped.</string>

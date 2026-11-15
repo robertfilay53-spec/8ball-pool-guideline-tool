@@ -146,6 +146,22 @@ class CaptureService : Service() {
             android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
         )
 
+        // 2. Heavy work only AFTER startForeground. v1.0.31: the whole
+        // post-confirm stretch is wrapped. On cloud emulators the
+        // MediaProjection token can be scoped to the stream or a
+        // projection can already be held by the streaming session, so
+        // getMediaProjection / createVirtualDisplay can throw, and any
+        // throw here used to kill the process with no breadcrumb.
+        // The precise steps have their own catches naming the failing
+        // call; this outer catch is the backstop for anything else.
+        try {
+            startCaptureAfterForeground(intent)
+        } catch (e: Exception) {
+            failCaptureStart("startCapture", e)
+        }
+    }
+
+    private fun startCaptureAfterForeground(intent: Intent) {
         // 2. Heavy work only AFTER startForeground.
         if (!OpenCvInit.ensureLoaded()) {
             updateNotification("OpenCV failed to load — stopping")
@@ -154,10 +170,20 @@ class CaptureService : Service() {
             return
         }
 
-        val metrics = currentDisplayMetrics()
-        pipeline = CvPipeline(metrics.widthPixels, metrics.heightPixels).apply {
-            tableOverrideNormalized = store.getTableCorners()
-            gameProfile = store.getGameProfile()
+        val metrics = try {
+            currentDisplayMetrics()
+        } catch (e: Exception) {
+            failCaptureStart("currentDisplayMetrics", e)
+            return
+        }
+        pipeline = try {
+            CvPipeline(metrics.widthPixels, metrics.heightPixels).apply {
+                tableOverrideNormalized = store.getTableCorners()
+                gameProfile = store.getGameProfile()
+            }
+        } catch (e: Exception) {
+            failCaptureStart("CvPipeline init", e)
+            return
         }
         val displayManager = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
         displayManager.registerDisplayListener(displayListener, Handler(mainLooper))
@@ -177,10 +203,35 @@ class CaptureService : Service() {
         startMediaProjection(resultCode, resultData)
     }
 
+    /** v1.0.31: a post-confirm startup step threw. Log it, leave a
+     * diagnostics breadcrumb naming the failing call (plus the
+     * exception type and message), and stop gracefully instead of
+     * crashing. The breadcrumb survives in the in-memory log, so the
+     * user can export diagnostics afterwards and the next
+     * cloud-emulator run can say exactly what threw. */
+    private fun failCaptureStart(step: String, e: Exception? = null) {
+        val detail = if (e == null) {
+            step
+        } else {
+            "$step: ${e::class.java.simpleName}: ${e.message}"
+        }
+        Log.e(TAG, "capture start failed at $detail", e)
+        DiagnosticsLog.record(DiagnosticsLog.Kind.CAPTURE_START_FAILED, detail)
+        updateNotification("Capture failed to start, see diagnostics")
+        stopSelf()
+    }
+
     private fun startMediaProjection(resultCode: Int, resultData: Intent) {
         val projectionManager =
             getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        val projection = projectionManager.getMediaProjection(resultCode, resultData)
+        val projection = try {
+            projectionManager.getMediaProjection(resultCode, resultData)
+        } catch (e: Exception) {
+            // Cloud emulator: the token can be scoped to the stream or
+            // a projection already held by the streaming session.
+            failCaptureStart("getMediaProjection", e)
+            return
+        }
         mediaProjection = projection
         projection.registerCallback(object : MediaProjection.Callback() {
             override fun onStop() {
@@ -191,13 +242,30 @@ class CaptureService : Service() {
         }, Handler(mainLooper))
 
         val densityDpi = resources.displayMetrics.densityDpi
-        imageReader = ImageReader.newInstance(VD_WIDTH, VD_HEIGHT, PixelFormat.RGBA_8888, 2)
-        virtualDisplay = projection.createVirtualDisplay(
-            "PoolGuideCapture",
-            VD_WIDTH, VD_HEIGHT, densityDpi,
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-            imageReader!!.surface, null, null
-        )
+        imageReader = try {
+            ImageReader.newInstance(VD_WIDTH, VD_HEIGHT, PixelFormat.RGBA_8888, 2)
+        } catch (e: Exception) {
+            failCaptureStart("ImageReader.newInstance", e)
+            return
+        }
+        virtualDisplay = try {
+            projection.createVirtualDisplay(
+                "PoolGuideCapture",
+                VD_WIDTH, VD_HEIGHT, densityDpi,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                imageReader!!.surface, null, null
+            )
+        } catch (e: Exception) {
+            failCaptureStart("createVirtualDisplay", e)
+            return
+        }
+        // Defensive check (v1.0.31): createVirtualDisplay can return
+        // null when the display could not be created. Never start the
+        // CV thread without a real virtual display behind it.
+        if (virtualDisplay == null) {
+            failCaptureStart("createVirtualDisplay returned null")
+            return
+        }
 
         cvThread = HandlerThread("poolguide-cv").apply { start() }
         cvHandler = Handler(cvThread!!.looper)
