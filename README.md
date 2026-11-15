@@ -461,7 +461,17 @@ candidates), so the work width stays 720. The experiment record is
 `../cv-harness/run_v1046.py` with the rescaled ground truth
 (`ground_truth_640.json`, every coordinate times 640/720) and the
 before/after JSONs; the `RESULTS.md` header was bumped to v1.0.46
-with the figures unchanged, since no pipeline code changed.
+with the figures unchanged, since no pipeline code changed. In v1.0.47
+`run_harness.py` learned to write the Adversarial tables section itself:
+it reads the newest versioned adversarial JSON (the -after file of the
+newest pair, with a loud warning if before/after disagree, and a
+`--adversarial` override for the abandoned-change case) and regenerates
+the headline figures, the finding bullets and the per-table rows from
+it, so the section now survives a re-run instead of being wiped. The
+regenerated section was checked row for row against the hand-maintained
+one it replaces: identical except for the header comment. The
+`RESULTS.md` header was bumped to v1.0.47 with the figures unchanged,
+since no pipeline code changed.
 
 Interaction work (v1.0.4, the remaining decode items): an **Edit/Play
 toggle** on the floating bubble (Line Guide lead) that freezes the current
