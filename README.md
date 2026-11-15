@@ -52,6 +52,10 @@ screen. Nothing about the game is changed.**
    blocked (FLAG_SECURE?)" on the control bubble and is recorded in the
    diagnostics export with the frame it started on and whether the table
    was locked just before, so the next test can map when the flag is on.
+   The capture itself is named neutrally: since v1.0.37 the virtual
+   display is "ScreenCapture" and the foreground notification reads
+   "Guide active", so the tool's own name never appears in the system
+   capture UI.
 3. **No ban guarantee is possible.** Enforcement is mostly server-side
    (shot accuracy, win-rate jumps, reports). Use a **secondary or guest
    account first**. The first-run warning in the app says the same.
@@ -62,7 +66,12 @@ screen. Nothing about the game is changed.**
    is detected with a tightly fitted window (the wooden rail is nearly the
    same hue) — it works on the synthetic tables, and the window is now
    recalibratable per game version from the Calibrate screen (sliders)
-   if a real brown table needs it. The bank- and kick-shot cushion
+   if a real brown table needs it. Since v1.0.34 the white and
+   stripe brightness floors are relative to the felt instead of
+   fixed (the floor is the felt's brightness + 30, with a minimum
+   of 90), so a dim table down to about 0.37x brightness still
+   reads the cue ball; below that the cue reads SOLID by design
+   and the tool reports no cue rather than guessing. The bank- and kick-shot cushion
    correction is fitted to the synthetic harness data, where it
    measures zero; real-table cushion behaviour is unmeasured. A
    stripe ball's white number band can also read as a second white
@@ -75,15 +84,20 @@ screen. Nothing about the game is changed.**
    still detected (it IS the stripe ball, just mis-coloured) and is
    tagged STRIPE. If the real cue's group ever reads UNKNOWN
    (occluded, or cut off by the frame edge) the pick falls back to
-   the first white ball, and a phantom listed first can win that
-   fallback — EDIT mode exists to correct a mis-detection by hand.
+   the guideline ray and then to the first white ball (see item 21),
+   and a phantom listed first can win that last fallback. EDIT mode
+   exists to correct a mis-detection by hand.
 5. **EDIT mode's anchor handles are touchable on purpose.** The Edit button
    on the floating bubble freezes the current shot and shows two draggable
    handles (cue + ghost) so you can correct a mis-detection by hand. Those
    two small windows ARE touchable (that is how dragging works), so a touch
    landing exactly on a handle sets `FLAG_WINDOW_IS_OBSCURED` — use EDIT
    mode to arrange, then tap Done and shoot in PLAY mode, where every line
-   window is pass-through again. Since v1.0.6 the lock ring in EDIT mode
+   window is pass-through again. Since v1.0.41 EDIT mode also exits
+   on its own after 20 seconds without a handle drag, so a forgotten
+   EDIT session cannot leave a touchable handle over the table while
+   you shoot; the handles disappear and live detection resumes.
+   Since v1.0.6 the lock ring in EDIT mode
    shows a neutral grey full circle (a frozen state) instead of the last
    live lock progress, so it cannot be misread as "the table is 60%
    locked" while you edit a frozen shot.
@@ -334,7 +348,11 @@ screen. Nothing about the game is changed.**
     old first-white-colour pick took a stripe ball's white number
     band as the cue on the blue demo table (see item 4). The band
     phantom is still detected and tagged STRIPE. If no ball carries
-    the CUE group the pick falls back to the first white ball.
+    the CUE group the pick falls back to the guideline ray (since
+    v1.0.40): the white ball nearest the detected aim line, within
+    20 px of it, wins, so a cue ball hidden in a cluster is picked
+    by the ball on the actual aim line. Only if there is no guideline
+    either does it fall back to the first white ball.
 
 22. **The ghost-ball ring marks where the cue ball must arrive.**
     Since v1.0.26 the live overlay draws a green ring of one ball
@@ -356,6 +374,31 @@ screen. Nothing about the game is changed.**
     the shot will drop. Cut angle, thin-cut warning, and the
     blocked-path flag still carry the make judgement.
 
+23. **The session pot rate counts what you potted, not how well
+    you played.** Since v1.0.42 the control bubble shows
+    "Pots 7/10 (70%)" once you have taken a shot while capture is
+    locked, and the diagnostics export carries a "Session pot rate"
+    line. A shot counts only after the cue ball jumps over 1.5 ball
+    diameters and stays there for 2 frames, and a pot counts only
+    after the balls settle (5 stable frames); a missing cue ball
+    counts as a scratch, never a pot, and balls that never settle
+    within 150 frames keep the shot count but get no pot count. At
+    10 shots and 80% or more the bubble adds "Pot rate very high,
+    vary your play". The tracker cannot tell whose turn it is, so a
+    shot taken while capture runs through an opponent's turn counts
+    too, and the numbers are a session tally, not a make guarantee.
+
+24. **The app's permission footprint is pinned by a test.** Since
+    v1.0.43 a unit test fails if the manifest ever gains INTERNET,
+    QUERY_ALL_PACKAGES, PACKAGE_USAGE_STATS, READ_EXTERNAL_STORAGE,
+    or BIND_ACCESSIBILITY_SERVICE, if the permission set drifts from
+    exactly SYSTEM_ALERT_WINDOW, FOREGROUND_SERVICE,
+    FOREGROUND_SERVICE_MEDIA_PROJECTION,
+    FOREGROUND_SERVICE_SPECIAL_USE, and POST_NOTIFICATIONS, or if
+    any component other than MainActivity is exported. The tool
+    stays offline and unprivileged by construction, and a deliberate
+    future change has to update the test in the same change.
+
 ## How it works
 
 ```
@@ -366,7 +409,8 @@ MediaProjection + VirtualDisplay (960x540, foreground service)
         (green/blue ball windows are learned from the felt colour, so a
         ball the same hue as the cloth is still separated from it)
      -> the game's own white guideline: Gaussian blur 5x5 -> Canny (50, 150)
-        -> HoughLinesP (30/15/8) -> verifier -> robust refit -> LineTracker
+        -> HoughLinesP (30/15/8) -> verifier (parallel-edge dedup since
+        v1.0.39) -> robust refit -> LineTracker
   -> shot solver (ghost ball, cut angle, tangent, mirror-pocket banks
      (one- and two-rail), mirror-ghost kicks (one- and two-rail), combo + kiss
      shots; every reachable pocket ranked, first clear pocket shown;
@@ -398,6 +442,11 @@ systematic angle error is left to correct). The CV harness (15 synthetic
 tables, `../cv-harness/RESULTS.md`) measures the v1.0.3 pipeline at
 15/15 tables, 85/85 balls with 0 false positives, 15/15 shots, mean
 cut-angle error 0.32 deg (v1.0.1 was 13/15, 76/85, 11/15, 1.46 deg).
+As of v1.0.44 the same harness measures 15/15, 85/85, 0 false
+positives, 15/15, mean cut-angle error 0.177 deg (max 0.27 deg);
+the adversarial tables measure 8/9 tables, 46 balls, 4 missed
+(all the purple-felt table, which the felt windows do not cover),
+0 false positives.
 
 Interaction work (v1.0.4, the remaining decode items): an **Edit/Play
 toggle** on the floating bubble (Line Guide lead) that freezes the current
@@ -430,8 +479,10 @@ detection fails, which never happens on the 15 harness tables.
   JitPack `com.github.opencv:opencv:4.9.0`.
 - **Performance**: 15 FPS cap (Scugalug measured targets: capture scale
   0.75, 15 FPS — the table does not move between frames, and anything
-  faster only heats the phone), ~720p downscale, Hough every 2nd-3rd frame,
-  HSV + contours for coloured balls every frame, Hough restricted to the
+  faster only heats the phone), ~720p downscale, HoughCircles and the
+  guideline Hough every 3rd frame (guideline cadence 3 since v1.0.38),
+  HSV + contours for coloured balls every frame, the ball HSV pass
+  cropped to the table ROI (since v1.0.36), Hough restricted to the
   table ROI, Mat objects reused, detection on a background HandlerThread,
   never `bitmapToMat` per frame. Aim-fit error measured on the synthetic
   demo tables with a Python replica of the detector (`tools/measure_aim_fit.py`):
@@ -539,7 +590,20 @@ runs the instrumented tests on API 34 (x86_64). The workflow file is
   cushion-correction fit, EDIT-mode manual aim (cue re-solve, ghost
   re-aim, impossible-drag guard, table clamp), ratio fallback geometry
   (Bloro band fractions, 2:1 centring, portrait clamp), practice-table
-  state (1-px nudge, clamp, hit test, reset). 85 tests.
+  state (1-px nudge, clamp, hit test, reset), ball-group
+  classification (disc sampling, stripe / solid / cue / 8-ball,
+  ambiguous "?" cases), overlay labels (cut angle, pocket distance,
+  rail-contact markers, ghost-ball ring), shot history + blocked-path
+  flagging, table presets, calibration preview, bubble drag + lock
+  ring, CV config + guideline verifier (parallel-edge dedup, spatial
+  grid), ball-detector table ROI, black-frame state, display-name
+  pins, aim-activity tracking (auto-hide while aiming), EDIT
+  inactivity (20 s auto-exit), cue pick by guideline ray, session
+  pot-rate tracking (shot / pot counting, settle, scratch, reminder),
+  and the no-input-injection + manifest-guard tests (no
+  dispatchGesture / AccessibilityService / UiAutomation /
+  Instrumentation anywhere; permission set pinned to the five minimal
+  permissions, MainActivity the only exported component). 439 tests.
 - **Instrumented** (`app/src/androidTest`): the real pipeline on the two
   synthetic tables (green + blue felt) — table, 6 pockets, cue ball, 8+
   balls, guideline, and a solved shot with the expected target and pocket,
@@ -549,8 +613,11 @@ runs the instrumented tests on API 34 (x86_64). The workflow file is
   "Show all shots" is on, 4 when it is off) and hides them on toggle /
   black frame; EDIT mode freezes the shot, shows 2 anchor handles, follows
   a ghost-anchor drag, keeps drawing with no guideline, and resumes live
-  detection on Done; the overlay service runs in demo mode; the practice
-  activity launches, solves the default layout, and nudges 1 px. 10 tests.
+  detection on Done; the overlay service runs in demo mode; the
+  ball-detector ROI tests (green table cue + target through the ROI,
+  a rail ball near the corner, no-table fallback); calibration-activity
+  tests; the practice activity launches, solves the default layout,
+  and nudges 1 px. 49 tests.
 - **Not yet tested (needs a real phone + the game)**: FLAG_SECURE blackout,
   `isObscured` behaviour while shooting, real-table CV accuracy across
   table skins and resolutions. See `../phone-test/PHONE-TEST-PLAN.md` in
@@ -560,19 +627,28 @@ runs the instrumented tests on API 34 (x86_64). The workflow file is
 
 ```
 app/src/main/java/com/poolguide/tool/
-  geometry/   Vec2, ShotSolver, PathBlock, BlockedPathLabel
+  geometry/   Vec2, ShotSolver, PathBlock, BlockedPathLabel,
+              BallGroup, BallGroupTag, CutAngleLabel, GhostBallRing,
+              PocketDistanceLabel, RailContactMarker, CushionCorrection
               (pure Kotlin, JVM-testable)
   cv/         CvConfig, TableGeometry, TableDetector, BallDetector,
-              GuidelineDetector, CvPipeline, OpenCvInit,
+              BallClassifier, GuidelineDetector, CvPipeline, CuePicker,
+              CalibrationPreview, LiveFallback, OpenCvInit,
               RatioTableGeometry (fallback table from frame size)
-  capture/    CaptureService, PreviewBus, OverlayBus, FramePacer
+  capture/    CaptureService, PreviewBus, OverlayBus, FramePacer,
+              CaptureDisplayNames (virtual display + notification names)
               (MediaProjection, foreground svc; 15 FPS pacing)
-  overlay/    LineView, LineOverlayManager, OverlayService, ManualAim
+  overlay/    LineView, LineOverlayManager, OverlayService, ManualAim,
+              AimActivityTracker (auto-hide while aiming),
+              EditInactivityTracker (20 s EDIT auto-exit), BubbleDrag,
+              LineSmoother, LockRingView
               (one small window per line; specialUse foreground svc;
               EDIT mode: frozen shot + draggable cue/ghost anchors)
   data/       CalibrationStore, GameProfile (per-version calibration),
               TablePreset (7ft/8ft/9ft table-size presets),
-              ShotHistory (last 8 solved shots, with the blocked flag)
+              ShotHistory (last 8 solved shots, with the blocked flag),
+              DiagnosticsLog (persisted session log),
+              ShotOutcomeTracker (session pot-rate stat)
   ui/         MainActivity, CalibrationActivity, PracticeState,
               PracticeView, PracticeActivity (offline practice table)
 app/src/main/assets/demo/  synthetic tables + black frame (tests + demo mode)
