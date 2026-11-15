@@ -72,4 +72,25 @@ class CvConfigTest {
         assertEquals(90.0, CvConfig.feltRelativeWhiteVFloor(felt, CvConfig.WHITE_V_FLOOR), 0.0)
         assertFalse(73.0 > CvConfig.feltRelativeWhiteVFloor(felt, CvConfig.WHITE_V_FLOOR))
     }
+
+    @Test
+    fun guidelineCadence_isThreeFrames() {
+        // v1.0.38: guideline Hough runs every 3rd frame (was every
+        // 2nd). The tracker fades a lost segment over 5 frames, so
+        // the 3-frame gap is covered; the harness is identical on
+        // every accuracy field at cadence 3 (15 baseline + 8
+        // adversarial tables, results-v1.0.38-before/after.json).
+        assertEquals(3, CvConfig.GUIDELINE_EVERY_N_FRAMES)
+    }
+
+    @Test
+    fun guidelineCadence_runsOnFramesZeroThreeSix() {
+        // Mirrors the CvPipeline gate exactly: frameIndex %
+        // GUIDELINE_EVERY_N_FRAMES == 0. Detection frames are 0, 3,
+        // 6; the in-between frames reuse the last tracked segments.
+        val runFrames = (0L..8L).filter { it % CvConfig.GUIDELINE_EVERY_N_FRAMES == 0L }
+        assertEquals(listOf(0L, 3L, 6L), runFrames)
+        val skipFrames = (0L..8L).filter { it % CvConfig.GUIDELINE_EVERY_N_FRAMES != 0L }
+        assertEquals(listOf(1L, 2L, 4L, 5L, 7L, 8L), skipFrames)
+    }
 }

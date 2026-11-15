@@ -183,7 +183,7 @@ class CvPipeline(
         // v1.0.20: cue by group, not by colour — see CuePicker.
         val cue = CuePicker.pickCue(balls)
 
-        // Guideline: detect every 2nd frame inside the table ROI; between
+        // Guideline: detect every 3rd frame inside the table ROI; between
         // detection frames the last tracked segments are reused.
         val guideline: List<GuidelineSegment> =
             if (frameIndex % CvConfig.GUIDELINE_EVERY_N_FRAMES == 0L && table != null) {
