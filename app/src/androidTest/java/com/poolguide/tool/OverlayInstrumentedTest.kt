@@ -415,6 +415,100 @@ class OverlayInstrumentedTest {
     }
 
     @Test
+    fun editMode_twoRailBank_freezesBank2ShowsLegsAndHandles() {
+        val ctx = appContext()
+        assertTrue(
+            "overlay permission must be granted for this test",
+            Settings.canDrawOverlays(ctx)
+        )
+        val store = CalibrationStore(ctx).apply {
+            guidesHidden = false
+            bankLinesEnabled = true
+        }
+        val manager = LineOverlayManager(ctx, store)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+
+        // Live mode: the two-rail bank draws 8 windows (aim + 3 bank
+        // legs + pocket ring + ghost ring + 2 contact markers) and
+        // 2 labels (angle + pocket distance).
+        instrumentation.runOnMainSync { manager.update(bank2Result()) }
+        assertEquals(8, manager.lineWindowCount)
+        assertEquals(2, manager.labelWindowCount)
+        assertEquals(listOf("12.6°", "29.7 bd"), manager.labelTexts)
+        assertEquals(0, manager.handleWindowCount)
+        assertFalse(manager.isEditMode)
+
+        // Enter edit mode: the frozen two-rail bank draws the same
+        // 8 windows (not a collapsed direct shot) + 2 handles.
+        instrumentation.runOnMainSync { manager.toggleEditMode() }
+        assertTrue(manager.isEditMode)
+        assertEquals(8, manager.lineWindowCount)
+        assertEquals(2, manager.labelWindowCount)
+        assertEquals(2, manager.handleWindowCount)
+        val frozen = manager.editedBank2!!
+        assertEquals(586.2850922803298, frozen.direct.ghostPoint.x, 1e-9)
+        assertEquals(308.3423284382803, frozen.direct.ghostPoint.y, 1e-9)
+        assertEquals(623.5294117647059, frozen.railContacts[0].x, 1e-9)
+        assertEquals(340.0, frozen.railContacts[0].y, 0.0)
+        assertEquals(680.0, frozen.railContacts[1].x, 0.0)
+        assertEquals(292.0, frozen.railContacts[1].y, 1e-9)
+
+        // Drag the cue anchor 20 px left (working coords): the bank
+        // is re-solved from the corrected cue; the ghost and both
+        // contacts stay where the solver puts them, the cut changes.
+        instrumentation.runOnMainSync {
+            manager.applyAnchorDrag(Anchor.CUE, Vec2(-20.0, 0.0))
+        }
+        val cueEdited = manager.editedBank2!!
+        assertEquals(560.0, cueEdited.direct.aimLine.start.x, 0.0)
+        assertEquals(300.0, cueEdited.direct.aimLine.start.y, 0.0)
+        assertEquals(586.2850922803298, cueEdited.direct.ghostPoint.x, 1e-9)
+        assertEquals(623.5294117647059, cueEdited.railContacts[0].x, 1e-9)
+        assertEquals(680.0, cueEdited.railContacts[1].x, 0.0)
+        assertEquals(22.756206986766507, cueEdited.direct.cutAngleDegrees, 1e-9)
+
+        // Drag the ghost anchor 2 px down (working coords): the aim
+        // line follows, BOTH contacts move along their rails, the
+        // pocket stays the same. The cut comes from the CORRECTED
+        // cue (560,300) after the cue drag above, not the frozen
+        // cue: 13.67 deg, not the 23.56 deg a ghost drag from the
+        // frozen cue would give (probe33 chained sequence).
+        instrumentation.runOnMainSync {
+            manager.applyAnchorDrag(Anchor.GHOST, Vec2(0.0, 2.0))
+        }
+        assertTrue("ghost drag must register an override", manager.editHasOverrides)
+        assertTrue("still in edit mode after the drag", manager.isEditMode)
+        val edited = manager.editedBank2!!
+        assertEquals(586.2850922803298, edited.direct.ghostPoint.x, 1e-9)
+        assertEquals(310.3423284382803, edited.direct.ghostPoint.y, 1e-9)
+        assertEquals(13.674160027265291, edited.direct.cutAngleDegrees, 1e-9)
+        assertEquals(628.402100096326, edited.railContacts[0].x, 1e-9)
+        assertEquals(340.0, edited.railContacts[0].y, 0.0)
+        assertEquals(680.0, edited.railContacts[1].x, 0.0)
+        assertEquals(303.66613755413914, edited.railContacts[1].y, 1e-9)
+        assertEquals(360.0, edited.bankPath[2].end.x, 0.0)
+        assertEquals(20.0, edited.bankPath[2].end.y, 0.0)
+        assertEquals(8, manager.lineWindowCount)
+
+        // Drag the ghost 300 px further left: the cut would pass
+        // 90 deg, so the last good two-rail bank is kept.
+        instrumentation.runOnMainSync {
+            manager.applyAnchorDrag(Anchor.GHOST, Vec2(-300.0, 0.0))
+        }
+        assertEquals(586.2850922803298, manager.editedBank2!!.direct.ghostPoint.x, 1e-9)
+        assertEquals(628.402100096326, manager.editedBank2!!.railContacts[0].x, 1e-9)
+
+        // Leaving edit mode resumes live detection (8 windows again).
+        instrumentation.runOnMainSync { manager.toggleEditMode() }
+        assertFalse(manager.isEditMode)
+        assertEquals(0, manager.handleWindowCount)
+        instrumentation.runOnMainSync { manager.update(bank2Result()) }
+        assertEquals(8, manager.lineWindowCount)
+
+        instrumentation.runOnMainSync { manager.removeAll() }
+    }
+
+    @Test
     fun lockRing_showsTableLockProgress() {
         val ctx = appContext()
         assertTrue(

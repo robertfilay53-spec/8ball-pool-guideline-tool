@@ -44,8 +44,14 @@ enum class Anchor { CUE, GHOST }
  * base is the kick solution, the CUE drag re-solves the kick from the
  * corrected cue ([ShotSolver.solveKick]), and the GHOST drag mirrors
  * the dragged ghost across the rail, aims the cue at the mirror, and
- * rebuilds the kick path from the contact it implies. Two-rail and
- * combo/kiss shots stay direct-only: EDIT mode does not enter for them.
+ * rebuilds the kick path from the contact it implies. Two-rail bank
+ * shots (v1.0.33) freeze the same way again: the base is the two-rail
+ * bank solution, the CUE drag re-solves the bank from the corrected
+ * cue ([ShotSolver.solveTwoRailBank]), and the GHOST drag re-aims the
+ * cue at the dragged point and rebuilds the two-leg bank path from
+ * the departure direction it implies, reflecting once more off the
+ * second rail. Two-rail kick and combo/kiss shots stay out: EDIT
+ * mode does not enter for them.
  */
 class ManualAim {
 
@@ -55,6 +61,7 @@ class ManualAim {
     private var baseShot: ShotSolver.ShotSolution? = null
     private var baseBank: ShotSolver.BankSolution? = null
     private var baseKick: ShotSolver.KickSolution? = null
+    private var baseTwoRailBank: ShotSolver.TwoRailBankSolution? = null
     /** The rail the frozen kick plays off, recovered from the kick
      * solution (v1.0.30): the rail passes through the rail contact and
      * its normal is the ghost-to-mirrored-ghost direction. The
@@ -67,6 +74,14 @@ class ManualAim {
      * solution does not store the rail, and the mirror/reflection
      * helpers are sign-agnostic in the normal, so either sign works. */
     private var bankRail: Rail? = null
+    /** The two rails the frozen two-rail bank plays off, recovered
+     * from the bank solution (v1.0.33): each rail passes through its
+     * rail contact, its tangent the bisector of the incoming and
+     * outgoing legs at that contact. The solution does not store
+     * the rails, and the mirror/reflection helpers are
+     * sign-agnostic in the normal, so either sign works. */
+    private var bankRail1: Rail? = null
+    private var bankRail2: Rail? = null
     /** The table rect from the last anchor drag (v1.0.29): the bank
      * contact must fall on the table, and the rect is only known from
      * a drag (like the anchor clamp). Null when no drag has supplied
@@ -77,11 +92,13 @@ class ManualAim {
     private var ghostOverride: Vec2? = null
 
     val isEditMode: Boolean get() = mode == OverlayMode.EDIT
-    val hasShot: Boolean get() = baseShot != null || baseBank != null || baseKick != null
+    val hasShot: Boolean get() = baseShot != null || baseBank != null || baseKick != null || baseTwoRailBank != null
     /** True when the frozen shot is a one-rail bank (v1.0.29). */
     val isBankEdit: Boolean get() = baseBank != null
     /** True when the frozen shot is a one-rail kick (v1.0.30). */
     val isKickEdit: Boolean get() = baseKick != null
+    /** True when the frozen shot is a two-rail bank (v1.0.33). */
+    val isTwoRailBankEdit: Boolean get() = baseTwoRailBank != null
     val hasOverrides: Boolean get() = cueOverride != null || ghostOverride != null
 
     /** Freeze [shot] as the editable base and enter EDIT mode. */
@@ -89,8 +106,11 @@ class ManualAim {
         baseShot = shot
         baseBank = null
         baseKick = null
+        baseTwoRailBank = null
         bankRail = null
         kickRail = null
+        bankRail1 = null
+        bankRail2 = null
         ballRadiusPx = radiusPx
         cueOverride = null
         ghostOverride = null
@@ -104,11 +124,14 @@ class ManualAim {
         baseShot = null
         baseBank = bank
         baseKick = null
+        baseTwoRailBank = null
         ballRadiusPx = radiusPx
         cueOverride = null
         ghostOverride = null
         bankRail = recoverRail(bank)
         kickRail = null
+        bankRail1 = null
+        bankRail2 = null
         mode = OverlayMode.EDIT
     }
 
@@ -119,11 +142,35 @@ class ManualAim {
         baseShot = null
         baseBank = null
         baseKick = kick
+        baseTwoRailBank = null
         ballRadiusPx = radiusPx
         cueOverride = null
         ghostOverride = null
         bankRail = null
         kickRail = recoverKickRail(kick)
+        bankRail1 = null
+        bankRail2 = null
+        mode = OverlayMode.EDIT
+    }
+
+    /** Freeze [bank2] as the editable base and enter EDIT mode
+     * (v1.0.33). Both rails are recovered from the solution: each
+     * passes through its rail contact, its tangent the bisector of
+     * the incoming and outgoing legs at that contact (see
+     * [recoverTwoRailBankRails]). */
+    fun enterEditMode(bank2: ShotSolver.TwoRailBankSolution, radiusPx: Double) {
+        baseShot = null
+        baseBank = null
+        baseKick = null
+        baseTwoRailBank = bank2
+        ballRadiusPx = radiusPx
+        cueOverride = null
+        ghostOverride = null
+        bankRail = null
+        kickRail = null
+        val (rail1, rail2) = recoverTwoRailBankRails(bank2)
+        bankRail1 = rail1
+        bankRail2 = rail2
         mode = OverlayMode.EDIT
     }
 
@@ -141,14 +188,44 @@ class ManualAim {
         return Rail(kick.railContact, normal)
     }
 
+    /** Recover the two-rail bank's rails from its solution (v1.0.33):
+     * at each contact the rail tangent is the bisector of the
+     * incoming and outgoing legs (their normalized directions
+     * summed and normalized), and the normal is the tangent's
+     * perpendicular. The recovered normal may point OUT of the table
+     * (opposite sign to the true rail normal); that is fine because
+     * [ShotSolver.railContactPoint] and
+     * [ShotSolver.reflectDirection] are sign-insensitive. A
+     * degenerate leg pair (a 180-degree turn, which a bank path
+     * never has) falls back to the incoming leg's perpendicular.
+     * Probe-verified on the v1.0.33 fixture: rail1 tangent (1, 0),
+     * normal (0, 1); rail2 tangent (0, -1), normal (1, 0). */
+    private fun recoverTwoRailBankRails(
+        bank2: ShotSolver.TwoRailBankSolution
+    ): Pair<Rail, Rail> {
+        val path = bank2.bankPath
+        fun railAt(index: Int): Rail {
+            val contact = path[index].end
+            val incoming = (path[index].end - path[index].start).normalized()
+            val outgoing = (path[index + 1].end - path[index + 1].start).normalized()
+            val sum = incoming + outgoing
+            val tangent = if (sum.norm() < 1e-9) incoming else sum.normalized()
+            return Rail(contact, tangent.perp())
+        }
+        return railAt(0) to railAt(1)
+    }
+
     /** Leave EDIT mode; the frozen shot and any overrides are dropped. */
     fun exitEditMode() {
         mode = OverlayMode.PLAY
         baseShot = null
         baseBank = null
         baseKick = null
+        baseTwoRailBank = null
         bankRail = null
         kickRail = null
+        bankRail1 = null
+        bankRail2 = null
         lastTable = null
         cueOverride = null
         ghostOverride = null
@@ -175,6 +252,14 @@ class ManualAim {
         return applyKickOverrides(base)
     }
 
+    /** The two-rail bank to draw in EDIT mode (v1.0.33): the frozen
+     * base with any overrides applied. Null when no two-rail bank
+     * was frozen. */
+    fun currentTwoRailBank(): ShotSolver.TwoRailBankSolution? {
+        val base = baseTwoRailBank ?: return null
+        return applyTwoRailBankOverrides(base)
+    }
+
     /** Drag [anchor] by [delta] (working coordinates), clamped inside
      * [table] (inset by the ball radius) when a table is known. A drag
      * the correction rejects (cut over 90, contact off the table, no
@@ -185,7 +270,7 @@ class ManualAim {
      * back to the frozen base, losing the accepted correction. */
     fun dragAnchor(anchor: Anchor, delta: Vec2, table: TableRect?) {
         if (table != null) lastTable = table
-        val base = baseShot ?: baseBank?.direct ?: baseKick?.direct ?: return
+        val base = baseShot ?: baseBank?.direct ?: baseKick?.direct ?: baseTwoRailBank?.direct ?: return
         when (anchor) {
             Anchor.CUE -> {
                 val prev = cueOverride
@@ -210,6 +295,7 @@ class ManualAim {
         if (baseShot != null) return currentShot() === baseShot
         if (baseBank != null) return currentBank() === baseBank
         if (baseKick != null) return currentKick() === baseKick
+        if (baseTwoRailBank != null) return currentTwoRailBank() === baseTwoRailBank
         return false
     }
 
@@ -385,6 +471,101 @@ class ManualAim {
             railContact = contact,
             kickPath = listOf(Segment(aimStart, contact), Segment(contact, aimEnd)),
             mirroredGhost = mirrored
+        )
+    }
+
+    /** Apply the anchor overrides to a frozen two-rail bank (v1.0.33).
+     * The pocket stays as detected; the rails are the ones recovered
+     * at freeze time. CUE moved: re-solve the bank from the corrected
+     * cue ([ShotSolver.solveTwoRailBank]); when the corrected cue
+     * cannot bank to the pocket, or either contact would fall off
+     * the table, keep the base. The ghost and contacts depend only
+     * on the target, pocket and rails, never on the cue, so a cue
+     * drag moves the cut only. GHOST dragged: aim at the dragged
+     * point, and rebuild the bank path from the departure direction
+     * it implies, reflecting once more off the second rail. Like the
+     * one-rail bank ghost drag this is a manual aim correction, not
+     * a physics re-solve: there is no pocket-consistency check on
+     * the reflected ray (the ghost sits one ball diameter from the
+     * target, so a few pixels of drag swing the departure several
+     * degrees and any such check would reject nearly every drag).
+     * The drag is ignored only when the cut would exceed 90 degrees,
+     * when either departure ray never meets its rail, or when either
+     * contact would fall off the table. The rays are built long
+     * (2000 px): the mirrored pocket distance belongs to the
+     * original departure, and a dragged departure meets the rails
+     * farther along than that. The cushion correction is ideal
+     * reflection here, which matches
+     * [ShotSolver.solveTwoRailBank]: the fitted correction is zero.
+     * Note the contact can never fall off the rail from a clamped
+     * drag: contact1 is the crossing of the target-to-departure ray
+     * with rail1, so its rail coordinate lies between the target
+     * and the departure point. The check is still kept, as defence,
+     * for the unclamped (no-table) path. */
+    private fun applyTwoRailBankOverrides(
+        base: ShotSolver.TwoRailBankSolution
+    ): ShotSolver.TwoRailBankSolution {
+        val cue = cueOverride
+        val ghost = ghostOverride
+        if (cue == null && ghost == null) return base
+        val target = base.direct.targetLine.start
+        val pocket = base.bankPath.last().end
+        val rail1 = bankRail1 ?: return base
+        val rail2 = bankRail2 ?: return base
+        // Cue moved: re-solve the bank from the corrected cue.
+        // If the corrected cue cannot bank to the pocket, or either
+        // contact would fall off the table, keep the base.
+        if (cue != null && ghost == null) {
+            val solved = ShotSolver.solveTwoRailBank(
+                cue, target, pocket, rail1, rail2, ballRadiusPx
+            ) ?: return base
+            if (!contactOnTable(solved.railContacts[0])) return base
+            if (!contactOnTable(solved.railContacts[1])) return base
+            return solved
+        }
+        // Ghost dragged (with or without a cue override): aim at the
+        // dragged point; cut angle + deflection recomputed from the
+        // departure direction it implies, bank path rebuilt from it.
+        val aimStart = cue ?: base.direct.aimLine.start
+        val aimEnd = ghost ?: base.direct.ghostPoint
+        val aimDir = (aimEnd - aimStart).normalized()
+        if (aimDir.norm() < 1e-9) return base
+        val depart = (target - aimEnd).normalized()
+        if (depart.norm() < 1e-9) return base
+        val cut = ShotSolver.cutAngleDegrees(aimDir, depart)
+        if (cut > 90.0) return base
+        // The first contact is where the ray from the target along
+        // the departure direction meets the first rail. Reuse the
+        // production segment check on a long ray: a null means the
+        // ray never meets the rail at all.
+        val contact1 = ShotSolver.railContactPoint(
+            target, target + depart * 2000.0, rail1
+        ) ?: return base
+        if (!contactOnTable(contact1)) return base
+        // Reflect off the first rail and meet the second the same way.
+        val dir2 = ShotSolver.reflectDirection(depart, rail1)
+        val contact2 = ShotSolver.railContactPoint(
+            contact1, contact1 + dir2 * 2000.0, rail2
+        ) ?: return base
+        if (!contactOnTable(contact2)) return base
+        val tangent = ShotSolver.tangentDirection(aimDir, depart)
+        val direct = base.direct.copy(
+            ghostPoint = aimEnd,
+            aimLine = Segment(aimStart, aimEnd),
+            deflectionLine = Segment(aimEnd, aimEnd + tangent * (2 * ballRadiusPx)),
+            cutAngleDegrees = cut,
+            isThinCut = cut > ShotSolver.THIN_CUT_DEGREES,
+            distanceToImpact = aimStart.distanceTo(aimEnd)
+        )
+        return ShotSolver.TwoRailBankSolution(
+            direct = direct,
+            railContacts = listOf(contact1, contact2),
+            bankPath = listOf(
+                Segment(target, contact1),
+                Segment(contact1, contact2),
+                Segment(contact2, pocket)
+            ),
+            mirroredPocket = base.mirroredPocket
         )
     }
 
