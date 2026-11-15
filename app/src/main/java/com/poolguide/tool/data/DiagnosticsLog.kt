@@ -54,6 +54,11 @@ object DiagnosticsLog {
         GUIDES_SHOWN,
         EDIT_ENTER,
         EDIT_EXIT,
+        /** v1.0.41, REA hardening R4: EDIT mode exited on its own
+         * after 20 s without a handle drag (no Done tap). The
+         * export can tell a forgotten session from a deliberate
+         * Done (EDIT_EXIT). */
+        EDIT_AUTO_EXIT,
         /** v1.0.31: a post-confirm capture-startup step threw
          * (getMediaProjection / createVirtualDisplay / CvPipeline
          * init). The detail names the failing call, so the next
