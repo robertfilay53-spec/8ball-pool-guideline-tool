@@ -35,15 +35,23 @@ screen. Nothing about the game is changed.**
    reduces the footprint as far as legally possible: each aim line is drawn
    in its own small window sized to just that line's bounding box (never one
    full-screen overlay), and the control bubble has a **Hide guides** toggle
-   that removes every line window while you shoot. But if you tap exactly on
-   a line, the game sees the obscured flag. That is unavoidable.
+   that removes every line window while you shoot. Since v1.0.37 the lines
+   also auto-hide while you are aiming (the guideline angle swinging, or
+   the cue ball travelling after a shot) and come back once the aim has
+   been quiet for 5 frames, so no line window exists over the table at
+   the moment you tap to shoot. But if you tap exactly on a line while
+   it is drawn, the game sees the obscured flag. That is unavoidable.
 2. **The game can black out screen capture.** If 8 Ball Pool sets
    `FLAG_SECURE`, MediaProjection captures a solid black frame and this tool
    cannot see the table at all. There is no legitimate bypass without root,
    and this tool does not attempt one. The app has a **diagnostic preview**
    (Main screen, "Show captured frame") so you can see immediately whether
    the capture is black. Whether 8 Ball Pool v56.35.0 sets FLAG_SECURE is
-   still unconfirmed and is being tested on a real phone.
+   still unconfirmed and is being tested on a real phone. Since v1.0.37 a
+   black run that lasts 30 frames (about 2 seconds) shows "Capture
+   blocked (FLAG_SECURE?)" on the control bubble and is recorded in the
+   diagnostics export with the frame it started on and whether the table
+   was locked just before, so the next test can map when the flag is on.
 3. **No ban guarantee is possible.** Enforcement is mostly server-side
    (shot accuracy, win-rate jumps, reports). Use a **secondary or guest
    account first**. The first-run warning in the app says the same.

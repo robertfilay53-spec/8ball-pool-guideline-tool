@@ -43,6 +43,13 @@ object DiagnosticsLog {
         FALLBACK_END,
         BLACK_FRAME,
         BLACK_FRAME_CLEARED,
+        /** v1.0.37: a black run that persisted past
+         * [DetectionResult.BLACK_FRAME_PERSISTENT_AFTER_FRAMES]
+         * frames. The detail carries the frame it crossed the
+         * threshold on, the run length, and whether the table was
+         * locked just before the capture went black — the context
+         * the next phone test needs to map WHEN FLAG_SECURE is on. */
+        BLACK_FRAME_PERSISTENT,
         GUIDES_HIDDEN,
         GUIDES_SHOWN,
         EDIT_ENTER,

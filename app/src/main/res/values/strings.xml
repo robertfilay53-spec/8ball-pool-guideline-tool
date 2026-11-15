@@ -26,6 +26,7 @@
     <string name="edit_guides">Edit guides</string>
     <string name="done_editing">Done</string>
     <string name="no_shot_to_edit">No shot to edit yet — aim at a ball first.</string>
+    <string name="bubble_capture_blocked">Capture blocked (FLAG_SECURE?)</string>
     <string name="status_practice">Practice — drag the balls, no game needed.</string>
 
     <string name="practice_title">Practice mode</string>
