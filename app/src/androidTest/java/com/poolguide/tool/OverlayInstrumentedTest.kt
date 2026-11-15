@@ -380,7 +380,10 @@ class OverlayInstrumentedTest {
 
         // Drag the ghost anchor 2 px right (working coords): the aim
         // line follows, the contact moves along the rail, the pocket
-        // stays the same.
+        // stays the same. The contact comes from the CORRECTED cue
+        // (100,340) after the cue drag above, not the frozen cue:
+        // 144.2962962962963, not the 153.9310344827586 a ghost drag
+        // from the frozen cue would give (probe30d).
         instrumentation.runOnMainSync {
             manager.applyAnchorDrag(Anchor.GHOST, Vec2(2.0, 0.0))
         }
@@ -388,7 +391,7 @@ class OverlayInstrumentedTest {
         assertTrue("still in edit mode after the drag", manager.isEditMode)
         val edited = manager.editedKick!!
         assertEquals(284.0, edited.direct.ghostPoint.x, 1e-9)
-        assertEquals(153.9310344827586, edited.railContact.x, 1e-9)
+        assertEquals(144.2962962962963, edited.railContact.x, 1e-9)
         assertEquals(680.0, edited.direct.targetLine.end.x, 0.0)
         assertEquals(200.0, edited.direct.targetLine.end.y, 0.0)
         assertEquals(7, manager.lineWindowCount)
@@ -399,7 +402,7 @@ class OverlayInstrumentedTest {
             manager.applyAnchorDrag(Anchor.GHOST, Vec2(-273.0, 0.0))
         }
         assertEquals(284.0, manager.editedKick!!.direct.ghostPoint.x, 1e-9)
-        assertEquals(153.9310344827586, manager.editedKick!!.railContact.x, 1e-9)
+        assertEquals(144.2962962962963, manager.editedKick!!.railContact.x, 1e-9)
 
         // Leaving edit mode resumes live detection (7 windows again).
         instrumentation.runOnMainSync { manager.toggleEditMode() }
