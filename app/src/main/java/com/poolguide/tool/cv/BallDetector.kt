@@ -48,6 +48,34 @@ import kotlin.math.floor
  *   sit ~25 px from the pocket centres, just outside the old radius+12
  *   rule. A real ball's disc can never overlap a pocket's disc.
  */
+
+/**
+ * Table ROI (v1.0.36, power-team CV item 3): the axis-aligned
+ * bounding box of the table corners, padded 5 px exactly like
+ * [BallDetector.insideTable], clamped to the frame. Returns null when
+ * there is no table, the frame is empty, or the box is degenerate
+ * (under 10 px on a side) — the caller then uses the full frame,
+ * exactly as before.
+ *
+ * Top-level (not a [BallDetector] member) on purpose: constructing a
+ * BallDetector allocates native Mats, which throws
+ * UnsatisfiedLinkError in JVM unit tests where the OpenCV native
+ * library is not loaded. This function is pure bounds math plus a
+ * plain Rect value (Rect's constructor makes no native calls), so it
+ * is unit-testable here (see BallDetectorRoiTest).
+ */
+internal fun tableRoi(table: TableRect?, frameWidth: Int, frameHeight: Int): Rect? {
+    if (table == null || frameWidth <= 0 || frameHeight <= 0) return null
+    val xs = table.corners.map { it.x }
+    val ys = table.corners.map { it.y }
+    val x0 = floor(xs.min() - 5.0).toInt().coerceIn(0, frameWidth - 1)
+    val y0 = floor(ys.min() - 5.0).toInt().coerceIn(0, frameHeight - 1)
+    val x1 = ceil(xs.max() + 5.0).toInt().coerceIn(1, frameWidth)
+    val y1 = ceil(ys.max() + 5.0).toInt().coerceIn(1, frameHeight)
+    if (x1 - x0 < 10 || y1 - y0 < 10) return null
+    return Rect(x0, y0, x1 - x0, y1 - y0)
+}
+
 class BallDetector {
 
     private val mask = Mat()
@@ -108,27 +136,6 @@ class BallDetector {
             Triple(BallColor.WHITE, doubleArrayOf(0.0, 0.0, CvConfig.feltRelativeWhiteVFloor(feltHsv, CvConfig.WHITE_V_FLOOR)), doubleArrayOf(180.0, 40.0, 255.0)),
             Triple(BallColor.BLACK, doubleArrayOf(0.0, 0.0, 0.0), doubleArrayOf(180.0, 255.0, 60.0))
         )
-    }
-
-    /**
-     * Table ROI (v1.0.36, power-team CV item 3): the axis-aligned
-     * bounding box of the table corners, padded 5 px exactly like
-     * [insideTable], clamped to the frame. Returns null when there
-     * is no table, the frame is empty, or the box is degenerate
-     * (under 10 px on a side) — the caller then uses the full
-     * frame, exactly as before. Pure bounds math, no OpenCV calls,
-     * so it is unit-testable (see BallDetectorRoiTest).
-     */
-    internal fun tableRoi(table: TableRect?, frameWidth: Int, frameHeight: Int): Rect? {
-        if (table == null || frameWidth <= 0 || frameHeight <= 0) return null
-        val xs = table.corners.map { it.x }
-        val ys = table.corners.map { it.y }
-        val x0 = floor(xs.min() - 5.0).toInt().coerceIn(0, frameWidth - 1)
-        val y0 = floor(ys.min() - 5.0).toInt().coerceIn(0, frameHeight - 1)
-        val x1 = ceil(xs.max() + 5.0).toInt().coerceIn(1, frameWidth)
-        val y1 = ceil(ys.max() + 5.0).toInt().coerceIn(1, frameHeight)
-        if (x1 - x0 < 10 || y1 - y0 < 10) return null
-        return Rect(x0, y0, x1 - x0, y1 - y0)
     }
 
     /**
