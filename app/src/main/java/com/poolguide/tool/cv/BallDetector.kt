@@ -8,10 +8,13 @@ import org.opencv.core.Mat
 import org.opencv.core.MatOfPoint
 import org.opencv.core.MatOfPoint2f
 import org.opencv.core.Point
+import org.opencv.core.Rect
 import org.opencv.core.Scalar
 import org.opencv.imgproc.Imgproc
 import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.ceil
+import kotlin.math.floor
 
 /**
  * Ball detector.
@@ -108,6 +111,27 @@ class BallDetector {
     }
 
     /**
+     * Table ROI (v1.0.36, power-team CV item 3): the axis-aligned
+     * bounding box of the table corners, padded 5 px exactly like
+     * [insideTable], clamped to the frame. Returns null when there
+     * is no table, the frame is empty, or the box is degenerate
+     * (under 10 px on a side) — the caller then uses the full
+     * frame, exactly as before. Pure bounds math, no OpenCV calls,
+     * so it is unit-testable (see BallDetectorRoiTest).
+     */
+    internal fun tableRoi(table: TableRect?, frameWidth: Int, frameHeight: Int): Rect? {
+        if (table == null || frameWidth <= 0 || frameHeight <= 0) return null
+        val xs = table.corners.map { it.x }
+        val ys = table.corners.map { it.y }
+        val x0 = floor(xs.min() - 5.0).toInt().coerceIn(0, frameWidth - 1)
+        val y0 = floor(ys.min() - 5.0).toInt().coerceIn(0, frameHeight - 1)
+        val x1 = ceil(xs.max() + 5.0).toInt().coerceIn(1, frameWidth)
+        val y1 = ceil(ys.max() + 5.0).toInt().coerceIn(1, frameHeight)
+        if (x1 - x0 < 10 || y1 - y0 < 10) return null
+        return Rect(x0, y0, x1 - x0, y1 - y0)
+    }
+
+    /**
      * Detect balls in [hsv] and [gray] (working resolution). [table] bounds
      * the search when known. [pockets] are excluded: the pockets are black
      * circles that would otherwise be detected as black balls. [runHough]
@@ -115,16 +139,55 @@ class BallDetector {
      * is the felt's mean HSV (from the table detector) for the adaptive
      * green/blue windows; [pocketRadiusPx] is the pocket radius at the
      * working resolution for the disc-overlap exclusion.
+     *
+     * v1.0.36: the expensive passes (inRange + findContours per colour,
+     * HoughCircles) run on the table ROI only ([tableRoi]). The ROI is
+     * the table bbox + the same 5 px pad [insideTable] uses, so any
+     * centre the ROI can produce would have passed [insideTable]
+     * anyway — the crop drops work, never balls. Centres are
+     * translated back to full-frame coordinates immediately, so every
+     * check and sampler below (insideTable, pockets, stripe, colour,
+     * disc sampling) still runs on the full frame exactly as before.
+     * No table, or a degenerate ROI, falls back to the full frame.
      */
     fun detect(
         hsv: Mat, gray: Mat, table: TableRect?, pockets: List<Vec2> = emptyList(),
         runHough: Boolean, frameIndex: Long,
         feltHsv: DoubleArray? = null, pocketRadiusPx: Double = 12.0
     ): List<Ball> {
+        val roi = tableRoi(table, hsv.cols(), hsv.rows())
+        val hsvRoi = if (roi != null) hsv.submat(roi) else hsv
+        val grayRoi = if (roi != null) gray.submat(roi) else gray
+        val ox = roi?.x?.toDouble() ?: 0.0
+        val oy = roi?.y?.toDouble() ?: 0.0
+        try {
+            return detectCropped(hsv, hsvRoi, grayRoi, ox, oy, table, pockets, runHough, frameIndex, feltHsv, pocketRadiusPx)
+        } finally {
+            // Only the submat views are released here: when the ROI
+            // fell back to the full frame, hsvRoi/grayRoi ARE the
+            // caller's Mats and must not be touched.
+            if (roi != null) {
+                hsvRoi.release()
+                grayRoi.release()
+            }
+        }
+    }
+
+    /** The detection itself, run on the (possibly cropped) [hsvRoi] /
+     * [grayRoi] with centres translated back to full-frame coordinates
+     * by ([ox], [oy]) the moment they are found. [hsv] is the full
+     * frame, used only for single-pixel sampling (stripe, colour,
+     * disc groups), which is cheap and stays in full-frame coords. */
+    private fun detectCropped(
+        hsv: Mat, hsvRoi: Mat, grayRoi: Mat, ox: Double, oy: Double,
+        table: TableRect?, pockets: List<Vec2>,
+        runHough: Boolean, frameIndex: Long,
+        feltHsv: DoubleArray?, pocketRadiusPx: Double
+    ): List<Ball> {
         val found = mutableListOf<Ball>()
 
         for ((color, lower, upper) in colorWindows(feltHsv)) {
-            Core.inRange(hsv, Scalar(lower), Scalar(upper), mask)
+            Core.inRange(hsvRoi, Scalar(lower), Scalar(upper), mask)
             val contours = mutableListOf<MatOfPoint>()
             Imgproc.findContours(
                 mask, contours, hierarchy,
@@ -138,7 +201,7 @@ class BallDetector {
                 if (r < CvConfig.BALL_MIN_RADIUS_PX || r > CvConfig.BALL_MAX_RADIUS_PX) continue
                 val area = Imgproc.contourArea(contour)
                 if (area / (PI * r * r) < CvConfig.BALL_MIN_CIRCULARITY) continue
-                val c = Vec2(center.x, center.y)
+                val c = Vec2(center.x + ox, center.y + oy)
                 if (table != null && !insideTable(c, table)) continue
                 if (isPocket(c, r, pockets, pocketRadiusPx)) continue
                 if (found.any { it.center.distanceTo(c) < CvConfig.BALL_DEDUP_DIST_PX }) continue
@@ -150,9 +213,9 @@ class BallDetector {
             // v1.0.3: no median blur (MEDIAN_BLUR_KSIZE 0) — the blur
             // smears the stripe band and Hough loses stripe balls.
             val houghSrc = if (CvConfig.MEDIAN_BLUR_KSIZE <= 0) {
-                gray
+                grayRoi
             } else {
-                Imgproc.medianBlur(gray, grayBlurred, CvConfig.MEDIAN_BLUR_KSIZE)
+                Imgproc.medianBlur(grayRoi, grayBlurred, CvConfig.MEDIAN_BLUR_KSIZE)
                 grayBlurred
             }
             Imgproc.HoughCircles(
@@ -167,7 +230,7 @@ class BallDetector {
             for (i in 0 until circles.cols()) {
                 val v = circles.get(0, i) ?: continue
                 if (v.size < 3) continue
-                val c = Vec2(v[0], v[1])
+                val c = Vec2(v[0] + ox, v[1] + oy)
                 val r = v[2]
                 if (r < CvConfig.BALL_MIN_RADIUS_PX || r > CvConfig.BALL_MAX_RADIUS_PX) continue
                 if (table != null && !insideTable(c, table)) continue
