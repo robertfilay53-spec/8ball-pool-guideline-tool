@@ -73,6 +73,14 @@ import kotlin.math.min
  *    do not follow new detections. EDIT mode exits on its own after
  *    20 s without a handle drag (v1.0.41, REA hardening R4), so a
  *    forgotten session cannot leave the handles over the table.
+ * 7. Session pot rate (v1.0.42, REA hardening R6): the bubble shows
+ *    "Pots 7/10 (70%)" once any shot was taken, and the diagnostics
+ *    export carries the same line. The stat comes from
+ *    ShotOutcomeTracker, which counts a shot when the cue ball
+ *    jumps after an aim and a pot when a ball is gone once the table
+ *    settles; at ten shots and 80 percent or more the label turns
+ *    amber and tells the user to vary their play, because perfect
+ *    play is itself a signal to the server.
  */
 class LineOverlayManager(
     private val context: Context,
@@ -179,6 +187,14 @@ class LineOverlayManager(
     /** "Capture blocked" status on the bubble (v1.0.37, REA hardening
      * R2): visible only while a black run persists past the threshold. */
     private var blockedStatusView: TextView? = null
+    /** Session pot-rate stat on the bubble (v1.0.42, REA hardening
+     * R6): "Pots 7/10 (70%)" once any shot was taken, GONE before
+     * that, so the bubble keeps its normal size. Amber with a second
+     * line when the rate is abnormally high. */
+    private var potRateView: TextView? = null
+    /** Last pot-rate text set on the bubble, so update() does not
+     * re-set the same string every frame. */
+    private var lastPotRateText: String? = null
     private var hideButton: Button? = null
     private var editButton: Button? = null
     private var framesWithoutGuideline = 0
@@ -424,6 +440,16 @@ class LineOverlayManager(
             return
         }
 
+        // Session pot rate (v1.0.42, REA hardening R6): feed every
+        // live frame, before the lock gate and the hide branch both
+        // return early: the tracker needs the scatter frames too,
+        // when the lines are hidden because the balls are moving.
+        // EDIT mode returns before this point, so a frozen shot
+        // never feeds it; black and unlocked frames abandon a
+        // pending shot inside the tracker.
+        DiagnosticsLog.outcomes.observe(result)
+        updatePotRateLabel()
+
         // Table-lock gate (v1.0.3, Bloro lead): draw nothing until the
         // table rect has been stable for 5 s. A new table, a moved
         // table, or a lost table all clear the lock in the pipeline.
@@ -488,6 +514,33 @@ class LineOverlayManager(
      * recovers. */
     private fun setCaptureBlocked(blocked: Boolean) {
         blockedStatusView?.visibility = if (blocked) View.VISIBLE else View.GONE
+    }
+
+    /** Session pot-rate stat on the bubble (v1.0.42, REA hardening
+     * R6): GONE until the first shot is taken, then "Pots 7/10
+     * (70%)". At ten shots and 80 percent or more the label turns
+     * amber and gains a second line telling the user to vary their
+     * play. The text is set only when it changes. */
+    private fun updatePotRateLabel() {
+        val view = potRateView ?: return
+        val outcomes = DiagnosticsLog.outcomes
+        if (outcomes.shotsTaken == 0) {
+            if (lastPotRateText != null) {
+                lastPotRateText = null
+                view.visibility = View.GONE
+            }
+            return
+        }
+        val text = if (outcomes.shouldRemind()) {
+            outcomes.format() + "\nPot rate very high, vary your play"
+        } else {
+            outcomes.format()
+        }
+        if (text == lastPotRateText) return
+        lastPotRateText = text
+        view.text = text
+        view.setTextColor(if (outcomes.shouldRemind()) WARNING_COLOR else Color.WHITE)
+        view.visibility = View.VISIBLE
     }
 
     /** EDIT-mode frame: draw the frozen shot with any anchor corrections.
@@ -1700,6 +1753,23 @@ class LineOverlayManager(
         }
         blockedStatusView = blocked
         layout.addView(blocked)
+        // Session pot-rate stat (v1.0.42, REA hardening R6): a small
+        // label that appears once the first shot of the session is
+        // taken, GONE before that, so the bubble keeps its normal
+        // size. Updated from update(), not from here.
+        val potRate = TextView(context).apply {
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                marginEnd = 8
+            }
+            visibility = View.GONE
+        }
+        potRateView = potRate
+        layout.addView(potRate)
         val hide = Button(context).apply {
             text = if (store.guidesHidden) context.getString(R.string.show_guides)
             else context.getString(R.string.hide_guides)
@@ -1818,6 +1888,8 @@ class LineOverlayManager(
         bubbleParams = null
         lockRing = null
         blockedStatusView = null
+        potRateView = null
+        lastPotRateText = null
         hideButton = null
         editButton = null
         framesWithoutGuideline = 0
