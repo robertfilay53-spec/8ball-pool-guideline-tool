@@ -35,6 +35,22 @@ class ManualAimTest {
     private fun baseBank() =
         ShotSolver.solveBank(bankCue, target, bankPocket, topRail, radius)!!
 
+    // One-rail kick (v1.0.30): cue (100,320) -> target (300,200) ->
+    // pocket (680,200), off the bottom rail. Numbers pinned by kotlinc
+    // probe (~/workspace/probe30, Probe30a/30b full precision):
+    // ghost (282.0,200.0), cut 57.88818512576571 deg, rail contact
+    // (153.3448275862069,405.0), mirrored ghost (282.0,610.0).
+    // No off-table test: the contact is the crossing of cue to
+    // mirrored ghost, so its rail coordinate always lies between the
+    // cue's and the ghost's, both clamped inside the table, and no
+    // clamped drag can push it off the rail (see applyKickOverrides).
+    private val kickCue = Vec2(100.0, 320.0)
+    private val kickPocket = Vec2(680.0, 200.0)
+    private val bottomRail = Rail(Vec2(0.0, 405.0), Vec2(0.0, -1.0))
+
+    private fun baseKick() =
+        ShotSolver.solveKick(kickCue, target, kickPocket, bottomRail, radius)!!
+
     private fun table() = TableRect(
         Vec2(0.0, 0.0), Vec2(720.0, 0.0),
         Vec2(720.0, 405.0), Vec2(0.0, 405.0)
@@ -313,5 +329,130 @@ class ManualAimTest {
         // pocket (cut > 90 deg from there).
         aim.dragAnchor(Anchor.CUE, Vec2(-400.0, 0.0), table())
         assertEquals(base, aim.currentBank())
+    }
+
+    @Test
+    fun `kick edit freezes the kick, exit clears it`() {
+        val aim = ManualAim()
+        aim.enterEditMode(baseKick(), radius)
+        assertTrue(aim.isEditMode)
+        assertTrue(aim.isKickEdit)
+        assertTrue(aim.hasShot)
+        assertFalse(aim.hasOverrides)
+        val frozen = aim.currentKick()!!
+        assertNull(aim.currentShot())
+        assertNull(aim.currentBank())
+        assertEquals(282.0, frozen.direct.ghostPoint.x, 0.0)
+        assertEquals(200.0, frozen.direct.ghostPoint.y, 0.0)
+        assertEquals(57.88818512576571, frozen.direct.cutAngleDegrees, 1e-9)
+        assertEquals(153.3448275862069, frozen.railContact.x, 1e-9)
+        assertEquals(405.0, frozen.railContact.y, 0.0)
+        assertEquals(2, frozen.kickPath.size)
+        aim.exitEditMode()
+        assertFalse(aim.isEditMode)
+        assertFalse(aim.isKickEdit)
+        assertFalse(aim.hasShot)
+        assertNull(aim.currentKick())
+    }
+
+    @Test
+    fun `kick cue drag re-solves from the corrected cue`() {
+        val aim = ManualAim()
+        aim.enterEditMode(baseKick(), radius)
+        // Move the cue 20 px down: the ghost point stays put (same
+        // kick), but the contact and cut angle change, and the
+        // re-solve matches a fresh solveKick from the corrected cue.
+        aim.dragAnchor(Anchor.CUE, Vec2(0.0, 20.0), table())
+        val corrected = aim.currentKick()!!
+        assertTrue(aim.hasOverrides)
+        assertEquals(100.0, corrected.direct.aimLine.start.x, 0.0)
+        assertEquals(340.0, corrected.direct.aimLine.start.y, 0.0)
+        assertEquals(282.0, corrected.direct.ghostPoint.x, 0.0)
+        assertEquals(200.0, corrected.direct.ghostPoint.y, 0.0)
+        assertEquals(143.8148148148148, corrected.railContact.x, 1e-9)
+        assertEquals(56.017111618789215, corrected.direct.cutAngleDegrees, 1e-9)
+        val fresh = ShotSolver.solveKick(
+            Vec2(100.0, 340.0), target, kickPocket, bottomRail, radius
+        )!!
+        assertEquals(fresh, corrected)
+    }
+
+    @Test
+    fun `kick ghost drag re-aims and rebuilds the path`() {
+        val aim = ManualAim()
+        aim.enterEditMode(baseKick(), radius)
+        // Drag the ghost 2 px right: aim line ends at the dragged
+        // point, the contact moves along the rail, the pocket stays.
+        aim.dragAnchor(Anchor.GHOST, Vec2(2.0, 0.0), table())
+        val corrected = aim.currentKick()!!
+        assertEquals(284.0, corrected.direct.ghostPoint.x, 0.0)
+        assertEquals(200.0, corrected.direct.ghostPoint.y, 0.0)
+        assertEquals(153.9310344827586, corrected.railContact.x, 1e-9)
+        assertEquals(405.0, corrected.railContact.y, 0.0)
+        assertEquals(57.605577354384614, corrected.direct.cutAngleDegrees, 1e-9)
+        assertEquals(284.0, corrected.kickPath[1].end.x, 0.0)
+        assertEquals(200.0, corrected.kickPath[1].end.y, 0.0)
+        assertEquals(680.0, corrected.direct.targetLine.end.x, 0.0)
+        assertEquals(200.0, corrected.direct.targetLine.end.y, 0.0)
+        assertEquals(2, corrected.kickPath.size)
+        // Deflection starts at the dragged ghost point.
+        assertEquals(284.0, corrected.direct.deflectionLine.start.x, 0.0)
+        assertEquals(200.0, corrected.direct.deflectionLine.start.y, 0.0)
+    }
+
+    @Test
+    fun `kick ghost drag up moves the contact`() {
+        val aim = ManualAim()
+        aim.enterEditMode(baseKick(), radius)
+        // Drag the ghost 100 px up: the mirrored ghost drops, the
+        // cue-to-mirror line meets the rail further left.
+        aim.dragAnchor(Anchor.GHOST, Vec2(0.0, -100.0), table())
+        val corrected = aim.currentKick()!!
+        assertEquals(282.0, corrected.direct.ghostPoint.x, 0.0)
+        assertEquals(100.0, corrected.direct.ghostPoint.y, 0.0)
+        assertEquals(139.66666666666666, corrected.railContact.x, 1e-9)
+        assertEquals(64.98310652189998, corrected.direct.cutAngleDegrees, 1e-9)
+    }
+
+    @Test
+    fun `kick rejected ghost drag after an accepted one keeps the last good kick`() {
+        val aim = ManualAim()
+        aim.enterEditMode(baseKick(), radius)
+        // First drag accepted: ghost moves 2 px right, contact slides
+        // along the rail.
+        aim.dragAnchor(Anchor.GHOST, Vec2(2.0, 0.0), table())
+        val edited = aim.currentKick()!!
+        assertEquals(284.0, edited.direct.ghostPoint.x, 0.0)
+        assertEquals(153.9310344827586, edited.railContact.x, 1e-9)
+        // Second drag rejected (cut past 90 deg): the drag is not
+        // committed, so the last good kick stays instead of snapping
+        // back to the frozen base.
+        aim.dragAnchor(Anchor.GHOST, Vec2(-273.0, 0.0), table())
+        val kept = aim.currentKick()!!
+        assertEquals(284.0, kept.direct.ghostPoint.x, 0.0)
+        assertEquals(153.9310344827586, kept.railContact.x, 1e-9)
+        assertTrue(aim.hasOverrides)
+    }
+
+    @Test
+    fun `kick ghost drag past the impossible line keeps the last good kick`() {
+        val aim = ManualAim()
+        val base = baseKick()
+        aim.enterEditMode(base, radius)
+        // Drag the ghost far to the left: the reflected ray would point
+        // away from the pocket (cut > 90 deg).
+        aim.dragAnchor(Anchor.GHOST, Vec2(-273.0, 0.0), table())
+        assertEquals(base, aim.currentKick())
+    }
+
+    @Test
+    fun `kick cue drag that cannot kick keeps the last good kick`() {
+        val aim = ManualAim()
+        val base = baseKick()
+        aim.enterEditMode(base, radius)
+        // Drag the cue to the bottom-right corner: from there the
+        // reflected ray points away from the pocket, so no kick exists.
+        aim.dragAnchor(Anchor.CUE, Vec2(611.0, 76.0), table())
+        assertEquals(base, aim.currentKick())
     }
 }

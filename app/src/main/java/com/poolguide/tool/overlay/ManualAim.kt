@@ -40,8 +40,12 @@ enum class Anchor { CUE, GHOST }
  * this is a manual aim correction, not a physics re-solve: the drag is
  * ignored only when the cut would exceed 90 degrees, when the departure
  * ray never meets the rail, or when the contact would fall off the
- * table. Kick, two-rail and combo/kiss shots stay direct-only: EDIT
- * mode does not enter for them.
+ * table. One-rail kick shots (v1.0.30) freeze the same way again: the
+ * base is the kick solution, the CUE drag re-solves the kick from the
+ * corrected cue ([ShotSolver.solveKick]), and the GHOST drag mirrors
+ * the dragged ghost across the rail, aims the cue at the mirror, and
+ * rebuilds the kick path from the contact it implies. Two-rail and
+ * combo/kiss shots stay direct-only: EDIT mode does not enter for them.
  */
 class ManualAim {
 
@@ -50,6 +54,13 @@ class ManualAim {
 
     private var baseShot: ShotSolver.ShotSolution? = null
     private var baseBank: ShotSolver.BankSolution? = null
+    private var baseKick: ShotSolver.KickSolution? = null
+    /** The rail the frozen kick plays off, recovered from the kick
+     * solution (v1.0.30): the rail passes through the rail contact and
+     * its normal is the ghost-to-mirrored-ghost direction. The
+     * solution does not store the rail, and the mirror/reflection
+     * helpers are sign-agnostic in the normal, so either sign works. */
+    private var kickRail: Rail? = null
     /** The rail the frozen bank plays off, recovered from the bank
      * solution (v1.0.29): the rail passes through the rail contact and
      * its normal is the pocket-to-mirrored-pocket direction. The
@@ -66,16 +77,20 @@ class ManualAim {
     private var ghostOverride: Vec2? = null
 
     val isEditMode: Boolean get() = mode == OverlayMode.EDIT
-    val hasShot: Boolean get() = baseShot != null || baseBank != null
+    val hasShot: Boolean get() = baseShot != null || baseBank != null || baseKick != null
     /** True when the frozen shot is a one-rail bank (v1.0.29). */
     val isBankEdit: Boolean get() = baseBank != null
+    /** True when the frozen shot is a one-rail kick (v1.0.30). */
+    val isKickEdit: Boolean get() = baseKick != null
     val hasOverrides: Boolean get() = cueOverride != null || ghostOverride != null
 
     /** Freeze [shot] as the editable base and enter EDIT mode. */
     fun enterEditMode(shot: ShotSolver.ShotSolution, radiusPx: Double) {
         baseShot = shot
         baseBank = null
+        baseKick = null
         bankRail = null
+        kickRail = null
         ballRadiusPx = radiusPx
         cueOverride = null
         ghostOverride = null
@@ -88,10 +103,27 @@ class ManualAim {
     fun enterEditMode(bank: ShotSolver.BankSolution, radiusPx: Double) {
         baseShot = null
         baseBank = bank
+        baseKick = null
         ballRadiusPx = radiusPx
         cueOverride = null
         ghostOverride = null
         bankRail = recoverRail(bank)
+        kickRail = null
+        mode = OverlayMode.EDIT
+    }
+
+    /** Freeze [kick] as the editable base and enter EDIT mode (v1.0.30).
+     * The rail is recovered from the solution: it passes through the
+     * rail contact, normal along ghost-to-mirrored-ghost. */
+    fun enterEditMode(kick: ShotSolver.KickSolution, radiusPx: Double) {
+        baseShot = null
+        baseBank = null
+        baseKick = kick
+        ballRadiusPx = radiusPx
+        cueOverride = null
+        ghostOverride = null
+        bankRail = null
+        kickRail = recoverKickRail(kick)
         mode = OverlayMode.EDIT
     }
 
@@ -102,12 +134,21 @@ class ManualAim {
         return Rail(bank.railContact, normal)
     }
 
+    /** Recover the kick's rail from its solution (v1.0.30). */
+    private fun recoverKickRail(kick: ShotSolver.KickSolution): Rail {
+        val ghost = kick.direct.ghostPoint
+        val normal = (kick.mirroredGhost - ghost).normalized()
+        return Rail(kick.railContact, normal)
+    }
+
     /** Leave EDIT mode; the frozen shot and any overrides are dropped. */
     fun exitEditMode() {
         mode = OverlayMode.PLAY
         baseShot = null
         baseBank = null
+        baseKick = null
         bankRail = null
+        kickRail = null
         lastTable = null
         cueOverride = null
         ghostOverride = null
@@ -127,6 +168,13 @@ class ManualAim {
         return applyBankOverrides(base)
     }
 
+    /** The kick to draw in EDIT mode (v1.0.30): the frozen base with any
+     * overrides applied. Null when no kick was frozen. */
+    fun currentKick(): ShotSolver.KickSolution? {
+        val base = baseKick ?: return null
+        return applyKickOverrides(base)
+    }
+
     /** Drag [anchor] by [delta] (working coordinates), clamped inside
      * [table] (inset by the ball radius) when a table is known. A drag
      * the correction rejects (cut over 90, contact off the table, no
@@ -137,7 +185,7 @@ class ManualAim {
      * back to the frozen base, losing the accepted correction. */
     fun dragAnchor(anchor: Anchor, delta: Vec2, table: TableRect?) {
         if (table != null) lastTable = table
-        val base = baseShot ?: baseBank?.direct ?: return
+        val base = baseShot ?: baseBank?.direct ?: baseKick?.direct ?: return
         when (anchor) {
             Anchor.CUE -> {
                 val prev = cueOverride
@@ -161,6 +209,7 @@ class ManualAim {
     private fun isRejected(): Boolean {
         if (baseShot != null) return currentShot() === baseShot
         if (baseBank != null) return currentBank() === baseBank
+        if (baseKick != null) return currentKick() === baseKick
         return false
     }
 
@@ -271,6 +320,71 @@ class ManualAim {
             railContact = contact,
             bankPath = listOf(Segment(target, contact), Segment(contact, pocket)),
             mirroredPocket = base.mirroredPocket
+        )
+    }
+
+    /** Apply the anchor overrides to a frozen kick (v1.0.30). The pocket
+     * stays as detected; the rail is the one recovered at freeze time.
+     * CUE moved: re-solve the kick from the corrected cue (ghost and
+     * contact recomputed by the solver); when the corrected cue cannot
+     * kick to the pocket, or the contact would fall off the table,
+     * keep the base. GHOST dragged: mirror the dragged ghost across
+     * the rail and aim the cue at the mirror; the contact is where
+     * that line meets the rail, and the reflected ray from it must
+     * head toward the dragged ghost. Mirroring plus aiming is exactly
+     * how [ShotSolver.solveKick] builds the path, so the contact, cut
+     * and deflection all follow from the dragged point, like the
+     * direct ghost drag. The drag is ignored only when the cue-to-
+     * mirror line never meets the rail, when the reflected ray does
+     * not head toward the dragged ghost, when the cut would exceed
+     * 90 degrees, or when the contact would fall off the table.
+     * Note the contact can never fall off the rail from a clamped
+     * drag: it is the crossing of cue to mirrored ghost, so its
+     * rail coordinate always lies between the cue's and the ghost's,
+     * both inside the table. The check is still kept, as defence,
+     * for the unclamped (no-table) path. */
+    private fun applyKickOverrides(base: ShotSolver.KickSolution): ShotSolver.KickSolution {
+        val cue = cueOverride
+        val ghost = ghostOverride
+        if (cue == null && ghost == null) return base
+        val target = base.direct.targetLine.start
+        val pocket = base.direct.targetLine.end
+        val rail = kickRail ?: return base
+        // Cue moved: re-solve the kick from the corrected cue.
+        // If the corrected cue cannot kick to the pocket, or the
+        // contact would fall off the table, keep the base.
+        if (cue != null && ghost == null) {
+            val solved = ShotSolver.solveKick(cue, target, pocket, rail, ballRadiusPx) ?: return base
+            if (!contactOnTable(solved.railContact)) return base
+            return solved
+        }
+        // Ghost dragged (with or without a cue override): mirror the
+        // dragged ghost across the rail, aim the cue at the mirror,
+        // and rebuild the kick path from the contact it implies.
+        val aimStart = cue ?: base.direct.aimLine.start
+        val aimEnd = ghost ?: base.direct.ghostPoint
+        val mirrored = ShotSolver.mirrorPointAcrossRail(aimEnd, rail)
+        val contact = ShotSolver.railContactPoint(aimStart, mirrored, rail) ?: return base
+        if (!contactOnTable(contact)) return base
+        val outDir = ShotSolver.reflectDirection(contact - aimStart, rail)
+        if ((aimEnd - contact).dot(outDir) <= 0.0) return base
+        val pocketDir = (pocket - target).normalized()
+        val cut = ShotSolver.cutAngleDegrees(outDir, pocketDir)
+        if (cut > 90.0) return base
+        val tangent = ShotSolver.tangentDirection(outDir, pocketDir)
+        val direct = base.direct.copy(
+            ghostPoint = aimEnd,
+            aimLine = Segment(aimStart, contact),
+            deflectionLine = Segment(aimEnd, aimEnd + tangent * (2 * ballRadiusPx)),
+            cutAngleDegrees = cut,
+            isThinCut = cut > ShotSolver.THIN_CUT_DEGREES,
+            distanceToImpact = aimStart.distanceTo(contact) + contact.distanceTo(aimEnd)
+        )
+        return ShotSolver.KickSolution(
+            direct = direct,
+            railContact = contact,
+            kickPath = listOf(Segment(aimStart, contact), Segment(contact, aimEnd)),
+            mirroredGhost = mirrored
         )
     }
 

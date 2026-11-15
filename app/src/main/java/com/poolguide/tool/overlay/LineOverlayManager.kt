@@ -210,6 +210,11 @@ class LineOverlayManager(
     @androidx.annotation.VisibleForTesting
     val editedBank: ShotSolver.BankSolution? get() = manualAim.currentBank()
 
+    /** Test-only: the corrected kick currently drawn in EDIT mode
+     * (v1.0.30). Null unless a kick is frozen. */
+    @androidx.annotation.VisibleForTesting
+    val editedKick: ShotSolver.KickSolution? get() = manualAim.currentKick()
+
     /** Test-only: whether any anchor override is registered in EDIT
      * mode (v1.0.29 diagnostic: distinguishes a drag that never
      * registered from one the bank re-aim ignores). */
@@ -231,8 +236,11 @@ class LineOverlayManager(
      * any corrections. With no shot to edit, the tap does nothing.
      * One-rail bank shots (v1.0.29) freeze the same way: when no direct
      * shot exists but a bank is shown, EDIT freezes the bank instead.
-     * Kick, two-rail and combo/kiss shots stay out: with neither a
-     * direct shot nor a bank, the tap still does nothing. */
+     * One-rail kick shots (v1.0.30) freeze the same way again: when
+     * neither a direct shot nor a bank exists but a kick is shown,
+     * EDIT freezes the kick instead. Two-rail and combo/kiss shots
+     * stay out: with neither a direct shot, a bank, nor a kick, the
+     * tap still does nothing. */
     fun toggleEditMode() {
         if (manualAim.isEditMode) {
             manualAim.exitEditMode()
@@ -257,6 +265,16 @@ class LineOverlayManager(
         if (bank != null && store.bankLinesEnabled) {
             smoother.reset()
             manualAim.enterEditMode(bank, result.cueBall?.radiusPx ?: 9.0)
+            editButton?.text = context.getString(R.string.done_editing)
+            lockRing?.isFrozen = true
+            DiagnosticsLog.record(DiagnosticsLog.Kind.EDIT_ENTER)
+            result.let { updateEditMode(it) }
+            return
+        }
+        val kick = result?.kick
+        if (kick != null && store.bankLinesEnabled) {
+            smoother.reset()
+            manualAim.enterEditMode(kick, result.cueBall?.radiusPx ?: 9.0)
             editButton?.text = context.getString(R.string.done_editing)
             lockRing?.isFrozen = true
             DiagnosticsLog.record(DiagnosticsLog.Kind.EDIT_ENTER)
@@ -401,6 +419,30 @@ class LineOverlayManager(
             ensureHandles(bank.direct, result)
             return
         }
+        // One-rail kick EDIT (v1.0.30): the frozen kick with its legs.
+        if (manualAim.isKickEdit) {
+            val kick = manualAim.currentKick()
+            if (kick == null) {
+                removeLineWindows()
+                removeLabelWindows()
+                removeTagWindows()
+                removeHandles()
+                return
+            }
+            val drawn = buildEditKickLines(kick, result)
+            if (drawn.lines.isEmpty()) {
+                removeLineWindows()
+                removeLabelWindows()
+                removeTagWindows()
+                removeHandles()
+                return
+            }
+            applyLines(drawn.lines)
+            applyLabels(drawn.labels)
+            applyTags(drawn.tags)
+            ensureHandles(kick.direct, result)
+            return
+        }
         val shot = manualAim.currentShot()
         if (shot == null) {
             removeLineWindows()
@@ -506,6 +548,56 @@ class LineOverlayManager(
                 distanceLabel(
                     PocketDistanceLabel.pathSegments(bank),
                     bank.bankPath.last().end, bank.bankPath.last(), result, BANK_COLOR
+                ),
+            tags = groupTags(result, lines.filter { !it.isRing }.map { it.segment })
+        )
+    }
+
+    /** The corrected kick's lines, mapped to screen coordinates
+     * (v1.0.30). The aim line (cue to rail contact) stays aim green;
+     * the kicked leg (contact to ghost), the cut-angle label and the
+     * pocket-distance label are kick magenta, like the live kick
+     * overlay, and the target and deflection lines are drawn as for
+     * a direct shot. The pocket ring marks the (unchanged) target
+     * pocket, the ghost-ball ring (v1.0.26) marks the cue ball's
+     * arrival point, and the rail-contact marker (v1.0.16) marks the
+     * cushion spot, all three in the live overlay's positions, so
+     * EDIT draws the kick the live overlay drew, not a direct shot. */
+    private fun buildEditKickLines(
+        kick: ShotSolver.KickSolution,
+        result: DetectionResult
+    ): DrawnOverlay {
+        val sx = result.scaleToScreenX
+        val sy = result.scaleToScreenY
+        fun map(p: Vec2) = Vec2(p.x * sx, p.y * sy)
+        val pocket = kick.direct.targetLine.end
+        val aim = Segment(map(kick.direct.aimLine.start), map(kick.direct.aimLine.end))
+        val lines = listOf(
+            DrawLine(aim, AIM_COLOR, AIM_WIDTH_PX),
+            DrawLine(
+                Segment(map(kick.kickPath[1].start), map(kick.kickPath[1].end)),
+                KICK_COLOR, LINE_WIDTH_PX
+            ),
+            DrawLine(
+                Segment(map(kick.direct.targetLine.start), map(kick.direct.targetLine.end)),
+                TARGET_COLOR, LINE_WIDTH_PX
+            ),
+            DrawLine(
+                Segment(map(kick.direct.deflectionLine.start), map(kick.direct.deflectionLine.end)),
+                DEFLECT_COLOR, LINE_WIDTH_PX
+            ),
+            DrawLine(
+                Segment(map(pocket), map(pocket)),
+                POCKET_COLOR, RING_WIDTH_PX, isRing = true, ringRadius = RING_RADIUS_PX
+            ),
+            ghostRing(kick.direct, result, ::map)
+        ) + contactMarkers(kick.kickPath, KICK_COLOR, ::map)
+        return DrawnOverlay(
+            lines = lines,
+            labels = labelsFor(kick.direct, aim, result, KICK_COLOR) +
+                distanceLabel(
+                    PocketDistanceLabel.pathSegments(kick),
+                    kick.direct.targetLine.end, kick.direct.targetLine, result, KICK_COLOR
                 ),
             tags = groupTags(result, lines.filter { !it.isRing }.map { it.segment })
         )
