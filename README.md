@@ -442,13 +442,13 @@ systematic angle error is left to correct). The CV harness (15 synthetic
 tables, `../cv-harness/RESULTS.md`) measures the v1.0.3 pipeline at
 15/15 tables, 85/85 balls with 0 false positives, 15/15 shots, mean
 cut-angle error 0.32 deg (v1.0.1 was 13/15, 76/85, 11/15, 1.46 deg).
-As of v1.0.62 the same harness measures 15/15, 85/85, 0 false
+As of v1.0.63 the same harness measures 15/15, 85/85, 0 false
 positives, 15/15, mean cut-angle error 0.177 deg (max 0.27 deg);
 the adversarial tables measure 8/9 tables, 46 balls, 4 missed
 (all the purple-felt table, which the felt windows do not cover),
 0 false positives. The figures are unchanged since v1.0.45: no
 pipeline code changed in v1.0.45, v1.0.46, v1.0.47, v1.0.48, v1.0.49,
-v1.0.50, v1.0.51, v1.0.52, v1.0.53, v1.0.54, v1.0.55, v1.0.56, v1.0.57, v1.0.58, v1.0.59, v1.0.60, v1.0.61, v1.0.62, or v1.0.63, which were all docs-only cycles. `../cv-harness/RESULTS.md` was refreshed in
+v1.0.50, v1.0.51, v1.0.52, v1.0.53, v1.0.54, v1.0.55, v1.0.56, v1.0.57, v1.0.58, v1.0.59, v1.0.60, v1.0.61, v1.0.62, v1.0.63, or v1.0.64, which were all docs-only cycles. `../cv-harness/RESULTS.md` was refreshed in
 v1.0.45: its header now names the current pipeline version and its
 frame schedule reads HoughCircles and guideline on frames 0/3/6
 (guideline cadence 3 since v1.0.38); before that it still described
@@ -528,6 +528,11 @@ paragraph was refreshed again (it still anchored on v1.0.61): the
 anchor is now v1.0.62, and the paragraph records that the figures are
 unchanged since v1.0.45 across the nineteen docs-only cycles
 v1.0.45-v1.0.63. The `RESULTS.md` header was bumped to v1.0.63 with
+the figures unchanged, since no pipeline code changed. In v1.0.64 the README harness
+paragraph was refreshed again (it still anchored on v1.0.62): the
+anchor is now v1.0.63, and the paragraph records that the figures are
+unchanged since v1.0.45 across the twenty docs-only cycles
+v1.0.45-v1.0.64. The `RESULTS.md` header was bumped to v1.0.64 with
 the figures unchanged, since no pipeline code changed.
 
 Interaction work (v1.0.4, the remaining decode items): an **Edit/Play
