@@ -29,6 +29,7 @@ import com.poolguide.tool.data.DiagnosticsLog
 import org.opencv.android.Utils
 import org.opencv.core.Mat
 import org.opencv.imgproc.Imgproc
+import java.io.File
 
 /**
  * Foreground service that OWNS the overlay windows (and Demo mode).
@@ -96,33 +97,51 @@ class OverlayService : Service() {
     }
 
     private fun startOverlay() {
-        store = CalibrationStore(this)
-        // Diagnostics session (v1.0.6). A second start while a session
-        // is active is a no-op, so CaptureService starting at the
-        // same time cannot wipe these first events.
-        DiagnosticsLog.start()
-
+        // v1.0.35: attach the on-disk diagnostics sink before the
+        // session starts (same file as CaptureService; the two
+        // services starting together share one session).
+        DiagnosticsLog.attachFile(File(filesDir, DiagnosticsLog.PREVIOUS_SESSION_FILE))
         // 1. Notification + startForeground FIRST (5s timeout on Android 14+).
         // specialUse on 34+ (declared in the manifest with its subtype
         // property); the typeless overload below 34, where no type check
         // exists. Never mediaProjection: this service holds no token.
-        createNotificationChannel()
-        val notif = buildNotification(
-            if (demoMode) "Demo mode — synthetic table" else "Guide overlay active"
-        )
-        if (Build.VERSION.SDK_INT >= 34) {
-            startForeground(
-                NOTIF_ID, notif,
-                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+        //
+        // v1.0.35: this prelude used to run outside any try/catch, the
+        // same gap as CaptureService.startCapture: a throw in
+        // startForeground (or while building the overlay manager's
+        // windows) killed the process with no breadcrumb. The steps
+        // carry their own names, MainActivity's v1.0.31 pattern.
+        var step = "CalibrationStore"
+        try {
+            store = CalibrationStore(this)
+            // Diagnostics session (v1.0.6). A second start while a session
+            // is active is a no-op, so CaptureService starting at the
+            // same time cannot wipe these first events.
+            DiagnosticsLog.start()
+            step = "createNotificationChannel"
+            createNotificationChannel()
+            step = "buildNotification"
+            val notif = buildNotification(
+                if (demoMode) "Demo mode — synthetic table" else "Guide overlay active"
             )
-        } else {
-            startForeground(NOTIF_ID, notif)
-        }
-
-        // 2. The overlay manager + the bus listener (main thread).
-        overlayManager = LineOverlayManager(this, store) {
-            // Stop button in the control bubble: stop BOTH services.
-            stopAll()
+            step = "startForeground"
+            if (Build.VERSION.SDK_INT >= 34) {
+                startForeground(
+                    NOTIF_ID, notif,
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
+            } else {
+                startForeground(NOTIF_ID, notif)
+            }
+            step = "LineOverlayManager"
+            // 2. The overlay manager + the bus listener (main thread).
+            overlayManager = LineOverlayManager(this, store) {
+                // Stop button in the control bubble: stop BOTH services.
+                stopAll()
+            }
+        } catch (e: Exception) {
+            failOverlayStart(step, e)
+            return
         }
         OverlayBus.listener = { result ->
             mainHandler.post { overlayManager?.update(result) }
@@ -130,6 +149,23 @@ class OverlayService : Service() {
 
         if (demoMode) {
             startDemoLoop()
+        }
+    }
+
+    /** v1.0.35: an overlay-startup step threw. Same pattern as
+     * CaptureService.failCaptureStart: log it, leave a diagnostics
+     * breadcrumb naming the failing call, and stop gracefully instead
+     * of crashing. The breadcrumb is mirrored to disk the moment it
+     * is recorded, so it survives even a hard crash. */
+    private fun failOverlayStart(step: String, e: Exception) {
+        Log.e(TAG, "overlay start failed at $step", e)
+        DiagnosticsLog.record(
+            DiagnosticsLog.Kind.CAPTURE_START_FAILED,
+            "$step: ${e::class.java.simpleName}: ${e.message}"
+        )
+        try {
+            stopSelf()
+        } catch (_: Exception) {
         }
     }
 
