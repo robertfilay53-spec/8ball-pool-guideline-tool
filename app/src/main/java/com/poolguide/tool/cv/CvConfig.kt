@@ -65,6 +65,19 @@ object CvConfig {
     const val VERIFY_MAX_DIST_PX = 1.5
     const val VERIFY_MIN_INLIERS = 20
     const val VERIFY_KEEP_TOP = 3
+    /** v1.0.39 verifier dedup (deep-dive item 6): (a) a kept segment
+     * drops a later one when the later one is the same 2-3 px white
+     * line's other edge: nearly parallel and both endpoints within
+     * ~3 px of the kept segment. Dedup runs BEFORE the top-3 take,
+     * so the freed slot goes to the next distinct segment. (b) Edge
+     * points are bucketed into a coarse grid once per frame; a
+     * candidate only scans the cells its segment passes through.
+     * The grid is a pure speed change: the gathered points are a
+     * superset of the true inliers, in original scan order, and the
+     * exact distance filter still decides. */
+    const val VERIFY_DEDUP_LATERAL_PX = 3.0
+    const val VERIFY_DEDUP_MAX_ANGLE_DEG = 5.0
+    const val VERIFY_GRID_CELL_PX = 16
     /** Robust refit (yasin IRLS/Tukey lead, one guarded pass): a refitted
      * segment is kept only when it stays close to the verified one. */
     const val REFIT_MAX_ANGLE_DEG = 5.0

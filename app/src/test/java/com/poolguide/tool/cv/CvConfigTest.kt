@@ -93,4 +93,21 @@ class CvConfigTest {
         val skipFrames = (0L..8L).filter { it % CvConfig.GUIDELINE_EVERY_N_FRAMES != 0L }
         assertEquals(listOf(1L, 2L, 4L, 5L, 7L, 8L), skipFrames)
     }
+
+    @Test
+    fun verifierDedup_constants() {
+        // v1.0.39 (deep-dive item 6a): a kept segment drops a later
+        // one when the later one is the same 2-3 px white line's
+        // other edge: nearly parallel and both endpoints within ~3 px.
+        assertEquals(3.0, CvConfig.VERIFY_DEDUP_LATERAL_PX, 0.0)
+        assertEquals(5.0, CvConfig.VERIFY_DEDUP_MAX_ANGLE_DEG, 0.0)
+    }
+
+    @Test
+    fun verifierGrid_cellIsSixteenPx() {
+        // v1.0.39 (deep-dive item 6b): edge points bucketed into a
+        // coarse 16 px grid once per frame; a candidate only scans
+        // the cells its segment passes through.
+        assertEquals(16, CvConfig.VERIFY_GRID_CELL_PX)
+    }
 }
