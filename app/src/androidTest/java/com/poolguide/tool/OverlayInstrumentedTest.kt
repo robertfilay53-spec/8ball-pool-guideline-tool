@@ -1385,4 +1385,101 @@ class OverlayInstrumentedTest {
         ctx.startService(stop)
         Thread.sleep(1000)
     }
+
+    @Test
+    fun aimActivity_hidesLinesWhileAiming_restoresWhenStable() {
+        val ctx = appContext()
+        assertTrue(
+            "overlay permission must be granted for this test",
+            Settings.canDrawOverlays(ctx)
+        )
+        val store = CalibrationStore(ctx).apply { guidesHidden = false }
+        store.showAllShots = false
+        val manager = LineOverlayManager(ctx, store)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+
+        // Steady aim draws the 5 windows, twice over: no movement,
+        // no auto-hide.
+        instrumentation.runOnMainSync { manager.update(shotResultWithBalls()) }
+        assertEquals("expected 5 line windows", 5, manager.lineWindowCount)
+        instrumentation.runOnMainSync { manager.update(shotResultWithBalls()) }
+        assertEquals("steady aim must keep the lines", 5, manager.lineWindowCount)
+
+        // The guideline swings 30 degrees (the user drags to aim):
+        // the lines hide while the aim is moving, so no line window
+        // exists over the table at the moment a touch lands.
+        val swung = shotResultWithBalls().copy(
+            guideline = listOf(
+                com.poolguide.tool.cv.GuidelineSegment(
+                    Segment(Vec2(100.0, 200.0), Vec2(273.0, 300.0)), 40
+                )
+            )
+        )
+        instrumentation.runOnMainSync { manager.update(swung) }
+        assertEquals("swinging aim must hide the lines", 0, manager.lineWindowCount)
+
+        // Hold the swung aim steady: four quiet frames are still
+        // settling, the fifth restores the lines.
+        repeat(4) { instrumentation.runOnMainSync { manager.update(swung) } }
+        assertEquals("aim still settling", 0, manager.lineWindowCount)
+        instrumentation.runOnMainSync { manager.update(swung) }
+        assertEquals("steady aim must restore the lines", 5, manager.lineWindowCount)
+
+        // The cue ball jumps 5 px (the shot is away): the lines hide
+        // again until the balls settle.
+        val movedCue = swung.copy(
+            cueBall = Ball(0, Vec2(105.0, 200.0), 9.0, BallColor.WHITE, false, BallGroup.CUE)
+        )
+        instrumentation.runOnMainSync { manager.update(movedCue) }
+        assertEquals("moving cue must hide the lines", 0, manager.lineWindowCount)
+        repeat(5) { instrumentation.runOnMainSync { manager.update(movedCue) } }
+        assertEquals("settled balls must restore the lines", 5, manager.lineWindowCount)
+
+        instrumentation.runOnMainSync { manager.removeAll() }
+        assertEquals(0, manager.lineWindowCount)
+    }
+
+    @Test
+    fun captureBlocked_showsOnBubbleWhenBlackPersists() {
+        val ctx = appContext()
+        assertTrue(
+            "overlay permission must be granted for this test",
+            Settings.canDrawOverlays(ctx)
+        )
+        val store = CalibrationStore(ctx).apply { guidesHidden = false }
+        store.showAllShots = false
+        val manager = LineOverlayManager(ctx, store)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+
+        instrumentation.runOnMainSync { manager.update(shotResultWithBalls()) }
+        assertEquals("expected 5 line windows", 5, manager.lineWindowCount)
+        assertFalse(manager.isCaptureBlockedShown)
+
+        // A 1-frame black blip hides the lines but is not a persistent
+        // block: the bubble stays quiet.
+        val blip = DetectionResult.blackFrame(2, 720, 405, 1.0, 1.0, blackRunFrames = 1)
+        instrumentation.runOnMainSync { manager.update(blip) }
+        assertEquals("black frame must remove all line windows", 0, manager.lineWindowCount)
+        assertFalse(
+            "a 1-frame black blip is not a blocked capture",
+            manager.isCaptureBlockedShown
+        )
+
+        // A 30-frame black run is persistent: the bubble says so.
+        val blocked = DetectionResult.blackFrame(32, 720, 405, 1.0, 1.0, blackRunFrames = 30)
+        instrumentation.runOnMainSync { manager.update(blocked) }
+        assertEquals("black frame must remove all line windows", 0, manager.lineWindowCount)
+        assertTrue(
+            "a persistent black run must show on the bubble",
+            manager.isCaptureBlockedShown
+        )
+
+        // Capture back: the lines return and the blocked state clears.
+        instrumentation.runOnMainSync { manager.update(shotResultWithBalls()) }
+        assertEquals("expected 5 line windows", 5, manager.lineWindowCount)
+        assertFalse(manager.isCaptureBlockedShown)
+
+        instrumentation.runOnMainSync { manager.removeAll() }
+        assertEquals(0, manager.lineWindowCount)
+    }
 }

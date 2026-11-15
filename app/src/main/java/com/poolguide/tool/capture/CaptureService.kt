@@ -102,6 +102,12 @@ class CaptureService : Service() {
     private var lastWasLocked = false
     private var lastWasFallback = false
     private var lastWasBlack = false
+    /** v1.0.37: whether the table was locked when the current black
+     * run started, and how long the last black run lasted — the
+     * context the BLACK_FRAME_PERSISTENT and BLACK_FRAME_CLEARED
+     * events carry, so the next test can map WHEN FLAG_SECURE is on. */
+    private var lockedBeforeBlackRun = false
+    private var lastBlackRunFrames = 0
 
     private val displayListener = object : DisplayManager.DisplayListener {
         override fun onDisplayAdded(displayId: Int) {}
@@ -283,7 +289,7 @@ class CaptureService : Service() {
         }
         virtualDisplay = try {
             projection.createVirtualDisplay(
-                "PoolGuideCapture",
+                CaptureDisplayNames.VIRTUAL_DISPLAY_NAME,
                 VD_WIDTH, VD_HEIGHT, densityDpi,
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
                 imageReader!!.surface, null, null
@@ -324,7 +330,7 @@ class CaptureService : Service() {
             }
             runPipelineFrame()
         }, Handler(cvThread!!.looper))
-        updateNotification("Capturing — aim lines active")
+        updateNotification(CaptureDisplayNames.NOTIFICATION_ACTIVE_TEXT)
     }
 
     /** Copy the ImageReader RGBA frame into [frameMat], honouring rowStride. */
@@ -388,16 +394,36 @@ class CaptureService : Service() {
             DiagnosticsLog.record(DiagnosticsLog.Kind.FALLBACK_END, result.status)
         }
         if (result.isCaptureBlack && !lastWasBlack) {
+            lockedBeforeBlackRun = lastWasLocked
             DiagnosticsLog.record(
                 DiagnosticsLog.Kind.BLACK_FRAME,
                 "capture is black — FLAG_SECURE may be set"
             )
         } else if (!result.isCaptureBlack && lastWasBlack) {
-            DiagnosticsLog.record(DiagnosticsLog.Kind.BLACK_FRAME_CLEARED)
+            DiagnosticsLog.record(
+                DiagnosticsLog.Kind.BLACK_FRAME_CLEARED,
+                "black run lasted $lastBlackRunFrames frames, " +
+                    "tableLockedBefore=$lockedBeforeBlackRun"
+            )
+        }
+        // v1.0.37: a black run that persists past the threshold is a
+        // first-class event, recorded exactly once per run (the run
+        // length counts up by one per processed frame, so it crosses
+        // the threshold on exactly one frame), with the context the
+        // next phone test needs: which frame it crossed on, how long
+        // it had already lasted, and whether the table was locked
+        // just before the capture went black.
+        if (result.blackFrameRunFrames == DetectionResult.BLACK_FRAME_PERSISTENT_AFTER_FRAMES) {
+            DiagnosticsLog.record(
+                DiagnosticsLog.Kind.BLACK_FRAME_PERSISTENT,
+                "frame=${result.frameIndex} run=${result.blackFrameRunFrames} frames " +
+                    "tableLockedBefore=$lockedBeforeBlackRun"
+            )
         }
         lastWasLocked = result.tableLocked
         lastWasFallback = result.tableFromFallback
         lastWasBlack = result.isCaptureBlack
+        lastBlackRunFrames = result.blackFrameRunFrames
         if (result.frameIndex % 150L == 0L) {
             DiagnosticsLog.record(
                 DiagnosticsLog.Kind.FRAME_STATS,

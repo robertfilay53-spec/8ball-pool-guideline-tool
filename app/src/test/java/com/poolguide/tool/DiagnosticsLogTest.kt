@@ -68,6 +68,27 @@ class DiagnosticsLogTest {
     }
 
     @Test
+    fun `persistent black frame event records with its context`() {
+        // v1.0.37, REA hardening R2: the persistent event carries the
+        // frame it crossed the threshold on, the run length, and
+        // whether the table was locked just before the capture went
+        // black — the context the next phone test needs to map WHEN
+        // FLAG_SECURE is on. The service builds the detail; the log
+        // only has to carry the kind and the detail verbatim.
+        DiagnosticsLog.record(
+            DiagnosticsLog.Kind.BLACK_FRAME_PERSISTENT,
+            "frame=1234 run=30 frames tableLockedBefore=true"
+        )
+        val events = DiagnosticsLog.snapshot()
+        assertEquals(2, events.size)
+        assertEquals(DiagnosticsLog.Kind.BLACK_FRAME_PERSISTENT, events[1].kind)
+        assertEquals(
+            "frame=1234 run=30 frames tableLockedBefore=true",
+            events[1].detail
+        )
+    }
+
+    @Test
     fun `ring buffer keeps only the last 500 events`() {
         repeat(600) { i ->
             DiagnosticsLog.record(DiagnosticsLog.Kind.FRAME_STATS, "frame=$i")

@@ -29,6 +29,8 @@ import com.poolguide.tool.geometry.RailContactMarker
 import com.poolguide.tool.geometry.Segment
 import com.poolguide.tool.geometry.ShotSolver
 import com.poolguide.tool.geometry.Vec2
+import kotlin.math.PI
+import kotlin.math.atan2
 import kotlin.math.max
 import kotlin.math.min
 
@@ -41,13 +43,26 @@ import kotlin.math.min
  *    line. A full-screen overlay would flag EVERY touch as obscured.
  * 2. "Hide guide while shooting": the control bubble has a Hide/Show toggle
  *    that removes all line windows (removeView) while the user shoots.
- *    We cannot observe the user's touches (FLAG_NOT_TOUCHABLE passes them
- *    through), so the toggle is manual — see README, "Honest limits".
+ *    Since v1.0.37 the lines also auto-hide while the aim is moving
+ *    (AimActivityTracker: the game's guideline angle swinging, or the
+ *    cue ball travelling after a shot) and come back once the aim has
+ *    been quiet for 5 frames — the game reports FLAG_WINDOW_IS_OBSCURED
+ *    for every touch landing on a line window, so no line may exist
+ *    over the table at the moment a touch lands. The manual toggle
+ *    stays as the fallback. We cannot observe the user's touches
+ *    (FLAG_NOT_TOUCHABLE passes them through), so the auto-hide is
+ *    driven by the aim signal in the detection, not by touch events —
+ *    see README, "Honest limits".
  * 3. Auto-hide: when the game's own guideline is lost for 15 consecutive
  *    frames, the lines are removed — a stale shot is worse than no shot.
- * 4. Windows are reused by index across frames (updateViewLayout), not
+ * 4. Black capture (v1.0.37, REA hardening R2): a black run that
+ *    persists past 30 frames shows "Capture blocked (FLAG_SECURE?)"
+ *    on the bubble, so the user is told the game is hiding the table
+ *    instead of seeing no lines and no explanation; the run is also
+ *    recorded in DiagnosticsLog with its context (see CaptureService).
+ * 5. Windows are reused by index across frames (updateViewLayout), not
  *    re-added, to avoid flicker.
- * 5. EDIT mode (v1.0.4, Line Guide lead): the bubble's Edit button freezes
+ * 6. EDIT mode (v1.0.4, Line Guide lead): the bubble's Edit button freezes
  *    the current shot and shows two draggable anchor handles (cue +
  *    ghost). The handles are small touchable windows by design — a touch
  *    landing exactly on one sets FLAG_WINDOW_IS_OBSCURED, so EDIT mode is
@@ -158,9 +173,15 @@ class LineOverlayManager(
     private var bubbleView: View? = null
     /** Lock-progress ring on the bubble (v1.0.5). */
     private var lockRing: LockRingView? = null
+    /** "Capture blocked" status on the bubble (v1.0.37, REA hardening
+     * R2): visible only while a black run persists past the threshold. */
+    private var blockedStatusView: TextView? = null
     private var hideButton: Button? = null
     private var editButton: Button? = null
     private var framesWithoutGuideline = 0
+    /** Shot-in-progress state (v1.0.37, REA hardening R1): hides the
+     * lines while the aim is moving or a shot is in flight. */
+    private val aimTracker = AimActivityTracker()
     /** EDIT-mode state (v1.0.4): the frozen shot + anchor overrides. */
     private val manualAim = ManualAim()
     /** The latest result, kept so a handle drag can re-render without
@@ -235,6 +256,12 @@ class LineOverlayManager(
      * mode) state rather than live lock progress. */
     @androidx.annotation.VisibleForTesting
     val lockRingFrozen: Boolean get() = lockRing?.isFrozen ?: false
+
+    /** Test-only: whether the bubble is currently showing the
+     * "capture blocked" state (v1.0.37). */
+    @androidx.annotation.VisibleForTesting
+    val isCaptureBlockedShown: Boolean
+        get() = blockedStatusView?.visibility == View.VISIBLE
 
     /** Toggle EDIT mode (the bubble's Edit/Done button). Entering freezes
      * the current shot; leaving resumes the live detection and drops
@@ -347,6 +374,12 @@ class LineOverlayManager(
         // frozen state instead of implying live lock progress.
         lockRing?.isFrozen = manualAim.isEditMode
         lockRing?.progress = result.tableLockProgress
+        // Capture blocked (v1.0.37, REA hardening R2): a black run
+        // that persists past the threshold shows on the bubble, so the
+        // user is told the game is hiding the table instead of seeing
+        // no lines and no explanation. Set before the EDIT branch so
+        // it shows in EDIT mode too.
+        setCaptureBlocked(DetectionResult.isPersistentBlackRun(result.blackFrameRunFrames))
         lastResult = result
         if (result.guideline.isEmpty()) {
             framesWithoutGuideline++
@@ -366,15 +399,26 @@ class LineOverlayManager(
         // table, or a lost table all clear the lock in the pipeline.
         if (!result.tableLocked) {
             smoother.reset()
+            aimTracker.reset()
             removeLineWindows()
             removeLabelWindows()
             removeTagWindows()
             return
         }
 
+        // Auto-hide while aiming/shooting (v1.0.37, REA hardening R1):
+        // the aim signal is the game's guideline angle and the cue
+        // ball's position between frames. While either is moving, no
+        // line window may exist over the table at the moment a touch
+        // lands; once the aim has been quiet for 5 frames the lines
+        // come back.
+        val aiming = aimTracker.observe(
+            guidelineAngleDeg(result), result.cueBall?.center
+        )
         val hide = store.guidesHidden ||
             result.isCaptureBlack ||
-            framesWithoutGuideline > NO_GUIDELINE_HIDE_AFTER_FRAMES
+            framesWithoutGuideline > NO_GUIDELINE_HIDE_AFTER_FRAMES ||
+            aiming
         if (hide) {
             removeLineWindows()
             removeLabelWindows()
@@ -397,6 +441,23 @@ class LineOverlayManager(
         applyLines(drawn.lines)
         applyLabels(drawn.labels)
         applyTags(drawn.tags)
+    }
+
+    /** The game's guideline angle in degrees (v1.0.37, REA hardening
+     * R1): the longest tracked segment's direction, or null when there
+     * is no guideline this frame. The longest segment is the most
+     * stable read on where the player is aiming. */
+    private fun guidelineAngleDeg(result: DetectionResult): Double? {
+        val longest = result.guideline.maxByOrNull { it.segment.length() } ?: return null
+        return AimActivityTracker.directionAngleDeg(longest.segment.direction())
+    }
+
+    /** Show or hide the "capture blocked" state on the bubble
+     * (v1.0.37, REA hardening R2). The view is GONE, not INVISIBLE,
+     * so the bubble shrinks back to its normal size when the capture
+     * recovers. */
+    private fun setCaptureBlocked(blocked: Boolean) {
+        blockedStatusView?.visibility = if (blocked) View.VISIBLE else View.GONE
     }
 
     /** EDIT-mode frame: draw the frozen shot with any anchor corrections.
@@ -1588,6 +1649,26 @@ class LineOverlayManager(
         }
         lockRing = ring
         layout.addView(ring)
+        // "Capture blocked" status (v1.0.37, REA hardening R2): a small
+        // amber label that appears only while a black run persists past
+        // the threshold, so the user knows the game is hiding the
+        // table. GONE the rest of the time, so the bubble keeps its
+        // normal size.
+        val blocked = TextView(context).apply {
+            text = context.getString(R.string.bubble_capture_blocked)
+            setTextColor(WARNING_COLOR)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                marginEnd = 8
+            }
+            visibility = View.GONE
+        }
+        blockedStatusView = blocked
+        layout.addView(blocked)
         val hide = Button(context).apply {
             text = if (store.guidesHidden) context.getString(R.string.show_guides)
             else context.getString(R.string.hide_guides)
@@ -1690,6 +1771,7 @@ class LineOverlayManager(
 
     fun removeAll() {
         smoother.reset()
+        aimTracker.reset()
         manualAim.exitEditMode()
         removeLineWindows()
         removeLabelWindows()
@@ -1704,6 +1786,7 @@ class LineOverlayManager(
         bubbleView = null
         bubbleParams = null
         lockRing = null
+        blockedStatusView = null
         hideButton = null
         editButton = null
         framesWithoutGuideline = 0

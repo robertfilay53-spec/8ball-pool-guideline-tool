@@ -82,6 +82,13 @@ data class DetectionResult(
      * game is probably using FLAG_SECURE — see README. No other fields are
      * meaningful in that case. */
     val isCaptureBlack: Boolean,
+    /** Consecutive black frames so far, this run (v1.0.37, REA
+     * hardening R2). 0 on every non-black frame. The capture service
+     * and the overlay both read it: a run that persists past
+     * [BLACK_FRAME_PERSISTENT_AFTER_FRAMES] is a first-class
+     * "capture blocked" state, not a one-frame blip. Counted by the
+     * pipeline, which is the only place that sees every frame. */
+    val blackFrameRunFrames: Int = 0,
     val table: TableRect?,
     val pockets: List<Vec2>,
     val balls: List<Ball>,
@@ -154,9 +161,22 @@ data class DetectionResult(
     val status: String
 ) {
     companion object {
+        /** Black-run length after which the capture counts as
+         * persistently blocked (v1.0.37, REA hardening R2): 30 frames
+         * is about 2 seconds at the 15 FPS cap. A shorter black run
+         * is a blip (a transition, a menu fade); a run this long
+         * means the game is holding FLAG_SECURE on. */
+        const val BLACK_FRAME_PERSISTENT_AFTER_FRAMES = 30
+
+        /** True when a black run of [runFrames] frames counts as a
+         * persistent block. */
+        fun isPersistentBlackRun(runFrames: Int): Boolean =
+            runFrames >= BLACK_FRAME_PERSISTENT_AFTER_FRAMES
+
         fun blackFrame(
             frameIndex: Long, workingWidth: Int, workingHeight: Int,
-            scaleX: Double, scaleY: Double
+            scaleX: Double, scaleY: Double,
+            blackRunFrames: Int = 0
         ) = DetectionResult(
             frameIndex = frameIndex,
             workingWidth = workingWidth,
@@ -164,6 +184,7 @@ data class DetectionResult(
             scaleToScreenX = scaleX,
             scaleToScreenY = scaleY,
             isCaptureBlack = true,
+            blackFrameRunFrames = blackRunFrames,
             table = null,
             pockets = emptyList(),
             balls = emptyList(),

@@ -68,6 +68,11 @@ class CvPipeline(
     private var workingWidth = CvConfig.WORK_WIDTH
     private var workingHeight = 405
     private var frameIndex = 0L
+    /** Consecutive black frames in the current run (v1.0.37, REA
+     * hardening R2). Carried into [DetectionResult.blackFrameRunFrames]
+     * so the capture service (diagnostics) and the overlay (bubble
+     * state) both see the run length without counting it themselves. */
+    private var blackRunFrames = 0
     private var table: TableRect? = null
     /** True when [table] is the ratio fallback, not a detection. */
     private var tableIsFallback = false
@@ -99,6 +104,7 @@ class CvPipeline(
     fun reset() {
         table = null
         tableIsFallback = false
+        blackRunFrames = 0
         ballDetector.reset()
         guidelineDetector.reset()
         tableLock.reset()
@@ -237,11 +243,15 @@ class CvPipeline(
     private fun blackCheck(): DetectionResult? {
         val mean = Core.mean(gray).`val`[0]
         return if (mean < CvConfig.BLACK_FRAME_MEAN) {
+            blackRunFrames++
             DetectionResult.blackFrame(
                 frameIndex, workingWidth, workingHeight,
-                scaleToScreenX, scaleToScreenY
+                scaleToScreenX, scaleToScreenY, blackRunFrames
             )
-        } else null
+        } else {
+            blackRunFrames = 0
+            null
+        }
     }
 
     private fun normalizedToTable(norm: List<Vec2>): TableRect? {
