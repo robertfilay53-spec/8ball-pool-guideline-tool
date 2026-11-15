@@ -2,8 +2,9 @@ package com.poolguide.tool.cv
 
 /**
  * Detection constants. Three sources, all cited in the README:
- * - kaigiii/8-Ball-Pool-Aim-Assist-for-macOS (bilateral / verifier /
- *   LineTracker parameters and structure).
+ * - kaigiii/8-Ball-Pool-Aim-Assist-for-macOS (verifier / LineTracker
+ *   parameters and structure; the pre-filter was its bilateral, now a
+ *   Gaussian blur, see GAUSSIAN_BLUR_KSIZE below).
  * - ChatGPT's Android overlay guide, Nov 13 2026 (HoughCircles parameters,
  *   downscale target, frame-skipping strategy).
  * - workua94-afk/8ball-aim-master, via the Nov 13 GitHub search
@@ -34,9 +35,16 @@ object CvConfig {
     const val BLACK_FRAME_MEAN = 8.0
 
     // ---- Guideline detection (kaigiii structure, 8ball-aim-master params) ----
-    const val BILATERAL_D = 20
-    const val BILATERAL_SIGMA_COLOR = 200.0
-    const val BILATERAL_SIGMA_SPACE = 1.0
+    /** Guideline pre-filter (v1.0.32, was the kaigiii bilateral d=20,
+     * sigmaColor 200, sigmaSpace 1): the bilateral was 92% of the
+     * guideline stage (50.6 ms/run on the harness replica) while its
+     * spatial smoothing was nearly a no-op (sigmaSpace 1.0). A 5x5
+     * Gaussian blur is 7.6x faster per run (7.9 ms) for +0.02 deg mean
+     * angle error, max unchanged, zero change to shots, cut error, or
+     * ball recall on the 15 baseline + 7 adversarial tables. 5x5, not
+     * 3x3: it smooths sensor noise a little more and its max angle
+     * error matches the bilateral exactly. */
+    const val GAUSSIAN_BLUR_KSIZE = 5
     /** Canny thresholds (8ball-aim-master 50/150): the guideline is ~2 px
      * wide at the working resolution, so its Sobel response is far below
      * the old 500/350 pair, which kept almost no edges at all. */
