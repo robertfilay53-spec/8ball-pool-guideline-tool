@@ -70,9 +70,6 @@ class ManualAim {
     /** True when the frozen shot is a one-rail bank (v1.0.29). */
     val isBankEdit: Boolean get() = baseBank != null
     val hasOverrides: Boolean get() = cueOverride != null || ghostOverride != null
-    /** Test-only: the current ghost override value (v1.0.29 diagnostic). */
-    @androidx.annotation.VisibleForTesting
-    val ghostOverrideForTest: Vec2? get() = ghostOverride
 
     /** Freeze [shot] as the editable base and enter EDIT mode. */
     fun enterEditMode(shot: ShotSolver.ShotSolution, radiusPx: Double) {
@@ -131,20 +128,40 @@ class ManualAim {
     }
 
     /** Drag [anchor] by [delta] (working coordinates), clamped inside
-     * [table] (inset by the ball radius) when a table is known. */
+     * [table] (inset by the ball radius) when a table is known. A drag
+     * the correction rejects (cut over 90, contact off the table, no
+     * re-solve) is not committed: the override reverts to the last
+     * good value, so an earlier accepted drag is never wiped out by
+     * a later rejected one. Without the revert the rejected drag
+     * would leave its override set and every later read would fall
+     * back to the frozen base, losing the accepted correction. */
     fun dragAnchor(anchor: Anchor, delta: Vec2, table: TableRect?) {
         if (table != null) lastTable = table
         val base = baseShot ?: baseBank?.direct ?: return
         when (anchor) {
             Anchor.CUE -> {
-                val from = cueOverride ?: base.aimLine.start
+                val prev = cueOverride
+                val from = prev ?: base.aimLine.start
                 cueOverride = clamp(from + delta, table)
+                if (isRejected()) cueOverride = prev
             }
             Anchor.GHOST -> {
-                val from = ghostOverride ?: base.ghostPoint
+                val prev = ghostOverride
+                val from = prev ?: base.ghostPoint
                 ghostOverride = clamp(from + delta, table)
+                if (isRejected()) ghostOverride = prev
             }
         }
+    }
+
+    /** True when the current overrides are rejected: the correction
+     * collapses to the frozen base. An accepted correction always
+     * builds a new shot/bank object; a rejected one returns the base
+     * itself, so reference identity is the exact signal. */
+    private fun isRejected(): Boolean {
+        if (baseShot != null) return currentShot() === baseShot
+        if (baseBank != null) return currentBank() === baseBank
+        return false
     }
 
     private fun clamp(p: Vec2, table: TableRect?): Vec2 {

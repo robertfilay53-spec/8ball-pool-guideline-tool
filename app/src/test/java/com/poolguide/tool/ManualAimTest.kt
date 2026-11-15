@@ -119,6 +119,25 @@ class ManualAimTest {
     }
 
     @Test
+    fun `rejected ghost drag after an accepted one keeps the last good shot`() {
+        val aim = ManualAim()
+        aim.enterEditMode(baseShot(), radius)
+        // First drag accepted: ghost moves down 30 px.
+        aim.dragAnchor(Anchor.GHOST, Vec2(0.0, 30.0), table())
+        val edited = aim.currentShot()!!
+        assertEquals(282.0, edited.ghostPoint.x, 0.0)
+        assertEquals(230.0, edited.ghostPoint.y, 0.0)
+        // Second drag rejected (cut > 90 deg): the drag is not
+        // committed, so the last good shot stays instead of snapping
+        // back to the frozen base.
+        aim.dragAnchor(Anchor.GHOST, Vec2(-300.0, 0.0), table())
+        val kept = aim.currentShot()!!
+        assertEquals(282.0, kept.ghostPoint.x, 0.0)
+        assertEquals(230.0, kept.ghostPoint.y, 0.0)
+        assertTrue(aim.hasOverrides)
+    }
+
+    @Test
     fun `anchors clamp inside the table`() {
         val aim = ManualAim()
         aim.enterEditMode(baseShot(), radius)
@@ -241,6 +260,26 @@ class ManualAimTest {
         // left edge of the table (x < 0).
         aim.dragAnchor(Anchor.GHOST, Vec2(10.0, 0.0), table())
         assertEquals(base, aim.currentBank())
+    }
+
+    @Test
+    fun `bank rejected ghost drag after an accepted one keeps the last good bank`() {
+        val aim = ManualAim()
+        aim.enterEditMode(baseBank(), radius)
+        // First drag accepted: ghost moves 2 px right, contact slides
+        // along the rail.
+        aim.dragAnchor(Anchor.GHOST, Vec2(2.0, 0.0), table())
+        val edited = aim.currentBank()!!
+        assertEquals(315.48193812482685, edited.direct.ghostPoint.x, 1e-9)
+        assertEquals(40.37380684500539, edited.railContact.x, 1e-9)
+        // Second drag rejected (contact would fall off the table):
+        // the drag is not committed, so the last good bank stays
+        // instead of snapping back to the frozen base.
+        aim.dragAnchor(Anchor.GHOST, Vec2(10.0, 0.0), table())
+        val kept = aim.currentBank()!!
+        assertEquals(315.48193812482685, kept.direct.ghostPoint.x, 1e-9)
+        assertEquals(40.37380684500539, kept.railContact.x, 1e-9)
+        assertTrue(aim.hasOverrides)
     }
 
     @Test

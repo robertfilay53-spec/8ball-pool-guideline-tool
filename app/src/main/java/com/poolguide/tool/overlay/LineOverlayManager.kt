@@ -216,10 +216,6 @@ class LineOverlayManager(
     @androidx.annotation.VisibleForTesting
     val editHasOverrides: Boolean get() = manualAim.hasOverrides
 
-    /** Test-only: the current ghost override value (v1.0.29 diagnostic). */
-    @androidx.annotation.VisibleForTesting
-    val editGhostOverride: Vec2? get() = manualAim.ghostOverrideForTest
-
     /** Test-only: the lock-ring progress currently shown on the bubble
      * (-1 when the bubble does not exist yet). */
     @androidx.annotation.VisibleForTesting
