@@ -92,6 +92,12 @@ object DiagnosticsLog {
     private var sessionStartMs: Long = 0L
     private var active = false
 
+    /** Session pot-rate tracker (v1.0.42, REA hardening R6). The
+     * overlay feeds it one frame at a time; the diagnostics export
+     * reads it in [buildReport]. It is reset by [start], so the
+     * stat is per capture session. */
+    val outcomes = ShotOutcomeTracker()
+
     /** Optional on-disk sink, set by [attachFile]. Null in unit tests
      * (and when no file was attached), so recording stays purely
      * in-memory there. */
@@ -126,6 +132,7 @@ object DiagnosticsLog {
         previousSessionLines.clear()
         loadPreviousSession()
         events.clear()
+        outcomes.reset()
         sessionStartMs = System.currentTimeMillis()
         active = true
         record(Kind.SESSION_START, "session started")
@@ -229,6 +236,20 @@ object DiagnosticsLog {
             sb.appendLine("---")
             sb.appendLine("Shots: ${shots.size}")
             for (s in shots) sb.appendLine(ShotHistory.format(s))
+        }
+        // v1.0.42, REA hardening R6: the session pot rate, when any
+        // shot was taken. A very high rate over at least ten shots
+        // earns a reminder line: perfect play is itself a signal to
+        // the server, so the user should vary their play.
+        if (outcomes.shotsTaken > 0) {
+            sb.appendLine("---")
+            sb.appendLine("Session pot rate: ${outcomes.format()}")
+            if (outcomes.shouldRemind()) {
+                sb.appendLine(
+                    "Pot-rate reminder: pot rate is very high this " +
+                        "session, vary your play."
+                )
+            }
         }
         // v1.0.35: the previous session's transcript, when it ended
         // without a clean stop (crash, process kill). This is the
