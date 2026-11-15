@@ -442,11 +442,15 @@ systematic angle error is left to correct). The CV harness (15 synthetic
 tables, `../cv-harness/RESULTS.md`) measures the v1.0.3 pipeline at
 15/15 tables, 85/85 balls with 0 false positives, 15/15 shots, mean
 cut-angle error 0.32 deg (v1.0.1 was 13/15, 76/85, 11/15, 1.46 deg).
-As of v1.0.44 the same harness measures 15/15, 85/85, 0 false
+As of v1.0.45 the same harness measures 15/15, 85/85, 0 false
 positives, 15/15, mean cut-angle error 0.177 deg (max 0.27 deg);
 the adversarial tables measure 8/9 tables, 46 balls, 4 missed
 (all the purple-felt table, which the felt windows do not cover),
-0 false positives.
+0 false positives. `../cv-harness/RESULTS.md` was refreshed in
+v1.0.45: its header now names the current pipeline version and its
+frame schedule reads HoughCircles and guideline on frames 0/3/6
+(guideline cadence 3 since v1.0.38); before that it still described
+the v1.0.3 pipeline and the old 2/4/6 guideline schedule.
 
 Interaction work (v1.0.4, the remaining decode items): an **Edit/Play
 toggle** on the floating bubble (Line Guide lead) that freezes the current
