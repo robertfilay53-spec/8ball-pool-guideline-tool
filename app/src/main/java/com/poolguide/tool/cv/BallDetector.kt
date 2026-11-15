@@ -59,7 +59,9 @@ class BallDetector {
     /**
      * Colour windows: (colour, HSV lower, HSV upper). The green and blue
      * windows are felt-relative when [feltHsv] is known (see below);
-     * the rest are static.
+     * the white window's V floor is felt-relative too (v1.0.34):
+     * max(90, feltV + 30), so a dim cue ball stays inside the window.
+     * The rest are static.
      */
     private fun colorWindows(feltHsv: DoubleArray?): List<Triple<BallColor, DoubleArray, DoubleArray>> {
         val feltH = feltHsv?.get(0) ?: -1.0
@@ -100,7 +102,7 @@ class BallDetector {
             Triple(BallColor.BLUE, doubleArrayOf(90.0, blueSLow, blueVLow), doubleArrayOf(130.0, 255.0, 255.0)),
             Triple(BallColor.PURPLE, doubleArrayOf(130.0, 80.0, 50.0), doubleArrayOf(160.0, 255.0, 255.0)),
             Triple(BallColor.GREEN, doubleArrayOf(55.0, greenSLow, 40.0), doubleArrayOf(85.0, 255.0, 255.0)),
-            Triple(BallColor.WHITE, doubleArrayOf(0.0, 0.0, CvConfig.WHITE_V_FLOOR), doubleArrayOf(180.0, 40.0, 255.0)),
+            Triple(BallColor.WHITE, doubleArrayOf(0.0, 0.0, CvConfig.feltRelativeWhiteVFloor(feltHsv, CvConfig.WHITE_V_FLOOR)), doubleArrayOf(180.0, 40.0, 255.0)),
             Triple(BallColor.BLACK, doubleArrayOf(0.0, 0.0, 0.0), doubleArrayOf(180.0, 255.0, 60.0))
         )
     }
@@ -140,7 +142,7 @@ class BallDetector {
                 if (table != null && !insideTable(c, table)) continue
                 if (isPocket(c, r, pockets, pocketRadiusPx)) continue
                 if (found.any { it.center.distanceTo(c) < CvConfig.BALL_DEDUP_DIST_PX }) continue
-                found += Ball(0, c, r, color, isStripeAt(hsv, c, color))
+                found += Ball(0, c, r, color, isStripeAt(hsv, c, color, feltHsv))
             }
         }
 
@@ -171,12 +173,12 @@ class BallDetector {
                 if (table != null && !insideTable(c, table)) continue
                 if (isPocket(c, r, pockets, pocketRadiusPx)) continue
                 if (found.any { it.center.distanceTo(c) < CvConfig.BALL_DEDUP_DIST_PX }) continue
-                val color = colorAt(hsv, c)
-                found += Ball(0, c, r, color, isStripeAt(hsv, c, color))
+                val color = colorAt(hsv, c, feltHsv)
+                found += Ball(0, c, r, color, isStripeAt(hsv, c, color, feltHsv))
             }
         }
 
-        return track(classifyGroups(hsv, found), frameIndex)
+        return track(classifyGroups(hsv, found, feltHsv), frameIndex)
     }
 
     /**
@@ -189,7 +191,7 @@ class BallDetector {
      * id (a ball missed briefly keeps the group it was last
      * classified with).
      */
-    private fun classifyGroups(hsv: Mat, found: List<Ball>): List<Ball> {
+    private fun classifyGroups(hsv: Mat, found: List<Ball>, feltHsv: DoubleArray? = null): List<Ball> {
         return found.map { ball ->
             val others = found.filter { it !== ball }
                 .map { it.center to it.radiusPx }
@@ -197,7 +199,7 @@ class BallDetector {
                 BallGroup.UNKNOWN
             } else {
                 BallGroupClassifier.classify(
-                    BallClassifier.sampleDisc(hsv, ball.center, ball.radiusPx)
+                    BallClassifier.sampleDisc(hsv, ball.center, ball.radiusPx, feltHsv)
                 )
             }
             ball.copy(group = group)
@@ -273,8 +275,11 @@ class BallDetector {
             p.y in (ys.min() - pad)..(ys.max() + pad)
     }
 
-    /** Colour class of the HSV pixel at [p] (used for Hough-found circles). */
-    private fun colorAt(hsv: Mat, p: Vec2): BallColor {
+    /** Colour class of the HSV pixel at [p] (used for Hough-found circles).
+     * The white rule uses the felt-relative floor (v1.0.34), like the
+     * white window in [colorWindows]; without the felt it keeps the
+     * fixed floor. */
+    private fun colorAt(hsv: Mat, p: Vec2, feltHsv: DoubleArray? = null): BallColor {
         val px = hsv.get(p.y.toInt().coerceIn(0, hsv.rows() - 1), p.x.toInt().coerceIn(0, hsv.cols() - 1))
             ?: return BallColor.UNKNOWN
         val h = px[0]
@@ -282,7 +287,7 @@ class BallDetector {
         val v = px[2]
         return when {
             v < 60 -> BallColor.BLACK
-            s < 40 && v > CvConfig.WHITE_V_FLOOR -> BallColor.WHITE
+            s < 40 && v > CvConfig.feltRelativeWhiteVFloor(feltHsv, CvConfig.WHITE_V_FLOOR) -> BallColor.WHITE
             h < 10 || h >= 160 -> BallColor.RED
             h < 20 -> BallColor.ORANGE
             h < 35 -> BallColor.YELLOW
@@ -293,11 +298,13 @@ class BallDetector {
         }
     }
 
-    /** True when the centre pixel is white-ish: a stripe ball's number band. */
-    private fun isStripeAt(hsv: Mat, p: Vec2, color: BallColor): Boolean {
+    /** True when the centre pixel is white-ish: a stripe ball's number band.
+     * The V test uses the felt-relative floor (v1.0.34), like the disc
+     * sampler; without the felt it keeps the fixed stripe floor. */
+    private fun isStripeAt(hsv: Mat, p: Vec2, color: BallColor, feltHsv: DoubleArray? = null): Boolean {
         if (color == BallColor.WHITE || color == BallColor.BLACK) return false
         val px = hsv.get(p.y.toInt().coerceIn(0, hsv.rows() - 1), p.x.toInt().coerceIn(0, hsv.cols() - 1))
             ?: return false
-        return px[1] < 60 && px[2] > CvConfig.STRIPE_V_FLOOR
+        return px[1] < 60 && px[2] > CvConfig.feltRelativeWhiteVFloor(feltHsv, CvConfig.STRIPE_V_FLOOR)
     }
 }

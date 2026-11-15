@@ -128,6 +128,25 @@ object CvConfig {
     /** Stripe-band V floor (v1.0.3, was 180): a dim stripe band is
      * V~147, the same 0.6x lighting as the dim cue ball. */
     const val STRIPE_V_FLOOR = 130.0
+    /** Felt-relative white V floor (v1.0.34, dim-light cue fix): the
+     * fixed floors above miss a dim white cue ball (V~98 at 0.4x
+     * light, felt V~56): the cue is found but its disc samples
+     * white_fraction 0, so it reads SOLID and the pipeline reports
+     * "Cue ball not found". The cue is consistently ~1.75x the
+     * felt's V (245/140 at 1.0x, 147/84 at 0.6x, 98/56 at 0.4x),
+     * so the floor follows the felt: max(90, feltV + 30) when the
+     * felt mean is known, the fixed floor when it is not. The 90
+     * absolute floor keeps the rule above any grey felt pixel on
+     * near-black felt (V 35) and below any real white ball down to
+     * ~0.37x light; below that (0.3x: cue V~74) the cue stays below
+     * the floor by design (harness table a08 pins the boundary).
+     * [fixedFloor] is WHITE_V_FLOOR (140) for the white window /
+     * colorAt and STRIPE_V_FLOOR (130) for the stripe white test;
+     * the same felt-relative value feeds both. */
+    fun feltRelativeWhiteVFloor(feltHsv: DoubleArray?, fixedFloor: Double): Double {
+        val feltV = feltHsv?.getOrNull(2) ?: return fixedFloor
+        return (feltV + 30.0).coerceAtLeast(90.0)
+    }
     /** Pocket-exclusion margin (v1.0.3, was +3 px): with the pocket
      * model fixed (inset 0, below) the disc-overlap test needs no extra
      * margin; the +3 px ate real balls 22.5 px from a pocket (t05). */

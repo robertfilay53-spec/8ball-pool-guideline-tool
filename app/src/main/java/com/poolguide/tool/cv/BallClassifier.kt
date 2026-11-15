@@ -27,13 +27,18 @@ object BallClassifier {
      * antialiased against the felt. */
     const val SAMPLE_RADIUS_FRACTION = 0.85
 
-    fun sampleDisc(hsv: Mat, center: Vec2, radiusPx: Double): DiscStats {
+    fun sampleDisc(hsv: Mat, center: Vec2, radiusPx: Double, feltHsv: DoubleArray? = null): DiscStats {
         val sampleR = SAMPLE_RADIUS_FRACTION * radiusPx
         val expected = (PI * sampleR * sampleR / (SAMPLE_STEP_PX * SAMPLE_STEP_PX)).toInt()
         var sampled = 0
         var white = 0
         var sumV = 0.0
         var sumS = 0.0
+        // v1.0.34: the white test uses the felt-relative floor, so a
+        // dim cue ball's disc still samples white (at 0.4x light the
+        // cue is V~98 against a felt-relative floor of 90, not the
+        // fixed 130); without the felt it keeps the fixed floor.
+        val whiteVFloor = CvConfig.feltRelativeWhiteVFloor(feltHsv, CvConfig.STRIPE_V_FLOOR)
         var y = center.y - sampleR
         while (y <= center.y + sampleR) {
             var x = center.x - sampleR
@@ -51,7 +56,7 @@ object BallClassifier {
                         val v = px[2]
                         sumS += s
                         sumV += v
-                        if (s < 60.0 && v > CvConfig.STRIPE_V_FLOOR) white++
+                        if (s < 60.0 && v > whiteVFloor) white++
                     }
                 }
                 x += SAMPLE_STEP_PX
