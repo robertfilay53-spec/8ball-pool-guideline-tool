@@ -450,7 +450,18 @@ the adversarial tables measure 8/9 tables, 46 balls, 4 missed
 v1.0.45: its header now names the current pipeline version and its
 frame schedule reads HoughCircles and guideline on frames 0/3/6
 (guideline cadence 3 since v1.0.38); before that it still described
-the v1.0.3 pipeline and the old 2/4/6 guideline schedule.
+the v1.0.3 pipeline and the old 2/4/6 guideline schedule. In v1.0.46
+the work-width change (deep-dive item 8, 720 to 640) was attempted
+on the harness and abandoned: the baseline stayed identical on every
+decision field, but the adversarial tables regressed, the glare cue
+ball on a07 was lost (its circle is Hough-only at 720 and
+undetectable at 640 at any accumulator threshold from 8 to 12) and
+the 0.3x dim guideline on a08 was lost (54 edge pixels, zero Hough
+candidates), so the work width stays 720. The experiment record is
+`../cv-harness/run_v1046.py` with the rescaled ground truth
+(`ground_truth_640.json`, every coordinate times 640/720) and the
+before/after JSONs; the `RESULTS.md` header was bumped to v1.0.46
+with the figures unchanged, since no pipeline code changed.
 
 Interaction work (v1.0.4, the remaining decode items): an **Edit/Play
 toggle** on the floating bubble (Line Guide lead) that freezes the current
