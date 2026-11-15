@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.PointF
+import android.os.SystemClock
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
@@ -69,7 +70,9 @@ import kotlin.math.min
  *    for arranging, not for shooting; leaving it resumes the live
  *    detection. In EDIT mode the lines do not auto-hide on guideline
  *    loss (the user is editing precisely because detection missed) and
- *    do not follow new detections.
+ *    do not follow new detections. EDIT mode exits on its own after
+ *    20 s without a handle drag (v1.0.41, REA hardening R4), so a
+ *    forgotten session cannot leave the handles over the table.
  */
 class LineOverlayManager(
     private val context: Context,
@@ -184,6 +187,10 @@ class LineOverlayManager(
     private val aimTracker = AimActivityTracker()
     /** EDIT-mode state (v1.0.4): the frozen shot + anchor overrides. */
     private val manualAim = ManualAim()
+    /** EDIT-mode inactivity timer (v1.0.41, REA hardening R4): exits
+     * EDIT mode after 20 s without a handle drag, so a forgotten
+     * session cannot leave the touchable handles over the table. */
+    private val editInactivity = EditInactivityTracker()
     /** The latest result, kept so a handle drag can re-render without
      * waiting for the next frame. */
     private var lastResult: DetectionResult? = null
@@ -277,11 +284,7 @@ class LineOverlayManager(
      * with none of the four, the tap still does nothing. */
     fun toggleEditMode() {
         if (manualAim.isEditMode) {
-            manualAim.exitEditMode()
-            removeHandles()
-            editButton?.text = context.getString(R.string.edit_guides)
-            lockRing?.isFrozen = false
-            DiagnosticsLog.record(DiagnosticsLog.Kind.EDIT_EXIT)
+            exitEditMode(DiagnosticsLog.Kind.EDIT_EXIT)
             return
         }
         val result = lastResult
@@ -289,6 +292,7 @@ class LineOverlayManager(
         if (shot != null) {
             smoother.reset()
             manualAim.enterEditMode(shot, result.cueBall?.radiusPx ?: 9.0)
+            editInactivity.enter(SystemClock.uptimeMillis())
             editButton?.text = context.getString(R.string.done_editing)
             lockRing?.isFrozen = true
             DiagnosticsLog.record(DiagnosticsLog.Kind.EDIT_ENTER)
@@ -299,6 +303,7 @@ class LineOverlayManager(
         if (bank != null && store.bankLinesEnabled) {
             smoother.reset()
             manualAim.enterEditMode(bank, result.cueBall?.radiusPx ?: 9.0)
+            editInactivity.enter(SystemClock.uptimeMillis())
             editButton?.text = context.getString(R.string.done_editing)
             lockRing?.isFrozen = true
             DiagnosticsLog.record(DiagnosticsLog.Kind.EDIT_ENTER)
@@ -309,6 +314,7 @@ class LineOverlayManager(
         if (kick != null && store.bankLinesEnabled) {
             smoother.reset()
             manualAim.enterEditMode(kick, result.cueBall?.radiusPx ?: 9.0)
+            editInactivity.enter(SystemClock.uptimeMillis())
             editButton?.text = context.getString(R.string.done_editing)
             lockRing?.isFrozen = true
             DiagnosticsLog.record(DiagnosticsLog.Kind.EDIT_ENTER)
@@ -319,6 +325,7 @@ class LineOverlayManager(
         if (bank2 != null && store.bankLinesEnabled) {
             smoother.reset()
             manualAim.enterEditMode(bank2, result.cueBall?.radiusPx ?: 9.0)
+            editInactivity.enter(SystemClock.uptimeMillis())
             editButton?.text = context.getString(R.string.done_editing)
             lockRing?.isFrozen = true
             DiagnosticsLog.record(DiagnosticsLog.Kind.EDIT_ENTER)
@@ -328,12 +335,28 @@ class LineOverlayManager(
         Toast.makeText(context, R.string.no_shot_to_edit, Toast.LENGTH_SHORT).show()
     }
 
+    /** Shared EDIT-mode exit path (v1.0.41, REA hardening R4): the
+     * Done button exits with [DiagnosticsLog.Kind.EDIT_EXIT]; the
+     * inactivity timer exits with EDIT_AUTO_EXIT so the diagnostics
+     * export can tell a forgotten session from a deliberate Done.
+     * Either way the frozen shot is dropped, the handles are removed,
+     * and live detection resumes on the next frame. */
+    private fun exitEditMode(kind: DiagnosticsLog.Kind) {
+        manualAim.exitEditMode()
+        removeHandles()
+        editButton?.text = context.getString(R.string.edit_guides)
+        lockRing?.isFrozen = false
+        editInactivity.exit()
+        DiagnosticsLog.record(kind)
+    }
+
     /** Test-only: drag an anchor by a working-coordinate delta, then
      * re-render. No-op outside EDIT mode. */
     @androidx.annotation.VisibleForTesting
     fun applyAnchorDrag(anchor: Anchor, deltaWorking: Vec2) {
         if (!manualAim.isEditMode) return
         manualAim.dragAnchor(anchor, deltaWorking, lastResult?.table)
+        editInactivity.noteInteraction(SystemClock.uptimeMillis())
         lastResult?.let { updateEditMode(it) }
     }
 
@@ -388,8 +411,15 @@ class LineOverlayManager(
         }
 
         // EDIT mode (v1.0.4): the frozen shot is drawn, not the live
-        // detection — see updateEditMode.
+        // detection — see updateEditMode. A session with no handle
+        // drag for 20 s exits on its own (v1.0.41, REA hardening
+        // R4), so the touchable handles cannot sit over the table
+        // through a whole turn; live lines resume on the next frame.
         if (manualAim.isEditMode) {
+            if (editInactivity.shouldExit(SystemClock.uptimeMillis())) {
+                exitEditMode(DiagnosticsLog.Kind.EDIT_AUTO_EXIT)
+                return
+            }
             updateEditMode(result)
             return
         }
@@ -972,6 +1002,7 @@ class LineOverlayManager(
                         dyScreen / result.scaleToScreenY
                     )
                     manualAim.dragAnchor(anchor, delta, result.table)
+                    editInactivity.noteInteraction(SystemClock.uptimeMillis())
                     updateEditMode(result)
                     true
                 }
