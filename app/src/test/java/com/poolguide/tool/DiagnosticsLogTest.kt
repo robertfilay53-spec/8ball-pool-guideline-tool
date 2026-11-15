@@ -76,6 +76,61 @@ class DiagnosticsLogTest {
     }
 
     @Test
+    fun `capture start failure breadcrumb records the failing call`() {
+        // v1.0.31: the breadcrumb names the failing call, so the next
+        // cloud-emulator run can say what threw. Numbers pinned by a
+        // kotlinc probe before this test was written.
+        DiagnosticsLog.record(
+            DiagnosticsLog.Kind.CAPTURE_START_FAILED,
+            "getMediaProjection: SecurityException: Media projection requires a valid token"
+        )
+        val events = DiagnosticsLog.snapshot()
+        assertEquals(2, events.size)
+        assertEquals(DiagnosticsLog.Kind.CAPTURE_START_FAILED, events.last().kind)
+        assertEquals(
+            "getMediaProjection: SecurityException: Media projection requires a valid token",
+            events.last().detail
+        )
+    }
+
+    @Test
+    fun `capture start failure breadcrumb survives into the exported report`() {
+        DiagnosticsLog.record(
+            DiagnosticsLog.Kind.CAPTURE_START_FAILED,
+            "getMediaProjection: SecurityException: Media projection requires a valid token"
+        )
+        val header = DiagnosticsLog.Header(
+            appVersion = "1.0.31",
+            appVersionCode = 32L,
+            gameVersion = "56.35.0",
+            deviceModel = "Test Device",
+            androidVersion = "API 34 (14)",
+            sessionStartIso = "2026-11-15T06:00:00+0500"
+        )
+        val report = DiagnosticsLog.buildReport(header)
+        assertTrue(report.contains("Events: 2"))
+        assertTrue(
+            report.contains(
+                "CAPTURE_START_FAILED getMediaProjection: SecurityException"
+            )
+        )
+    }
+
+    @Test
+    fun `capture start failure is dropped with no active session`() {
+        // Callers must start() first: MainActivity's failServiceStart
+        // and CaptureService's startCapture both do. A record with no
+        // session is dropped, like every other kind.
+        DiagnosticsLog.end()
+        val count = DiagnosticsLog.eventCount()
+        DiagnosticsLog.record(
+            DiagnosticsLog.Kind.CAPTURE_START_FAILED,
+            "startForegroundService(CaptureService): IllegalStateException: x"
+        )
+        assertEquals(count, DiagnosticsLog.eventCount())
+    }
+
+    @Test
     fun `buildReport contains the header and every event`() {
         DiagnosticsLog.record(DiagnosticsLog.Kind.TABLE_LOCKED, "lock=1.00")
         DiagnosticsLog.record(DiagnosticsLog.Kind.GUIDES_HIDDEN)
