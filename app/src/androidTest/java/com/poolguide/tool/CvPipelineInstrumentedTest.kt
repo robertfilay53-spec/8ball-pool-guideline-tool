@@ -140,6 +140,27 @@ class CvPipelineInstrumentedTest {
     }
 
     @Test
+    fun dimGreenTable_findsCueBallAndSolvesShot() {
+        // v1.0.34: the green demo table at 0.4x light (same transform
+        // as harness table a04: cue V~98, felt V~55). Before the
+        // felt-relative floors the cue read SOLID and the pipeline
+        // reported "Cue ball not found"; now the cue must classify
+        // CUE and the depicted shot must solve.
+        val mat = loadDemoImage("demo_table_green_dim.png")
+        val pipeline = CvPipeline(1280, 720)
+        // Run several frames: Hough runs every 3rd, guideline every 2nd.
+        var result = pipeline.process(mat)
+        repeat(5) { result = pipeline.process(mat) }
+
+        assertFalse("dim table must not be black", result.isCaptureBlack)
+        assertNotNull("table not found", result.table)
+        assertNotNull("cue ball not found on the dim table", result.cueBall)
+        val cue = result.balls.firstOrNull { it.group == BallGroup.CUE }
+        assertNotNull("no ball classified CUE on the dim table", cue)
+        assertNotNull("no shot solved on the dim table: ${result.status}", result.shot)
+    }
+
+    @Test
     fun greenRerankTable_showsFirstClearPocket() {
         // v1.0.21: same layout as the green table, but the orange
         // 13-ball is moved off the bottom-right target line, so the
