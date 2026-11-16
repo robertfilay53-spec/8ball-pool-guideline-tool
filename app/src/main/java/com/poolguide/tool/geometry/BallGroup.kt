@@ -58,7 +58,33 @@ data class DiscStats(
     val sampledPx: Int,
     /** Samples expected for a full disc of this radius at the sample
      * step; a disc cut off by the frame edge samples far fewer. */
-    val expectedPx: Int
+    val expectedPx: Int,
+    /** Fraction of sampled pixels that are saturated colour
+     * (S > 150) — v1.0.69, real-phone fix. A stripe ball's caps are
+     * saturated colour, so a stripe with a big white band still
+     * measures a clear coloured fraction (~0.21-0.35); the real
+     * (cream) cue ball's disc is cream + white + the guideline's
+     * black edges, almost no saturated colour (~0.00-0.11). The
+     * cream-cue rule below uses it to tell a cream cue from a
+     * stripe with a big white band, which the white fraction alone
+     * cannot separate. Defaults 0.0 so older call sites keep
+     * compiling (they predate the stat). */
+    val coloredFraction: Double = 0.0,
+    /** Max per-sector saturated-colour fraction (v1.0.69): the disc
+     * is split into four sectors by dominant axis (top/bottom where
+     * |dy| > |dx|, left/right otherwise); this is the highest
+     * coloured fraction of any one sector. A stripe ball's coloured
+     * caps live in one or two opposite sectors (top for the a09 blue
+     * stripe: max sector 0.56 at its detected radius), so its max
+     * sector is high even when its overall coloured fraction is low
+     * (a09 reads overall 0.11). A cream cue ball's disc is cream in
+     * every sector (max sector 0.00-0.10 at its detected radius).
+     * The sector test is orientation-independent (caps in any
+     * direction land in some sector). A rim-only test does not
+     * separate them (both read rim ~0.21 — the rim mixes the caps
+     * with the white band's sides). Sectors with < 4 samples report
+     * 0.0 (noise, not evidence). Defaults 0.0 for older call sites. */
+    val maxSectorColoredFraction: Double = 0.0
 )
 
 /** The decision half of ball-group identification. Pure Kotlin —
@@ -91,6 +117,33 @@ object BallGroupClassifier {
      * clear gap on both sides. */
     const val CUE_WHITE_MIN_FRACTION = 0.85
 
+    /** A cream cue ball (v1.0.69, real-phone fix): the real game's
+     * cue ball is cream, not pure white — on Jawad's phone it
+     * measures white fraction 0.44-0.73 (the game's black-edged
+     * guideline crosses its disc), mean V 165-188, mean S 27-66,
+     * coloured fraction 0.00-0.11. The pure-white rule above misses
+     * it, and the stripe rule below would claim it. A cream cue
+     * reads: white fraction in [0.20, 0.85), almost no saturated
+     * colour in its disc (a stripe with a big white band still
+     * shows its saturated caps, coloured fraction ~0.21-0.35), a
+     * warm mean saturation (a white UI fragment or a stripe band
+     * reads mean S under ~10 — pure white, not cream), and bright
+     * overall. Bounds, measured on Jawad's real frame at radii
+     * 8/9/10 px: white 0.73/0.56/0.44, coloured 0.00/0.05/0.11,
+     * mean S 27/45/66, mean V 188/179/165. */
+    const val CREAM_CUE_MIN_WHITE_FRACTION = 0.20
+    const val CREAM_CUE_MAX_COLORED_FRACTION = 0.15
+    const val CREAM_CUE_MIN_MEAN_S = 15.0
+    const val CREAM_CUE_MIN_MEAN_V = 140.0
+
+    /** Sector cap for the cream-cue rule (v1.0.69): a stripe ball's
+     * coloured caps live in one or two opposite sectors of its disc
+     * (the a09 blue stripe reads max sector 0.56 at its detected
+     * radius, overall coloured only 0.11), while a cream cue ball's
+     * disc is cream in every sector (max sector 0.00-0.10 at its
+     * detected radius). 0.40 sits far from both. */
+    const val CREAM_CUE_MAX_SECTOR_COLORED_FRACTION = 0.40
+
     /** A stripe's white band covers a clear fraction of the disc:
      * measured 0.651–0.791 on the harness. 0.20 is far below that —
      * a real band seen at a shallow angle still covers far more than
@@ -119,6 +172,17 @@ object BallGroupClassifier {
             return BallGroup.EIGHT
         }
         if (stats.whiteFraction >= CUE_WHITE_MIN_FRACTION) return BallGroup.CUE
+        // Cream cue (v1.0.69): the real cue ball is cream, not pure
+        // white — see CREAM_CUE_* above. Checked before STRIPE: a
+        // cream cue's white fraction (0.44-0.73) sits inside the
+        // stripe range, and only the near-absence of saturated colour
+        // in its disc tells it apart from a stripe with a big band.
+        if (stats.whiteFraction >= CREAM_CUE_MIN_WHITE_FRACTION &&
+            stats.coloredFraction <= CREAM_CUE_MAX_COLORED_FRACTION &&
+            stats.maxSectorColoredFraction <= CREAM_CUE_MAX_SECTOR_COLORED_FRACTION &&
+            stats.meanS >= CREAM_CUE_MIN_MEAN_S &&
+            stats.meanV >= CREAM_CUE_MIN_MEAN_V
+        ) return BallGroup.CUE
         if (stats.whiteFraction >= STRIPE_MIN_FRACTION) return BallGroup.STRIPE
         if (stats.whiteFraction <= SOLID_MAX_FRACTION) return BallGroup.SOLID
         return BallGroup.UNKNOWN

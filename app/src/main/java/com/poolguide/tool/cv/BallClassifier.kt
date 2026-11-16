@@ -32,6 +32,18 @@ object BallClassifier {
         val expected = (PI * sampleR * sampleR / (SAMPLE_STEP_PX * SAMPLE_STEP_PX)).toInt()
         var sampled = 0
         var white = 0
+        // v1.0.69: saturated-colour count for the cream-cue rule —
+        // a stripe ball's caps are saturated (S > 150), a cream cue
+        // ball's disc is almost free of them (see DiscStats).
+        var colored = 0
+        // v1.0.69: per-sector saturated-colour counts for the
+        // cream-cue cap test — a stripe ball's coloured caps live in
+        // one or two opposite sectors (top/bottom for a horizontal
+        // band), a cream cue ball's disc is cream in every sector.
+        // Sectors are by dominant axis: |dy| > |dx| -> top/bottom,
+        // else left/right. Order: top, bottom, left, right.
+        val sectorSamples = IntArray(4)
+        val sectorColored = IntArray(4)
         var sumV = 0.0
         var sumS = 0.0
         // v1.0.34: the white test uses the felt-relative floor, so a
@@ -57,18 +69,40 @@ object BallClassifier {
                         sumS += s
                         sumV += v
                         if (s < 60.0 && v > whiteVFloor) white++
+                        if (s > 150.0) colored++
+                        val sector = if (kotlin.math.abs(dy) > kotlin.math.abs(dx)) {
+                            if (dy < 0) 0 else 1 // top, bottom
+                        } else {
+                            if (dx < 0) 2 else 3 // left, right
+                        }
+                        sectorSamples[sector]++
+                        if (s > 150.0) sectorColored[sector]++
                     }
                 }
                 x += SAMPLE_STEP_PX
             }
             y += SAMPLE_STEP_PX
         }
+        // Max sector coloured fraction (sectors with < 4 samples
+        // are noise, not evidence). 0.0 when no sector has enough
+        // samples — the aggregate coloured ceiling still applies.
+        var maxSectorColored = 0.0
+        for (i in 0 until 4) {
+            if (sectorSamples[i] >= 4) {
+                maxSectorColored = maxOf(
+                    maxSectorColored,
+                    sectorColored[i].toDouble() / sectorSamples[i]
+                )
+            }
+        }
         return DiscStats(
             whiteFraction = if (sampled > 0) white.toDouble() / sampled else 0.0,
             meanV = if (sampled > 0) sumV / sampled else 0.0,
             meanS = if (sampled > 0) sumS / sampled else 0.0,
             sampledPx = sampled,
-            expectedPx = expected
+            expectedPx = expected,
+            coloredFraction = if (sampled > 0) colored.toDouble() / sampled else 0.0,
+            maxSectorColoredFraction = maxSectorColored
         )
     }
 }

@@ -31,8 +31,17 @@ object CvConfig {
     const val MIN_FRAME_INTERVAL_MS = 1000L / MAX_FPS // 66 ms
 
     /** A frame whose mean grey value is below this is treated as black
-     * (FLAG_SECURE blackout or a dead capture). */
-    const val BLACK_FRAME_MEAN = 8.0
+     * (a dead capture, or a FLAG_SECURE blackout). 1.0, not 8.0
+     * (v1.0.69, real-phone fix): the game's loading screen is dark
+     * but NOT black — mean ~5.3 with a bright logo — and the old 8.0
+     * threshold fired "Capture blocked (FLAG_SECURE?)" on it every
+     * launch. A FLAG_SECURE blackout is exactly black (mean ~0: the
+     * compositor fills the frame), and a system screenshot of a
+     * FLAG_SECURE window is black too — Jawad's own screenshots show
+     * the game, so the game does NOT set FLAG_SECURE; the loading
+     * screen is just dark. 1.0 separates a pure-black frame from any
+     * dark-but-content frame by 5x. */
+    const val BLACK_FRAME_MEAN = 1.0
 
     // ---- Guideline detection (kaigiii structure, 8ball-aim-master params) ----
     /** Guideline pre-filter (v1.0.32, was the kaigiii bilateral d=20,
@@ -65,6 +74,35 @@ object CvConfig {
     const val VERIFY_MAX_DIST_PX = 1.5
     const val VERIFY_MIN_INLIERS = 20
     const val VERIFY_KEEP_TOP = 3
+    /** Guideline whiteness (v1.0.69, real-phone fix): a verified
+     * segment must actually BE a white line, not just a strong edge.
+     * The rail/cushion boundaries are the strongest edges in the
+     * table ROI (a 400 px bottom rail out-votes the real 2 px
+     * guideline on inlier count alone), so the old edge-only
+     * verifier returned rail lines as the "guideline" and the cue
+     * pick + target pick solved off them. A candidate passes when
+     * at least this fraction of the samples along it read WHITE in
+     * HSV: saturation below [GUIDELINE_WHITE_MAX_S] and V above the
+     * felt's V by [GUIDELINE_WHITE_V_ABOVE_FELT] (sampled at every
+     * integer perpendicular offset out to +-4 px). The game's
+     * guideline is achromatic white (S ~0, V ~230 at 1.0x, ~153 at
+     * 0.6x, ~76 at 0.3x); a rail boundary is saturated colour (felt
+     * S ~150, cushion S ~130-170) or dark. S < 100 (not 60): a
+     * blurred guideline mixes white with the green felt and reads
+     * S ~81 — the felt (S ~170) and cushion (S ~130) still fail
+     * 100. The V floor is felt-relative with NO absolute minimum:
+     * at 0.3x light the guideline is V ~76 against felt V ~41, and
+     * the ball classifier's 90 absolute floor would reject it. The
+     * +-4 px dense window matters because the Hough segment can sit
+     * on the guideline's black outline, up to ~3 px off the white
+     * centre, and a 1 px line's centre is 1 px off its Canny edge.
+     * An absolute grey cut cannot do this: at 0.6x light the white
+     * guideline is grey ~153, below any grey cut that still rejects
+     * a bright rail. */
+    const val GUIDELINE_WHITE_MIN_FRACTION = 0.5
+    const val GUIDELINE_WHITE_MAX_S = 100.0
+    const val GUIDELINE_WHITE_V_ABOVE_FELT = 25.0
+    const val GUIDELINE_WHITE_PERP_PX = 4.0
     /** v1.0.39 verifier dedup (deep-dive item 6): (a) a kept segment
      * drops a later one when the later one is the same 2-3 px white
      * line's other edge: nearly parallel and both endpoints within
@@ -100,6 +138,16 @@ object CvConfig {
      * harness); 12 finds them (5/5 on t14 with the blur off). 10 adds
      * nothing but noise, so 12 is the floor. */
     const val HOUGH_CIRCLES_PARAM2 = 12.0
+    /** Cue-rescue accumulator threshold (v1.0.69, real-phone fix):
+     * the real cue ball is cream, split by the game's black-edged
+     * guideline and touched by the cue stick, so its circle edge is
+     * broken — param2 12 (and 10) find no circle there, param2 8
+     * finds it at (410, 252) r=9 on Jawad's real frame. The rescue
+     * pass runs ONLY when no CUE-group ball exists, and only circles
+     * whose disc classifies CUE are kept, so the low threshold
+     * cannot flood the ball list with the false circles it finds
+     * elsewhere. */
+    const val HOUGH_CIRCLES_RESCUE_PARAM2 = 8.0
     const val HOUGH_CIRCLES_MIN_RADIUS = 8
     const val HOUGH_CIRCLES_MAX_RADIUS = 18
     /** Run HoughCircles every Nth frame (HSV contours run every frame). */
@@ -130,6 +178,16 @@ object CvConfig {
     const val BALL_RADIUS_PX_AT_720 = 9.0
     /** A contour is ball-like when area / (pi * r^2) is above this. */
     const val BALL_MIN_CIRCULARITY = 0.55
+    /** Contour-path radius cap as a fraction of the detected table
+     * width (v1.0.69, real-phone fix): a real ball is ~2.2% of the
+     * table width across (57 mm ball on a 2.54 m table), so 4% is a
+     * generous cap that still excludes the tool's own overlay UI —
+     * a white control button over the table fits a 24 px circle and
+     * was detected (and once picked) as a ball. The cap is
+     * max(18, tableWidth * fraction): 18 px is the Hough max radius
+     * and the floor for small tables. Balls found by HoughCircles
+     * already cap at 18. */
+    const val BALL_MAX_RADIUS_TABLE_FRACTION = 0.04
     /** Two detections closer than this are the same ball (dedup). */
     const val BALL_DEDUP_DIST_PX = 10.0
     /** Nearest-neighbour tracking gate between frames. */

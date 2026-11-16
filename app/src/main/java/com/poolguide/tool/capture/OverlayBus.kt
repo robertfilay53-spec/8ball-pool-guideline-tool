@@ -1,6 +1,7 @@
 package com.poolguide.tool.capture
 
 import com.poolguide.tool.cv.DetectionResult
+import com.poolguide.tool.geometry.UiRect
 
 /**
  * Overlay bus: [CaptureService] posts each processed frame's
@@ -26,4 +27,16 @@ object OverlayBus {
     fun post(result: DetectionResult) {
         listener?.invoke(result)
     }
+
+    /** The overlay's own UI rectangles in SCREEN pixels (the
+     * floating control bubble and its menu), published by the
+     * overlay (v1.0.69, real-phone fix). The capture service reads
+     * them before each pipeline frame and hands them to the
+     * pipeline, so the detector can exclude its own UI: the old
+     * control bar's white buttons were once detected as white balls
+     * and one was picked as the cue ball. Same-process in-memory
+     * singleton — no IPC, no persistence. Empty until the overlay
+     * publishes its first rects. */
+    @Volatile
+    var uiRectsScreen: List<UiRect> = emptyList()
 }

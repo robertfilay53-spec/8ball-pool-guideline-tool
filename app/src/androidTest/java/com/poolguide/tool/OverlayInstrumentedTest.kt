@@ -99,15 +99,18 @@ class OverlayInstrumentedTest {
         val manager = LineOverlayManager(ctx, store)
         val instrumentation = InstrumentationRegistry.getInstrumentation()
 
-        // One tag window per detected ball, in ball order — and the
-        // pinned line/label counts do not move (5 lines, 2 labels:
-        // angle + pocket distance — for this straight best shot).
+        // One tag window per confidently classified ball, in ball
+        // order — and the pinned line/label counts do not move (5
+        // lines, 2 labels: angle + pocket distance — for this
+        // straight best shot). The third ball is UNKNOWN, and an
+        // UNKNOWN ball draws NO tag (v1.0.69): a "?" tag next to a
+        // ball the detector could not identify is noise.
         store.showAllShots = false
         instrumentation.runOnMainSync { manager.update(shotResultWithBalls()) }
         assertEquals("expected 5 line windows", 5, manager.lineWindowCount)
         assertEquals("expected 2 label windows", 2, manager.labelWindowCount)
-        assertEquals("expected 3 tag windows", 3, manager.tagWindowCount)
-        assertEquals(listOf("C", "S", "?"), manager.tagTexts)
+        assertEquals("expected 2 tag windows", 2, manager.tagWindowCount)
+        assertEquals(listOf("C", "S"), manager.tagTexts)
 
         // Hide toggle removes the tags with the lines.
         store.guidesHidden = true
@@ -118,7 +121,7 @@ class OverlayInstrumentedTest {
         // Black frame removes the tags too.
         store.guidesHidden = false
         instrumentation.runOnMainSync { manager.update(shotResultWithBalls()) }
-        assertEquals(3, manager.tagWindowCount)
+        assertEquals(2, manager.tagWindowCount)
         val black = shotResultWithBalls().copy(
             isCaptureBlack = true, shot = null, guideline = emptyList()
         )

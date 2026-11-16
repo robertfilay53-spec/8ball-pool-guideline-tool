@@ -165,7 +165,12 @@ data class DetectionResult(
          * persistently blocked (v1.0.37, REA hardening R2): 30 frames
          * is about 2 seconds at the 15 FPS cap. A shorter black run
          * is a blip (a transition, a menu fade); a run this long
-         * means the game is holding FLAG_SECURE on. */
+         * means the capture really is black. v1.0.69: "black" now
+         * means pure black (mean grey < 1.0) — the game's loading
+         * screen is dark but not black (mean ~5.3) and no longer
+         * trips this. A pure-black run is most plausibly a
+         * FLAG_SECURE blackout, but the status says only what is
+         * observed, not the cause. */
         const val BLACK_FRAME_PERSISTENT_AFTER_FRAMES = 30
 
         /** True when a black run of [runFrames] frames counts as a
@@ -192,7 +197,7 @@ data class DetectionResult(
             guideline = emptyList(),
             shot = null,
             bank = null,
-            status = "Capture is black — the game may be using FLAG_SECURE"
+            status = "Capture is black — screen sharing may be blocked"
         )
     }
 }

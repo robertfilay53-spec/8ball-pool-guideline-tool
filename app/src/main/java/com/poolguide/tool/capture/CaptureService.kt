@@ -103,6 +103,11 @@ class CaptureService : Service() {
 
     private var running = false
     private var lastNotifUpdateMs = 0L
+    /** UI exclusion (v1.0.69): the overlay's UI rects last handed
+     * to the pipeline. The bus holds a new list reference only when
+     * the rects changed (the overlay writes on change), so comparing
+     * references here avoids a per-frame setter call. */
+    private var lastUiRects: List<com.poolguide.tool.geometry.UiRect> = emptyList()
 
     // Diagnostics (v1.0.6): previous frame's state, for edge-triggered
     // events (lock gained/lost, fallback entered/left, black frames).
@@ -385,7 +390,21 @@ class CaptureService : Service() {
         }
         handler.post {
             try {
-                val result = pipeline?.process(mat) ?: return@post
+                val pipe = pipeline ?: return@post
+                // v1.0.69: UI exclusion — the overlay publishes its
+                // bubble + menu rects on the bus; hand them to the
+                // pipeline (screen -> working coords) only when the
+                // list changed, so the detector excludes its own UI
+                // (the old control bar's white buttons were once
+                // detected as white balls and one was picked as the
+                // cue ball). The bus holds a new reference only on
+                // change, so a reference compare is enough.
+                val uiRects = OverlayBus.uiRectsScreen
+                if (uiRects !== lastUiRects) {
+                    lastUiRects = uiRects
+                    pipe.setUiExclusionRectsScreen(uiRects)
+                }
+                val result = pipe.process(mat)
                 OverlayBus.post(result)
                 recordDiagnostics(result)
                 postPreview(mat, result.isCaptureBlack)
@@ -419,7 +438,7 @@ class CaptureService : Service() {
             lockedBeforeBlackRun = lastWasLocked
             DiagnosticsLog.record(
                 DiagnosticsLog.Kind.BLACK_FRAME,
-                "capture is black — FLAG_SECURE may be set"
+                "capture is pure black (mean grey < 1.0) — screen sharing may be blocked"
             )
         } else if (!result.isCaptureBlack && lastWasBlack) {
             DiagnosticsLog.record(

@@ -103,7 +103,7 @@ class CuePickerTest {
 
     @Test
     fun noCueGroup_guidelineFarAway_fallsBackToFirstWhite() {
-        // No white ball within 20 px of the ray: the ray gives no
+        // No white ball within 12 px of the ray: the ray gives no
         // confident answer, so the old first-white behaviour stands.
         // (A vertical segment at x=400: the phantom at x=506.5 is
         // 106 px off its line, the cue at x=168.5 is 231 px off.)
@@ -130,13 +130,28 @@ class CuePickerTest {
 
     @Test
     fun rayGate_boundary() {
-        // 20 px is the gate: a white ball exactly on it still counts.
-        // The cue at perp 20.0 vs the phantom at perp 79 — the cue wins.
+        // 12 px is the gate (v1.0.69, was 20): a white ball exactly
+        // on it still counts. The cue at perp 12.0 vs the phantom
+        // at perp 79 — the cue wins.
         val gateGuideline = listOf(segment(100.0, 100.0, 300.0, 100.0))
-        val cueOnGate = ball(5, 110.0, 120.0, BallColor.WHITE, BallGroup.UNKNOWN)
+        val cueOnGate = ball(5, 110.0, 112.0, BallColor.WHITE, BallGroup.UNKNOWN)
         val picked = CuePicker.pickCue(
             listOf(a09Phantom, cueOnGate), gateGuideline
         )
         assertEquals(cueOnGate, picked)
+    }
+
+    @Test
+    fun rayGate_justOutsideGate_fallsBackToFirstWhite() {
+        // v1.0.69: a white ball 13 px off the ray is outside the
+        // 12 px gate, so the ray gives no confident answer and the
+        // old first-white behaviour stands (the phantom, listed
+        // first, is picked).
+        val gateGuideline = listOf(segment(100.0, 100.0, 300.0, 100.0))
+        val cueOutsideGate = ball(5, 110.0, 113.0, BallColor.WHITE, BallGroup.UNKNOWN)
+        val picked = CuePicker.pickCue(
+            listOf(a09Phantom, cueOutsideGate), gateGuideline
+        )
+        assertEquals(a09Phantom, picked)
     }
 }
