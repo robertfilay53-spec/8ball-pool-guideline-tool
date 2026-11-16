@@ -7,7 +7,6 @@ import com.poolguide.tool.geometry.DiscStats
 import com.poolguide.tool.geometry.Segment
 import com.poolguide.tool.geometry.Vec2
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.abs
@@ -38,8 +37,13 @@ class BallGroupTest {
         // reads 0.56 at its detected radius); a cream cue's disc is
         // cream in every sector (0.00-0.10 at its detected radius).
         // Defaults 0.0 for the older cases that predate it.
-        maxSectorColoredFraction: Double = 0.0
-    ) = DiscStats(whiteFraction, meanV, meanS, sampledPx, expectedPx, coloredFraction, maxSectorColoredFraction)
+        maxSectorColoredFraction: Double = 0.0,
+        // v1.0.70: the felt's mean V, for the felt-relative cream-cue
+        // brightness floor. Defaults -1.0 (unknown): the absolute
+        // 140 floor applies, which is what the older boundary cases
+        // pin. Dim-light cases pass the felt explicitly.
+        feltMeanV: Double = -1.0
+    ) = DiscStats(whiteFraction, meanV, meanS, sampledPx, expectedPx, coloredFraction, maxSectorColoredFraction, feltMeanV)
 
     // ---- Classification: measured harness stats ----
 
@@ -144,30 +148,51 @@ class BallGroupTest {
         assertEquals("?", BallGroup.UNKNOWN.tagText())
     }
 
-    // ---- Occlusion ----
+    // ---- Occlusion (v1.0.70: retired) ----
+    //
+    // The blanket occlusion rule is gone: a ball touching its
+    // neighbour used to read UNKNOWN outright (a02: all 5 cluster
+    // balls; a09: the cue itself), even though its own disc — once
+    // the neighbour's pixels are excluded from the sample — reads
+    // cleanly. BallClassifier.sampleDisc now skips samples inside
+    // another ball's disc, so a touching ball classifies on its own
+    // pixels and a genuinely half-hidden ball still reads UNKNOWN
+    // via the coverage rule (too few samples). BallGroupClassifier
+    // no longer has an isOccluded function; the cases below pin the
+    // classifier half of the new behaviour (the sampler half is
+    // covered by the instrumented tests and the CV harness, which
+    // scores a02 8/8 and a09 7/7 groups).
 
     @Test
-    fun isOccluded_overlappingDiscsOnly() {
-        val center = Vec2(100.0, 100.0)
-        // Centres 10 px apart at r = 9: the discs overlap.
-        assertTrue(
-            BallGroupClassifier.isOccluded(center, 9.0, listOf(Vec2(110.0, 100.0) to 9.0))
-        )
-        // Tangent balls (18 px apart at r = 9) do not count.
-        assertFalse(
-            BallGroupClassifier.isOccluded(center, 9.0, listOf(Vec2(118.0, 100.0) to 9.0))
-        )
-        // 15 px apart is inside the 0.85 overlap fraction (15.3 px).
-        assertTrue(
-            BallGroupClassifier.isOccluded(center, 9.0, listOf(Vec2(115.0, 100.0) to 9.0))
-        )
-        // 16 px apart is outside it.
-        assertFalse(
-            BallGroupClassifier.isOccluded(center, 9.0, listOf(Vec2(116.0, 100.0) to 9.0))
-        )
-        assertFalse(
-            BallGroupClassifier.isOccluded(center, 9.0, listOf(Vec2(200.0, 100.0) to 9.0))
-        )
+    fun classify_clusterBall_readsOnItsOwnDisc() {
+        // a02 cluster, measured harness stats once the neighbour's
+        // pixels are excluded from the sample: a solid's disc is
+        // all saturated colour, white fraction 0.00 — SOLID, not
+        // UNKNOWN. (The old code never reached classify() here:
+        // the occlusion rule fired first.)
+        assertEquals(BallGroup.SOLID, BallGroupClassifier.classify(stats(0.0, 220.0, 220.0, coloredFraction = 1.0, maxSectorColoredFraction = 1.0)))
+        // a09 cue in the cluster: white fraction 1.00 once the
+        // orange/green neighbours' pixels are excluded — CUE.
+        assertEquals(BallGroup.CUE, BallGroupClassifier.classify(stats(1.0, 245.0, 0.0)))
+        // a09 green/orange solids next to the cue: their white
+        // fraction was 0.12-0.15 from the cue's white pixels in
+        // their discs (the ambiguous middle); with those pixels
+        // excluded it is 0.00 — SOLID.
+        assertEquals(BallGroup.SOLID, BallGroupClassifier.classify(stats(0.0, 231.0, 248.0, coloredFraction = 1.0, maxSectorColoredFraction = 1.0)))
+    }
+
+    @Test
+    fun classify_eightBallInCluster_readsEight() {
+        // a10: the 8-ball touching a red solid. Its disc (measured
+        // on the harness, neighbour's pixels excluded) is dark and
+        // achromatic — mean V 56, mean S 49 — so it reads EIGHT.
+        // The red intrusion raises the coloured fraction to 0.22,
+        // but the EIGHT check is mean V < 60 AND mean S < 80, and
+        // neither is fooled by a 22% intrusion. On a real phone
+        // frame the same pollution pushed the 8-ball's mean S over
+        // the gate (SOLID); excluding the neighbour's pixels is
+        // what keeps it an 8.
+        assertEquals(BallGroup.EIGHT, BallGroupClassifier.classify(stats(0.0, 56.0, 49.0, coloredFraction = 0.22, maxSectorColoredFraction = 0.85)))
     }
 
     // ---- Tag placement: never on the aim line ----
@@ -273,8 +298,52 @@ class BallGroupTest {
         // Coloured ceiling: coloured 0.15 passes, 0.16 does not.
         assertEquals(BallGroup.CUE, BallGroupClassifier.classify(stats(0.50, 170.0, 40.0, coloredFraction = 0.15)))
         assertEquals(BallGroup.STRIPE, BallGroupClassifier.classify(stats(0.50, 170.0, 40.0, coloredFraction = 0.16)))
-        // Brightness floor: mean V 140 passes, 139 does not.
+        // Brightness floor with no felt known: mean V 140 passes,
+        // 139 does not (the absolute floor).
         assertEquals(BallGroup.CUE, BallGroupClassifier.classify(stats(0.50, 140.0, 40.0, coloredFraction = 0.10)))
         assertEquals(BallGroup.STRIPE, BallGroupClassifier.classify(stats(0.50, 139.0, 40.0, coloredFraction = 0.10)))
+    }
+
+    // ---- Dim-light cream cue (v1.0.70) ----
+
+    @Test
+    fun classify_creamCueBall_dimLight_feltRelativeFloor() {
+        // A real cream cue at 0.3x light is V~74 — far below the
+        // absolute 140 floor, but still ~1.8x its felt (V~41). With
+        // the felt known the floor is max(60, 41 + 15) = 60, so the
+        // cue passes; without the felt the same stats read STRIPE
+        // (the absolute floor still applies when the felt is
+        // unknown). Harness table a08 pins the pipeline half (the
+        // synthetic cue reads white fraction 1.00 through the
+        // felt-relative white floor and takes the plain cue rule);
+        // this pins the classifier half for a real cream cue, whose
+        // white fraction stays in the cream range at any light.
+        assertEquals(BallGroup.CUE, BallGroupClassifier.classify(stats(0.56, 74.0, 40.0, coloredFraction = 0.09, maxSectorColoredFraction = 0.30, feltMeanV = 41.0)))
+        assertEquals(BallGroup.STRIPE, BallGroupClassifier.classify(stats(0.56, 74.0, 40.0, coloredFraction = 0.09, maxSectorColoredFraction = 0.30)))
+        // Dim stripe at the same light (a11): its band is V~71
+        // like the cue, but its caps keep it out of the cream rule
+        // on coloured fraction / sector, not on brightness — so it
+        // stays a stripe even with the felt-relative floor.
+        assertEquals(BallGroup.STRIPE, BallGroupClassifier.classify(stats(0.70, 71.0, 49.0, coloredFraction = 0.22, maxSectorColoredFraction = 0.56, feltMeanV = 41.0)))
+        // Dim solid at the same light: saturated (mean S 220), so
+        // the coloured fraction keeps it a solid, not a cue.
+        assertEquals(BallGroup.SOLID, BallGroupClassifier.classify(stats(0.0, 66.0, 220.0, coloredFraction = 1.0, feltMeanV = 41.0)))
+    }
+
+    @Test
+    fun classify_creamCueBall_feltRelativeFloorBoundaries() {
+        // Felt V 41: the floor is max(60, 56) = 60. Mean V 60
+        // passes (cue); 59 does not — with a high mean S it is not
+        // the 8-ball either (EIGHT needs mean S < 80), so it reads
+        // STRIPE on its white fraction.
+        assertEquals(BallGroup.CUE, BallGroupClassifier.classify(stats(0.50, 60.0, 40.0, coloredFraction = 0.10, feltMeanV = 41.0)))
+        assertEquals(BallGroup.STRIPE, BallGroupClassifier.classify(stats(0.50, 59.0, 100.0, coloredFraction = 0.10, feltMeanV = 41.0)))
+        // Felt V 140 (a bright table): the floor is 155. Mean V
+        // 155 passes; 154 does not.
+        assertEquals(BallGroup.CUE, BallGroupClassifier.classify(stats(0.50, 155.0, 40.0, coloredFraction = 0.10, feltMeanV = 140.0)))
+        assertEquals(BallGroup.STRIPE, BallGroupClassifier.classify(stats(0.50, 154.0, 40.0, coloredFraction = 0.10, feltMeanV = 140.0)))
+        // The real-phone cream cue (Jawad's frame: mean V 165-188,
+        // felt V ~119) still passes: the floor is 134 there.
+        assertEquals(BallGroup.CUE, BallGroupClassifier.classify(stats(0.44, 165.0, 66.0, coloredFraction = 0.11, maxSectorColoredFraction = 0.38, feltMeanV = 119.0)))
     }
 }

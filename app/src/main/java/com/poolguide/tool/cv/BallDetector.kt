@@ -92,8 +92,11 @@ class BallDetector {
      * Colour windows: (colour, HSV lower, HSV upper). The green and blue
      * windows are felt-relative when [feltHsv] is known (see below);
      * the white window's V floor is felt-relative too (v1.0.34):
-     * max(90, feltV + 30), so a dim cue ball stays inside the window.
-     * The rest are static.
+     * max(60, feltV + 30), so a dim cue ball stays inside the window
+     * (v1.0.70: the absolute floor was 90, which bound it above a
+     * 0.3x-light cue). The rest are static. On a purple felt the
+     * PURPLE window is skipped entirely (v1.0.70, see below): the
+     * whole felt falls inside it.
      */
     private fun colorWindows(feltHsv: DoubleArray?): List<Triple<BallColor, DoubleArray, DoubleArray>> {
         val feltH = feltHsv?.get(0) ?: -1.0
@@ -136,7 +139,21 @@ class BallDetector {
             Triple(BallColor.GREEN, doubleArrayOf(55.0, greenSLow, 40.0), doubleArrayOf(85.0, 255.0, 255.0)),
             Triple(BallColor.WHITE, doubleArrayOf(0.0, 0.0, CvConfig.feltRelativeWhiteVFloor(feltHsv, CvConfig.WHITE_V_FLOOR)), doubleArrayOf(180.0, 40.0, 255.0)),
             Triple(BallColor.BLACK, doubleArrayOf(0.0, 0.0, 0.0), doubleArrayOf(180.0, 255.0, 60.0))
-        )
+            // v1.0.70: on a purple felt (felt H inside the purple
+            // ball window, 130-160) the PURPLE contour window is
+            // skipped: the whole felt falls inside it, so every ball
+            // would first be claimed as a PURPLE ball (the felt
+            // mask's holes where balls sit) and its true colour
+            // lost. A purple ball on a purple felt cannot be
+            // separated from the cloth by any HSV window (ball S
+            // ~191 vs felt S ~182 — the felt-relative tightening
+            // that works for green/blue/orange has no gap to use),
+            // so it is found by HoughCircles + the centre-pixel
+            // colour instead, like every Hough-found ball. Other
+            // balls are found by their own windows with true colours.
+        ).filter { (color, _, _) ->
+            !(color == BallColor.PURPLE && feltH in 130.0..160.0)
+        }
     }
 
     /**
@@ -282,7 +299,9 @@ class BallDetector {
         val withRescue = if (classified.none { it.group == BallGroup.CUE }) {
             val rescued = rescueCue(hsv, grayRoi, ox, oy, table, pockets, feltHsv, pocketRadiusPx, found, exclusionRects)
             if (rescued.isEmpty()) classified
-            else classified + classifyGroups(hsv, rescued, feltHsv)
+            // v1.0.70: a rescued ball is sampled against the balls
+            // already found, not just against other rescued balls.
+            else classified + classifyGroups(hsv, rescued, feltHsv, found + rescued)
                 .filter { it.group == BallGroup.CUE }
         } else {
             classified
@@ -334,8 +353,13 @@ class BallDetector {
             if (found.any { it.center.distanceTo(c) < CvConfig.BALL_DEDUP_DIST_PX }) continue
             if (out.any { it.center.distanceTo(c) < CvConfig.BALL_DEDUP_DIST_PX }) continue
             // The disc test is what makes the low threshold safe:
-            // keep only circles that read as a cue ball.
-            val stats = BallClassifier.sampleDisc(hsv, c, r, feltHsv)
+            // keep only circles that read as a cue ball. v1.0.70:
+            // sampled against the balls already found, so a rescue
+            // candidate touching a solid is judged on its own pixels.
+            val stats = BallClassifier.sampleDisc(
+                hsv, c, r, feltHsv,
+                found.map { it.center to it.radiusPx }
+            )
             if (BallGroupClassifier.classify(stats) != BallGroup.CUE) continue
             out += Ball(0, c, r, BallColor.WHITE, false, BallGroup.CUE)
         }
@@ -345,24 +369,34 @@ class BallDetector {
     /**
      * Group identification (v1.0.14): sample each detected ball's disc
      * and classify its group (cue / eight / solid / stripe / unknown).
-     * A ball whose disc overlaps another detected ball's is occluded:
-     * UNKNOWN, never guessed. Runs on the full found list so the
-     * occlusion check sees every ball on the table this frame; the
-     * tracker then carries each ball's group across frames with its
-     * id (a ball missed briefly keeps the group it was last
-     * classified with).
+     * v1.0.70: there is NO blanket occlusion rule any more. A ball
+     * touching its neighbour used to read UNKNOWN outright (a02: all
+     * 5 cluster balls; a09: the cue itself), even though its own disc
+     * — once the neighbour's pixels are excluded from the sample —
+     * reads cleanly. The sampler now skips samples inside another
+     * ball's disc (see BallClassifier.sampleDisc), so a touching ball
+     * classifies on its own pixels; a genuinely half-hidden ball
+     * still reads UNKNOWN because it samples too few pixels for the
+     * coverage rule in BallGroupClassifier. [exclusionPool] is the
+     * ball list the sampler excludes against (defaults to [found]);
+     * the rescue path passes found + rescued so a rescued ball is
+     * sampled against the balls already on the table. Runs on the
+     * full found list; the tracker then carries each ball's group
+     * across frames with its id (a ball missed briefly keeps the
+     * group it was last classified with).
      */
-    private fun classifyGroups(hsv: Mat, found: List<Ball>, feltHsv: DoubleArray? = null): List<Ball> {
+    private fun classifyGroups(
+        hsv: Mat,
+        found: List<Ball>,
+        feltHsv: DoubleArray? = null,
+        exclusionPool: List<Ball> = found
+    ): List<Ball> {
         return found.map { ball ->
-            val others = found.filter { it !== ball }
+            val others = exclusionPool.filter { it !== ball }
                 .map { it.center to it.radiusPx }
-            val group = if (BallGroupClassifier.isOccluded(ball.center, ball.radiusPx, others)) {
-                BallGroup.UNKNOWN
-            } else {
-                BallGroupClassifier.classify(
-                    BallClassifier.sampleDisc(hsv, ball.center, ball.radiusPx, feltHsv)
-                )
-            }
+            val group = BallGroupClassifier.classify(
+                BallClassifier.sampleDisc(hsv, ball.center, ball.radiusPx, feltHsv, others)
+            )
             ball.copy(group = group)
         }
     }

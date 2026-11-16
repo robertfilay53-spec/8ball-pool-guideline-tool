@@ -1,7 +1,6 @@
 package com.poolguide.tool.cv
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -20,13 +19,15 @@ class CvConfigTest {
     }
 
     @Test
-    fun whiteFloor_dim04_felt56_is90AndCue98Passes() {
+    fun whiteFloor_dim04_felt56_is86AndCue98Passes() {
         // Harness table a04: felt V 56, cue V 98. The old fixed
         // floors (140 / 130) lost the cue at every step, so it read
         // SOLID and the pipeline reported "Cue ball not found".
+        // v1.0.70: the absolute floor is 60, not 90, so the floor
+        // here is feltV + 30 = 86 (the old test pinned 90).
         val felt = doubleArrayOf(73.0, 172.0, 56.0)
-        assertEquals(90.0, CvConfig.feltRelativeWhiteVFloor(felt, CvConfig.WHITE_V_FLOOR), 0.0)
-        assertEquals(90.0, CvConfig.feltRelativeWhiteVFloor(felt, CvConfig.STRIPE_V_FLOOR), 0.0)
+        assertEquals(86.0, CvConfig.feltRelativeWhiteVFloor(felt, CvConfig.WHITE_V_FLOOR), 0.0)
+        assertEquals(86.0, CvConfig.feltRelativeWhiteVFloor(felt, CvConfig.STRIPE_V_FLOOR), 0.0)
         assertTrue(98.0 > CvConfig.feltRelativeWhiteVFloor(felt, CvConfig.WHITE_V_FLOOR))
         assertTrue(98.0 > CvConfig.feltRelativeWhiteVFloor(felt, CvConfig.STRIPE_V_FLOOR))
     }
@@ -46,11 +47,13 @@ class CvConfigTest {
     }
 
     @Test
-    fun whiteFloor_nearBlackFelt35_is90AndCue245Passes() {
-        // t13 near-black felt: the 90 absolute floor keeps the rule
-        // above the felt while the cue still passes by a wide margin.
+    fun whiteFloor_nearBlackFelt35_is65AndCue245Passes() {
+        // t13 near-black felt: the floor is feltV + 30 = 65 — above
+        // the felt (V 35) and far below the cue (V 245). v1.0.70:
+        // the absolute floor is 60, not 90, so the felt-relative
+        // part dominates here (the old test pinned 90).
         val felt = doubleArrayOf(60.0, 60.0, 35.0)
-        assertEquals(90.0, CvConfig.feltRelativeWhiteVFloor(felt, CvConfig.WHITE_V_FLOOR), 0.0)
+        assertEquals(65.0, CvConfig.feltRelativeWhiteVFloor(felt, CvConfig.WHITE_V_FLOOR), 0.0)
         assertTrue(245.0 > CvConfig.feltRelativeWhiteVFloor(felt, CvConfig.WHITE_V_FLOOR))
     }
 
@@ -63,14 +66,16 @@ class CvConfigTest {
     }
 
     @Test
-    fun whiteFloor_dim03_felt41_is90AndCue73FailsByDesign() {
+    fun whiteFloor_dim03_felt41_is71AndCue73Passes() {
         // Harness table a08: at 0.3x light the cue is V~73 against
-        // the 90 absolute floor, so it stays below the floor and the
-        // table stays unsolved. This pins the fix's lower bound:
-        // the rule generalises down to ~0.37x light, not below it.
+        // felt V~41. v1.0.70: the absolute floor is 60, not 90, so
+        // the floor is feltV + 30 = 71 and the cue passes — the old
+        // test pinned this as "fails by design" (floor 90, cue
+        // below it, table unsolved). The rule now generalises to
+        // 0.3x light; a08 is solved.
         val felt = doubleArrayOf(74.0, 174.0, 41.0)
-        assertEquals(90.0, CvConfig.feltRelativeWhiteVFloor(felt, CvConfig.WHITE_V_FLOOR), 0.0)
-        assertFalse(73.0 > CvConfig.feltRelativeWhiteVFloor(felt, CvConfig.WHITE_V_FLOOR))
+        assertEquals(71.0, CvConfig.feltRelativeWhiteVFloor(felt, CvConfig.WHITE_V_FLOOR), 0.0)
+        assertTrue(73.0 > CvConfig.feltRelativeWhiteVFloor(felt, CvConfig.WHITE_V_FLOOR))
     }
 
     @Test
