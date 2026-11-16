@@ -213,6 +213,22 @@ object DiagnosticsLog {
         }
     }
 
+    /** Test-only: clear all in-memory state (events, carried-over
+     * lines, active flag) so a test starts from a fresh log regardless
+     * of which tests ran before it in the same JVM. The singleton is
+     * shared across test classes, and [end] deliberately keeps events
+     * for export, so without this a test asserting an empty log would
+     * see the previous test's events. */
+    @Synchronized
+    fun resetForTests() {
+        events.clear()
+        previousSessionLines.clear()
+        previousCrashLines.clear()
+        outcomes.reset()
+        sessionStartMs = 0L
+        active = false
+    }
+
     /** Test-only: clear the installed flag so a later test can install
      * a fresh handler (the production install is once per process). */
     @Synchronized

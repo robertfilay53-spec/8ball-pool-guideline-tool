@@ -24,6 +24,10 @@ class CrashDiagnosticsTest {
     fun setUp() {
         previousHandler = Thread.getDefaultUncaughtExceptionHandler()
         DiagnosticsLog.end()
+        // The log is a shared singleton: a previous test's events
+        // would otherwise still be in it, and the gate test below
+        // needs a genuinely empty log.
+        DiagnosticsLog.resetForTests()
         tempFile = File.createTempFile("crash", ".txt")
         DiagnosticsLog.attachCrashFile(tempFile)
         DiagnosticsLog.installCrashHandler()
@@ -32,6 +36,7 @@ class CrashDiagnosticsTest {
     @After
     fun tearDown() {
         DiagnosticsLog.end()
+        DiagnosticsLog.resetForTests()
         DiagnosticsLog.attachFile(null)
         DiagnosticsLog.attachCrashFile(null)
         DiagnosticsLog.resetCrashHandlerForTests()
