@@ -5,6 +5,8 @@ import com.poolguide.tool.geometry.Vec2
 import org.opencv.core.Core
 import org.opencv.core.CvType
 import org.opencv.core.Mat
+import org.opencv.core.MatOfFloat
+import org.opencv.core.MatOfInt
 import org.opencv.core.MatOfPoint
 import org.opencv.core.MatOfPoint2f
 import org.opencv.core.Point
@@ -40,14 +42,65 @@ class TableDetector {
 
     /** Detect the table in an HSV [Mat]. Returns null when no felt found.
      * The brown window comes from [profile] (v1.0.4: recalibratable per
-     * game version); green/blue use the fixed windows. */
+     * game version); green/blue use the fixed windows. When none of
+     * them matches, the felt-colour-agnostic fallback
+     * ([detectGeneric], v1.0.70) tries the frame's dominant saturated
+     * hue — a purple felt, or any future skin colour. */
     fun detect(hsv: Mat, profile: GameProfile = GameProfile.DEFAULT): TableRect? {
         return detectWith(hsv, CvConfig.FELT_GREEN_LOWER, CvConfig.FELT_GREEN_UPPER)
             ?: detectWith(hsv, CvConfig.FELT_BLUE_LOWER, CvConfig.FELT_BLUE_UPPER)
             ?: detectWith(hsv, profile.brownFeltLower, profile.brownFeltUpper)
+            ?: detectGeneric(hsv)
     }
 
-    private fun detectWith(hsv: Mat, lower: DoubleArray, upper: DoubleArray): TableRect? {
+    /**
+     * Felt-colour-agnostic fallback (v1.0.70): the table's felt is the
+     * largest saturated surface in the frame, so its hue wins a
+     * histogram over the saturated pixels (S>=60, V>=30, any hue) by
+     * a wide margin — a purple felt (H~141) holds 84% of the
+     * saturated pixels on harness table a03. A window around the
+     * peak hue then runs the same detection as the fixed windows,
+     * with the frame-fraction gate ([CvConfig.FELT_GENERIC_MIN_FRAME_FRACTION]):
+     * a loading screen's bright logo is saturated too, but its
+     * largest contour is ~500 px (0.2% of the frame), so it stays
+     * "no table". Returns null when there are no saturated pixels
+     * at all (a black frame).
+     */
+    private fun detectGeneric(hsv: Mat): TableRect? {
+        Core.inRange(
+            hsv,
+            Scalar(doubleArrayOf(0.0, CvConfig.FELT_GENERIC_MIN_S, CvConfig.FELT_GENERIC_MIN_V)),
+            Scalar(doubleArrayOf(180.0, 255.0, 255.0)),
+            mask
+        )
+        if (Core.countNonZero(mask) == 0) return null
+        val hist = Mat()
+        try {
+            Imgproc.calcHist(
+                listOf(hsv), MatOfInt(0), mask, hist,
+                MatOfInt(18), MatOfFloat(0f, 180f)
+            )
+            val peak = Core.minMaxLoc(hist).maxLoc.y.toInt()
+            val lower = doubleArrayOf(
+                maxOf(0.0, peak * 10.0 - 15.0),
+                CvConfig.FELT_GENERIC_MIN_S,
+                CvConfig.FELT_GENERIC_MIN_V
+            )
+            val upper = doubleArrayOf(
+                minOf(179.0, peak * 10.0 + 25.0), 255.0, 255.0
+            )
+            return detectWith(hsv, lower, upper, CvConfig.FELT_GENERIC_MIN_FRAME_FRACTION)
+        } finally {
+            hist.release()
+        }
+    }
+
+    private fun detectWith(
+        hsv: Mat,
+        lower: DoubleArray,
+        upper: DoubleArray,
+        minFrameFraction: Double = 0.0
+    ): TableRect? {
         Core.inRange(hsv, Scalar(lower), Scalar(upper), mask)
         val contours = mutableListOf<MatOfPoint>()
         Imgproc.findContours(
@@ -57,6 +110,13 @@ class TableDetector {
         if (contours.isEmpty()) return null
         val biggest = contours.maxByOrNull { Imgproc.contourArea(it) } ?: return null
         if (Imgproc.contourArea(biggest) < 5_000) return null // too small to be a table
+        // v1.0.70: the generic fallback's frame-fraction gate — the
+        // candidate must cover a table-sized share of the frame, so
+        // a small saturated object (a loading-screen logo) cannot
+        // pass as a table. Fixed windows pass 0.0 (no gate).
+        if (minFrameFraction > 0.0 &&
+            Imgproc.contourArea(biggest) < minFrameFraction * hsv.rows() * hsv.cols()
+        ) return null
         feltHsvMean = Core.mean(hsv, mask).`val`.copyOf(3)
 
         val curve = MatOfPoint2f(*biggest.toArray())

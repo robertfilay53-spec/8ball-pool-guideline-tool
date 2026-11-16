@@ -210,18 +210,20 @@ object CvConfig {
      * white_fraction 0, so it reads SOLID and the pipeline reports
      * "Cue ball not found". The cue is consistently ~1.75x the
      * felt's V (245/140 at 1.0x, 147/84 at 0.6x, 98/56 at 0.4x),
-     * so the floor follows the felt: max(90, feltV + 30) when the
-     * felt mean is known, the fixed floor when it is not. The 90
-     * absolute floor keeps the rule above any grey felt pixel on
-     * near-black felt (V 35) and below any real white ball down to
-     * ~0.37x light; below that (0.3x: cue V~74) the cue stays below
-     * the floor by design (harness table a08 pins the boundary).
-     * [fixedFloor] is WHITE_V_FLOOR (140) for the white window /
-     * colorAt and STRIPE_V_FLOOR (130) for the stripe white test;
-     * the same felt-relative value feeds both. */
+     * so the floor follows the felt: max(60, feltV + 30) when the
+     * felt mean is known, the fixed floor when it is not. v1.0.70:
+     * the absolute floor is 60, not 90 — the old 90 bound the floor
+     * above a 0.3x cue by design (cue V~74, felt V~41, floor 71
+     * now; harness table a08 pins the fixed case). The 60 floor
+     * still sits above any grey felt pixel on near-black felt
+     * (V 35) and above the dark background (V~30), and the
+     * felt-relative part (feltV + 30) dominates whenever the felt
+     * is brighter. [fixedFloor] is WHITE_V_FLOOR (140) for the white
+     * window / colorAt and STRIPE_V_FLOOR (130) for the stripe
+     * white test; the same felt-relative value feeds both. */
     fun feltRelativeWhiteVFloor(feltHsv: DoubleArray?, fixedFloor: Double): Double {
         val feltV = feltHsv?.getOrNull(2) ?: return fixedFloor
-        return (feltV + 30.0).coerceAtLeast(90.0)
+        return (feltV + 30.0).coerceAtLeast(60.0)
     }
     /** Pocket-exclusion margin (v1.0.3, was +3 px): with the pocket
      * model fixed (inset 0, below) the disc-overlap test needs no extra
@@ -263,6 +265,21 @@ object CvConfig {
      * brown table ever shows up (green/blue are the standard skins). */
     val FELT_BROWN_LOWER = doubleArrayOf(13.0, 135.0, 105.0)
     val FELT_BROWN_UPPER = doubleArrayOf(22.0, 255.0, 255.0)
+    /** Felt-colour-agnostic fallback (v1.0.70, TableDetector): when
+     * no felt window matches (a purple felt, H~141, sits outside
+     * green/blue/brown), the detector takes the dominant hue among
+     * saturated pixels and detects the table from a window around
+     * it. The felt is the largest saturated surface in the frame,
+     * so its hue wins the histogram by a wide margin (a03: 84% of
+     * saturated pixels are the purple felt). A loading screen's
+     * bright logo is saturated too, but its largest contour is
+     * ~500 px, so the candidate must cover at least this fraction
+     * of the frame (a03 covers 65%; a loading logo covers 0.2%)
+     * and at least [FELT_GENERIC_MIN_AREA_PX]. */
+    const val FELT_GENERIC_MIN_S = 60.0
+    const val FELT_GENERIC_MIN_V = 30.0
+    const val FELT_GENERIC_MIN_AREA_PX = 5000.0
+    const val FELT_GENERIC_MIN_FRAME_FRACTION = 0.25
     /** Pocket inset as a fraction of the table width. FITTED from
      * ground truth (v1.0.3, was 0.015): the drawn pockets sit exactly
      * on the table corners, so the model inset is 0. The 1.5% inset

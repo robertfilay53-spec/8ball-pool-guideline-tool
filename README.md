@@ -69,8 +69,9 @@ screen. Nothing about the game is changed.**
    if a real brown table needs it. Since v1.0.34 the white and
    stripe brightness floors are relative to the felt instead of
    fixed (the floor is the felt's brightness + 30, with a minimum
-   of 90), so a dim table down to about 0.37x brightness still
-   reads the cue ball; below that the cue reads SOLID by design
+   of 60 since v1.0.70, 90 before), so a dim table down to 0.3x brightness still
+   reads the cue ball (harness table a08, fixed in v1.0.70);
+   below that the cue reads SOLID by design
    and the tool reports no cue rather than guessing. The bank- and kick-shot cushion
    correction is fitted to the synthetic harness data, where it
    measures zero; real-table cushion behaviour is unmeasured. A
@@ -215,11 +216,16 @@ screen. Nothing about the game is changed.**
     near-black one is the 8-ball, a disc with a clear white band is
     a stripe, a coloured disc with almost no white is a solid. It
     says "?" instead of guessing when the disc is too small, cut
-    off by the frame edge, occluded by another ball, or its white
-    fraction sits in the ambiguous middle — a solid showing its
+    off by the frame edge, mostly hidden behind another ball, or
+    its white fraction sits in the ambiguous middle — a solid showing its
     number circle reads a white fraction around 0.05-0.16, so it
     can read "?" on a real table, and that is the honest answer,
-    not a misread. On the 15 synthetic harness tables the
+    not a misread. Since v1.0.70 a ball merely touching another
+    ball is no longer "?" by default: the classifier samples only
+    the ball's own disc (pixels inside a neighbour's disc are
+    excluded), so clustered balls read their true group on the
+    synthetic harness; a ball more than half hidden still reads
+    "?" because too few of its own pixels are visible. On the 15 synthetic harness tables the
     classification is exact (see cv-harness/results-v1.0.14-after.json),
     but the synthetic balls have no number circle and perfect
     lighting — the phone test is still the real check. Practice mode
@@ -442,13 +448,12 @@ systematic angle error is left to correct). The CV harness (15 synthetic
 tables, `../cv-harness/RESULTS.md`) measures the v1.0.3 pipeline at
 15/15 tables, 85/85 balls with 0 false positives, 15/15 shots, mean
 cut-angle error 0.32 deg (v1.0.1 was 13/15, 76/85, 11/15, 1.46 deg).
-As of v1.0.69 the same harness measures 15/15, 85/85, 0 false
+As of v1.0.70 the same harness measures 15/15, 85/85, 0 false
 positives, 15/15, mean cut-angle error 0.177 deg (max 0.27 deg);
-the adversarial tables measure 8/9 tables, 46 balls, 4 missed
-(all the purple-felt table, which the felt windows do not cover),
-0 false positives. The figures are unchanged since v1.0.45: no
+the adversarial tables measure 11/11 tables, 61 balls, 0 missed,
+0 false positives, 61/61 groups, 11/11 shots solved. The figures are unchanged since v1.0.45: no
 pipeline code changed in v1.0.45, v1.0.46, v1.0.47, v1.0.48, v1.0.49,
-v1.0.50, v1.0.51, v1.0.52, v1.0.53, v1.0.54, v1.0.55, v1.0.56, v1.0.57, v1.0.58, v1.0.59, v1.0.60, v1.0.61, v1.0.62, v1.0.63, v1.0.64, v1.0.65, v1.0.66, v1.0.67, or v1.0.68, which were all docs-only cycles. v1.0.69 is the real-phone fix (Jawad's Nov 16 phone test: the tool's own control bar was detected as white balls, the guideline verifier returned rail lines, the cream cue ball was missed, and a dark loading screen was misread as a blocked capture): HSV guideline whiteness (S < 100, V above felt V + 25, no absolute floor), the cream-cue rule with the per-sector cap test, the cue-rescue Hough pass, the contour radius cap, the ray gate 20 to 12 px, the pure-black (mean < 1.0) capture test, and the detector-side UI exclusion (the floating bubble + menu rects, published on the overlay bus). The harness and adversarial figures are unchanged by that fix — 0 regressions on every measured field, and the three adversarial regressions the intermediate whiteness versions introduced (blurred guideline, 0.3x-light guideline, cue in a cluster) are all fixed. `../cv-harness/RESULTS.md` was refreshed in
+v1.0.50, v1.0.51, v1.0.52, v1.0.53, v1.0.54, v1.0.55, v1.0.56, v1.0.57, v1.0.58, v1.0.59, v1.0.60, v1.0.61, v1.0.62, v1.0.63, v1.0.64, v1.0.65, v1.0.66, v1.0.67, or v1.0.68, which were all docs-only cycles. v1.0.69 is the real-phone fix (Jawad's Nov 16 phone test: the tool's own control bar was detected as white balls, the guideline verifier returned rail lines, the cream cue ball was missed, and a dark loading screen was misread as a blocked capture): HSV guideline whiteness (S < 100, V above felt V + 25, no absolute floor), the cream-cue rule with the per-sector cap test, the cue-rescue Hough pass, the contour radius cap, the ray gate 20 to 12 px, the pure-black (mean < 1.0) capture test, and the detector-side UI exclusion (the floating bubble + menu rects, published on the overlay bus). The harness and adversarial figures are unchanged by that fix — 0 regressions on every measured field, and the three adversarial regressions the intermediate whiteness versions introduced (blurred guideline, 0.3x-light guideline, cue in a cluster) are all fixed. v1.0.70 is the harness-remainder fix: the 0.3x-light cue (a08) reads CUE again (white-floor absolute 90 to 60, cream-cue V floor felt-relative), clustered balls read their true group instead of UNKNOWN (neighbour-aware disc sampling, the occlusion blanket removed), the 8-ball in a cluster reads EIGHT (new probe a10), a dim stripe stays STRIPE (probe a11), and a purple felt is detected by a felt-colour-agnostic generic fallback (dominant saturated hue, area at least 5000 px and 25% of the frame) — the real game ships no purple felt asset in the decompiled APK, but the fallback covers a custom table without touching the blue/green/brown windows. The adversarial suite is now 11/11 tables, 61/61 balls, 61/61 groups, 11/11 shots, 0 false positives; the main suite is identical on every decision field to v1.0.69 (0 regressions). `../cv-harness/RESULTS.md` was refreshed in
 v1.0.45: its header now names the current pipeline version and its
 frame schedule reads HoughCircles and guideline on frames 0/3/6
 (guideline cadence 3 since v1.0.38); before that it still described

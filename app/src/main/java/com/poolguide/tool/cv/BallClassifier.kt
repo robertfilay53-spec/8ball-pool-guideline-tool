@@ -27,7 +27,25 @@ object BallClassifier {
      * antialiased against the felt. */
     const val SAMPLE_RADIUS_FRACTION = 0.85
 
-    fun sampleDisc(hsv: Mat, center: Vec2, radiusPx: Double, feltHsv: DoubleArray? = null): DiscStats {
+    fun sampleDisc(
+        hsv: Mat,
+        center: Vec2,
+        radiusPx: Double,
+        feltHsv: DoubleArray? = null,
+        // v1.0.70: the other detected balls as (centre, radius)
+        // pairs. Samples that fall inside another ball's disc are
+        // the neighbour's pixels, not this ball's, so they are
+        // skipped (see the class docstring): a ball touching its
+        // neighbour used to sample the neighbour's colour into its
+        // own disc, which pushed solids into the ambiguous white
+        // band (UNKNOWN), the cue's white fraction up, and the
+        // 8-ball's mean S over the EIGHT gate (SOLID on a real phone
+        // frame). The skipped crescent is small for touching balls,
+        // so coverage stays high; a genuinely half-hidden ball
+        // samples too few pixels and reads UNKNOWN via the coverage
+        // rule in BallGroupClassifier, which is the honest answer.
+        others: List<Pair<Vec2, Double>> = emptyList()
+    ): DiscStats {
         val sampleR = SAMPLE_RADIUS_FRACTION * radiusPx
         val expected = (PI * sampleR * sampleR / (SAMPLE_STEP_PX * SAMPLE_STEP_PX)).toInt()
         var sampled = 0
@@ -48,8 +66,10 @@ object BallClassifier {
         var sumS = 0.0
         // v1.0.34: the white test uses the felt-relative floor, so a
         // dim cue ball's disc still samples white (at 0.4x light the
-        // cue is V~98 against a felt-relative floor of 90, not the
+        // cue is V~98 against a felt-relative floor of 86, not the
         // fixed 130); without the felt it keeps the fixed floor.
+        // v1.0.70: the absolute floor is 60, not 90, so 0.3x light
+        // works too (cue V~74, felt V~41, floor 71).
         val whiteVFloor = CvConfig.feltRelativeWhiteVFloor(feltHsv, CvConfig.STRIPE_V_FLOOR)
         var y = center.y - sampleR
         while (y <= center.y + sampleR) {
@@ -58,25 +78,37 @@ object BallClassifier {
                 val dx = x - center.x
                 val dy = y - center.y
                 if (dx * dx + dy * dy <= sampleR * sampleR) {
-                    val px = hsv.get(
-                        y.toInt().coerceIn(0, hsv.rows() - 1),
-                        x.toInt().coerceIn(0, hsv.cols() - 1)
-                    )
-                    if (px != null && px.size >= 3) {
-                        sampled++
-                        val s = px[1]
-                        val v = px[2]
-                        sumS += s
-                        sumV += v
-                        if (s < 60.0 && v > whiteVFloor) white++
-                        if (s > 150.0) colored++
-                        val sector = if (kotlin.math.abs(dy) > kotlin.math.abs(dx)) {
-                            if (dy < 0) 0 else 1 // top, bottom
-                        } else {
-                            if (dx < 0) 2 else 3 // left, right
+                    // v1.0.70: a sample inside another ball's disc
+                    // is the neighbour's pixel, not this ball's —
+                    // skip it. The neighbour's radius is its
+                    // detected radius, no margin: a sample exactly
+                    // on the boundary is ambiguous either way.
+                    val insideNeighbour = others.any { (otherCenter, otherRadius) ->
+                        val ox = x - otherCenter.x
+                        val oy = y - otherCenter.y
+                        ox * ox + oy * oy < otherRadius * otherRadius
+                    }
+                    if (!insideNeighbour) {
+                        val px = hsv.get(
+                            y.toInt().coerceIn(0, hsv.rows() - 1),
+                            x.toInt().coerceIn(0, hsv.cols() - 1)
+                        )
+                        if (px != null && px.size >= 3) {
+                            sampled++
+                            val s = px[1]
+                            val v = px[2]
+                            sumS += s
+                            sumV += v
+                            if (s < 60.0 && v > whiteVFloor) white++
+                            if (s > 150.0) colored++
+                            val sector = if (kotlin.math.abs(dy) > kotlin.math.abs(dx)) {
+                                if (dy < 0) 0 else 1 // top, bottom
+                            } else {
+                                if (dx < 0) 2 else 3 // left, right
+                            }
+                            sectorSamples[sector]++
+                            if (s > 150.0) sectorColored[sector]++
                         }
-                        sectorSamples[sector]++
-                        if (s > 150.0) sectorColored[sector]++
                     }
                 }
                 x += SAMPLE_STEP_PX
@@ -102,7 +134,10 @@ object BallClassifier {
             sampledPx = sampled,
             expectedPx = expected,
             coloredFraction = if (sampled > 0) colored.toDouble() / sampled else 0.0,
-            maxSectorColoredFraction = maxSectorColored
+            maxSectorColoredFraction = maxSectorColored,
+            // v1.0.70: the felt's mean V for the felt-relative
+            // cream-cue brightness floor; -1.0 when unknown.
+            feltMeanV = feltHsv?.getOrNull(2) ?: -1.0
         )
     }
 }
