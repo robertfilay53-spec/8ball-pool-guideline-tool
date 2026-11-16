@@ -9,6 +9,7 @@
     <string name="status_overlay_denied">Overlay permission was denied. The tool cannot draw lines without it.</string>
     <string name="status_demo">Demo mode — synthetic table, no game needed.</string>
     <string name="status_stopped">Stopped.</string>
+    <string name="status_previous_crash">Last run crashed — tap Export diagnostics to see what threw.</string>
 
     <string name="btn_start">Start capture</string>
     <string name="btn_stop">Stop</string>

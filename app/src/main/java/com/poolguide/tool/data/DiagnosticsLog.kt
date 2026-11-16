@@ -88,6 +88,15 @@ object DiagnosticsLog {
      * any previous-session lines back. */
     const val PREVIOUS_SESSION_FILE = "diagnostics-previous-session.txt"
 
+    /** On-disk record of the last uncaught crash (v1.0.68). A crash in
+     * a service constructor happens before any session starts, so the
+     * session mirror above is empty for exactly the runs that need
+     * debugging most. The global handler ([installCrashHandler])
+     * writes the stack trace here synchronously, and the next launch
+     * reads it back into the export. Separate file from the session
+     * mirror, so the two are never confused or deleted together. */
+    const val CRASH_FILE = "diagnostics-crash.txt"
+
     private val events = ArrayDeque<Event>()
     private var sessionStartMs: Long = 0L
     private var active = false
@@ -107,6 +116,125 @@ object DiagnosticsLog {
      * a clean stop (v1.0.35). Loaded by [start], rendered by
      * [buildReport]. */
     private val previousSessionLines = ArrayList<String>()
+
+    /** Lines of the last uncaught crash (v1.0.68). Loaded by
+     * [loadPreviousCrash], rendered by [buildReport]. */
+    private val previousCrashLines = ArrayList<String>()
+
+    /** Optional crash sink file, set by [attachCrashFile]. */
+    private var crashFile: java.io.File? = null
+
+    /** Whether the global handler is installed (v1.0.68). */
+    private var crashHandlerInstalled = false
+
+    /** Attach the on-disk crash file. Pass null to detach (tests).
+     * Unlike the session mirror, the crash file is written by the
+     * global handler, so it can be attached any time — including
+     * from Application.onCreate, before any session exists. */
+    @Synchronized
+    fun attachCrashFile(file: java.io.File?) {
+        crashFile = file
+    }
+
+    /** Read the crash file into memory without deleting it (v1.0.68).
+     * MainActivity calls this on launch, so Export diagnostics can
+     * offer the crash record even though no session ever started.
+     * [start] deletes the file after carrying the lines over, so a
+     * crash is shown exactly once. */
+    @Synchronized
+    fun loadPreviousCrash() {
+        val file = crashFile ?: return
+        previousCrashLines.clear()
+        try {
+            if (file.exists()) {
+                previousCrashLines.addAll(file.readLines().takeLast(MAX_EVENTS))
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    /** Lines of the last uncaught crash (v1.0.68). Empty when there
+     * was no crash, or after the crash was consumed by [start]. */
+    @Synchronized
+    fun previousCrashLines(): List<String> = previousCrashLines.toList()
+
+    /** Whether an uncaught crash from a previous run is waiting to be
+     * exported (v1.0.68). */
+    @Synchronized
+    fun hasPreviousCrash(): Boolean = previousCrashLines.isNotEmpty()
+
+    /** Record an uncaught crash to the crash file (v1.0.68). Called by
+     * the global handler, so it must work with NO session active and
+     * must never throw itself — a throwing crash recorder would mask
+     * the real crash. The record carries the thread, the exception
+     * type and message, and the full stack trace including causes. */
+    @Synchronized
+    fun recordCrash(thread: Thread, throwable: Throwable) {
+        val file = crashFile ?: return
+        try {
+            val stamp = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZ", Locale.US)
+                .format(Date())
+            val sb = StringBuilder()
+            sb.appendLine(
+                "CRASH $stamp thread=${thread.name} " +
+                    "${throwable::class.java.name}: ${throwable.message}"
+            )
+            for (frame in throwable.stackTrace) sb.appendLine("    at $frame")
+            var cause = throwable.cause
+            while (cause != null) {
+                sb.appendLine("Caused by: ${cause::class.java.name}: ${cause.message}")
+                for (frame in cause.stackTrace) sb.appendLine("    at $frame")
+                cause = cause.cause
+            }
+            file.appendText(sb.toString(), Charsets.UTF_8)
+        } catch (_: Exception) {
+        }
+    }
+
+    /** Install the global uncaught-exception handler (v1.0.68). The
+     * handler records the crash to disk and then chains to the
+     * previously installed handler (the runtime's, on a device),
+     * which logs the crash and kills the process as usual — so the
+     * user still sees the normal crash behaviour, but the record
+     * survives for the next launch. When there is no previous handler
+     * (unit tests), the thread just dies. Installs once; the crash
+     * file can be re-attached any time with [attachCrashFile]. */
+    @Synchronized
+    fun installCrashHandler() {
+        if (crashHandlerInstalled) return
+        crashHandlerInstalled = true
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            try {
+                recordCrash(thread, throwable)
+            } catch (_: Exception) {
+            }
+            previous?.uncaughtException(thread, throwable)
+        }
+    }
+
+    /** Test-only: clear all in-memory state (events, carried-over
+     * lines, active flag) so a test starts from a fresh log regardless
+     * of which tests ran before it in the same JVM. The singleton is
+     * shared across test classes, and [end] deliberately keeps events
+     * for export, so without this a test asserting an empty log would
+     * see the previous test's events. */
+    @Synchronized
+    fun resetForTests() {
+        events.clear()
+        previousSessionLines.clear()
+        previousCrashLines.clear()
+        outcomes.reset()
+        sessionStartMs = 0L
+        active = false
+    }
+
+    /** Test-only: clear the installed flag so a later test can install
+     * a fresh handler (the production install is once per process). */
+    @Synchronized
+    fun resetCrashHandlerForTests() {
+        crashHandlerInstalled = false
+    }
 
     /** Attach the on-disk mirror file. Pass null to detach (tests).
      * Must be called before [start] for the previous-session lines
@@ -131,6 +259,14 @@ object DiagnosticsLog {
         if (active) return
         previousSessionLines.clear()
         loadPreviousSession()
+        // v1.0.68: a crash record from the previous process is carried
+        // into this session's report, then the file is deleted so the
+        // crash is shown exactly once.
+        loadPreviousCrash()
+        try {
+            crashFile?.delete()
+        } catch (_: Exception) {
+        }
         events.clear()
         outcomes.reset()
         sessionStartMs = System.currentTimeMillis()
@@ -260,6 +396,15 @@ object DiagnosticsLog {
             sb.appendLine("---")
             sb.appendLine("Previous session (process ended without a clean stop):")
             for (line in previousSessionLines) sb.appendLine(line)
+        }
+        // v1.0.68: the uncaught crash from the previous run, when
+        // there is one. This is the record the Start-capture / Demo
+        // crash used to leave no trace of: the process died before
+        // any session started, so the sections above were empty.
+        if (previousCrashLines.isNotEmpty()) {
+            sb.appendLine("---")
+            sb.appendLine("Previous crash (uncaught exception in the last run):")
+            for (line in previousCrashLines) sb.appendLine(line)
         }
         return sb.toString()
     }

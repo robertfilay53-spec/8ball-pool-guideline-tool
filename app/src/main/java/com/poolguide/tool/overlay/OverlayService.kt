@@ -68,8 +68,14 @@ class OverlayService : Service() {
     private var cvThread: HandlerThread? = null
     private var cvHandler: Handler? = null
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val demoMat = Mat()
-    private val previewMat = Mat()
+    /** v1.0.68: created in [startDemoLoop], AFTER OpenCV is loaded.
+     * These used to be `Mat()` field initialisers, so constructing the
+     * service called the native Mat constructor before any loadLibrary
+     * ran and threw UnsatisfiedLinkError (an Error, uncatchable by
+     * catch-Exception) — the Demo-mode crash, same root cause as the
+     * Start-capture crash in CaptureService. See OpenCvLoadOrderTest. */
+    private var demoMat: Mat? = null
+    private var previewMat: Mat? = null
     private var previewBitmap: Bitmap? = null
     private var demoRunnable: Runnable? = null
 
@@ -187,24 +193,49 @@ class OverlayService : Service() {
             stopSelf()
             return
         }
+        // v1.0.68: the demo Mats are created here, only now that the
+        // native library is loaded (see the field comment above).
+        demoMat = Mat()
+        previewMat = Mat()
+        val mat = demoMat
+        if (mat == null) {
+            Log.e(TAG, "demo Mat was not created")
+            stopSelf()
+            return
+        }
         try {
             assets.open("demo/demo_table_green.png").use { stream ->
                 val bitmap = BitmapFactory.decodeStream(stream)
                     ?: throw IllegalStateException("demo image failed to decode")
-                Utils.bitmapToMat(bitmap, demoMat)
+                Utils.bitmapToMat(bitmap, mat)
             }
         } catch (e: Exception) {
             Log.e(TAG, "demo image load failed", e)
             stopSelf()
             return
         }
-        val metrics = currentDisplayMetrics()
-        pipeline = CvPipeline(metrics.widthPixels, metrics.heightPixels).apply {
-            tableOverrideNormalized = store.getTableCorners()
-            gameProfile = store.getGameProfile()
-            // Demo "screen" is the real display (rotate to landscape to
-            // see the lines where the table would be).
-            setScreenSize(metrics.widthPixels, metrics.heightPixels)
+        // v1.0.68: the pipeline construction used to run unwrapped
+        // (v1.0.35 left it out of scope). A throw here — bad metrics,
+        // a native allocation failure — killed Demo mode with no
+        // breadcrumb, so it gets the same failOverlayStart treatment
+        // as the prelude.
+        val metrics = try {
+            currentDisplayMetrics()
+        } catch (e: Exception) {
+            failOverlayStart("currentDisplayMetrics", e)
+            return
+        }
+        pipeline = try {
+            CvPipeline(metrics.widthPixels, metrics.heightPixels).apply {
+                tableOverrideNormalized = store.getTableCorners()
+                gameProfile = store.getGameProfile()
+                // Demo "screen" is the real display (rotate to landscape to
+                // see the lines where the table would be).
+                setScreenSize(metrics.widthPixels, metrics.heightPixels)
+            }
+        } catch (e: Exception) {
+            failOverlayStart("CvPipeline init", e)
+            return
         }
         cvThread = HandlerThread("poolguide-demo").apply { start() }
         cvHandler = Handler(cvThread!!.looper)
@@ -212,10 +243,11 @@ class OverlayService : Service() {
             override fun run() {
                 if (!running || !demoMode) return
                 try {
-                    val result = pipeline?.process(demoMat) ?: return
+                    val demo = demoMat ?: return
+                    val result = pipeline?.process(demo) ?: return
                     // Same path as live results: main thread, via the bus.
                     mainHandler.post { overlayManager?.update(result) }
-                    postPreview(demoMat, result.isCaptureBlack)
+                    postPreview(demo, result.isCaptureBlack)
                 } catch (e: Exception) {
                     Log.e(TAG, "demo frame failed", e)
                 }
@@ -228,13 +260,14 @@ class OverlayService : Service() {
 
     private fun postPreview(source: Mat, isBlack: Boolean) {
         if (PreviewBus.listener == null) return
-        Imgproc.resize(source, previewMat, org.opencv.core.Size(360.0, 202.0))
+        val dst = previewMat ?: return
+        Imgproc.resize(source, dst, org.opencv.core.Size(360.0, 202.0))
         var bmp = previewBitmap
         if (bmp == null || bmp.width != 360 || bmp.height != 202) {
             bmp = Bitmap.createBitmap(360, 202, Bitmap.Config.ARGB_8888)
             previewBitmap = bmp
         }
-        Utils.matToBitmap(previewMat, bmp)
+        Utils.matToBitmap(dst, bmp)
         PreviewBus.post(bmp, isBlack)
     }
 
@@ -258,6 +291,13 @@ class OverlayService : Service() {
         cvThread = null
         cvHandler = null
         pipeline = null
+        // v1.0.68: the demo Mats are created per demo run now, so
+        // release them here instead of leaking native memory across
+        // restarts.
+        demoMat?.release()
+        demoMat = null
+        previewMat?.release()
+        previewMat = null
         stopForeground(STOP_FOREGROUND_REMOVE)
     }
 
