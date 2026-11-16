@@ -897,7 +897,7 @@ class LineOverlayManager(
         val sy = result.scaleToScreenY
         return result.balls
             .filter { it.group != BallGroup.UNKNOWN }
-            .map { ball -> {
+            .map { ball ->
             val center = Vec2(ball.center.x * sx, ball.center.y * sy)
             val radiusScreen = ball.radiusPx * sx
             val anchor = BallGroupTag.anchor(center, radiusScreen, segments)
