@@ -156,6 +156,12 @@ class MainActivity : AppCompatActivity() {
         // Attaching here also covers the failServiceStart path, which
         // records before any service has started.
         DiagnosticsLog.attachFile(File(filesDir, DiagnosticsLog.PREVIOUS_SESSION_FILE))
+        // v1.0.68: surface a crash record from the last run, if any.
+        // A crash before the first session left nothing in the
+        // session log, so without this the export gate below still
+        // said "No session yet" after a crash.
+        DiagnosticsLog.attachCrashFile(File(filesDir, DiagnosticsLog.CRASH_FILE))
+        DiagnosticsLog.loadPreviousCrash()
 
         statusText = findViewById(R.id.status_text)
         previewImage = findViewById(R.id.preview_image)
@@ -202,7 +208,13 @@ class MainActivity : AppCompatActivity() {
                 previewStatus.text = ""
             }
         }
-        setStatus(getString(R.string.status_ready))
+        setStatus(
+            if (DiagnosticsLog.hasPreviousCrash()) {
+                getString(R.string.status_previous_crash)
+            } else {
+                getString(R.string.status_ready)
+            }
+        )
     }
 
     override fun onDestroy() {
@@ -320,14 +332,25 @@ class MainActivity : AppCompatActivity() {
     private fun stopCapture() {
         // The two services run as a pair: stop both, so the lines never
         // outlive the capture (and vice versa).
+        // v1.0.68: starting a service can throw while the app is being
+        // torn down (the v1.0.35 out-of-scope item); the Stop button
+        // must never crash the activity.
         val stopCapture = Intent(this, CaptureService::class.java).apply {
             action = CaptureService.ACTION_STOP
         }
-        startService(stopCapture)
+        try {
+            startService(stopCapture)
+        } catch (e: Exception) {
+            Log.e(TAG, "failed to stop capture service", e)
+        }
         val stopOverlay = Intent(this, OverlayService::class.java).apply {
             action = OverlayService.ACTION_STOP
         }
-        startService(stopOverlay)
+        try {
+            startService(stopOverlay)
+        } catch (e: Exception) {
+            Log.e(TAG, "failed to stop overlay service", e)
+        }
         setStatus(getString(R.string.status_stopped))
     }
 
@@ -336,9 +359,15 @@ class MainActivity : AppCompatActivity() {
      * session yet (no events at all) there is nothing to export.
      * v1.0.35: a previous session that ended without a clean stop also
      * counts. That is exactly the crashed run the user is trying to
-     * export after relaunching, when the in-memory log is empty. */
+     * export after relaunching, when the in-memory log is empty.
+     * v1.0.68: a previous crash record counts too — a crash before the
+     * first session left no session events at all, so without this
+     * the export still said "No session yet" after the very crash the
+     * user was trying to report. */
     private fun exportDiagnostics() {
-        if (DiagnosticsLog.eventCount() == 0 && DiagnosticsLog.previousSessionEvents().isEmpty()) {
+        if (DiagnosticsLog.eventCount() == 0 && DiagnosticsLog.previousSessionEvents().isEmpty() &&
+            !DiagnosticsLog.hasPreviousCrash()
+        ) {
             Toast.makeText(this, R.string.diagnostics_empty, Toast.LENGTH_SHORT).show()
             return
         }

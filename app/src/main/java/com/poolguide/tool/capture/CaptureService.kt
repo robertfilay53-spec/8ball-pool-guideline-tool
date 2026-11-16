@@ -90,8 +90,15 @@ class CaptureService : Service() {
     private var cvHandler: Handler? = null
     private val cvBusy = AtomicBoolean(false)
     private val framePacer = FramePacer(CvConfig.MIN_FRAME_INTERVAL_MS)
-    private val frameMat = Mat()
-    private val previewMat = Mat()
+    /** v1.0.68: created in [startCaptureAfterForeground], AFTER
+     * OpenCV is loaded. These used to be `Mat()` field initialisers,
+     * so constructing the service called the native Mat constructor
+     * before any loadLibrary ran and threw UnsatisfiedLinkError (an
+     * Error, uncatchable by catch-Exception) — killing the process
+     * the moment the user granted screen capture, with no breadcrumb
+     * and no diagnostics. See OpenCvLoadOrderTest. */
+    private var frameMat: Mat? = null
+    private var previewMat: Mat? = null
     private var previewBitmap: Bitmap? = null
 
     private var running = false
@@ -197,6 +204,10 @@ class CaptureService : Service() {
             stopSelf()
             return
         }
+        // v1.0.68: the frame Mats are created here, only now that the
+        // native library is loaded (see the field comment above).
+        frameMat = Mat()
+        previewMat = Mat()
 
         val metrics = try {
             currentDisplayMetrics()
@@ -335,38 +346,49 @@ class CaptureService : Service() {
 
     /** Copy the ImageReader RGBA frame into [frameMat], honouring rowStride. */
     private fun copyImageToMat(image: android.media.Image) {
+        // v1.0.68: the Mats are nullable until startCaptureAfterForeground
+        // creates them; a frame arriving before that is dropped, never
+        // a null-pointer crash.
+        val mat = frameMat ?: return
         val plane = image.planes[0]
         val buffer = plane.buffer
         val rowStride = plane.rowStride
         val width = image.width
         val height = image.height
-        if (frameMat.rows() != height || frameMat.cols() != width) {
-            frameMat.create(height, width, CvType.CV_8UC4)
+        if (mat.rows() != height || mat.cols() != width) {
+            mat.create(height, width, CvType.CV_8UC4)
         }
         val bytes = ByteArray(rowStride * height)
         buffer.get(bytes)
         // Re-pack rows (rowStride may exceed width * 4).
         if (rowStride == width * 4) {
-            frameMat.put(0, 0, bytes)
+            mat.put(0, 0, bytes)
         } else {
             val row = ByteArray(width * 4)
             for (y in 0 until height) {
                 System.arraycopy(bytes, y * rowStride, row, 0, width * 4)
-                frameMat.put(y, 0, row)
+                mat.put(y, 0, row)
             }
         }
     }
 
     /** Single-slot: drop the frame if the previous one is still processing. */
     private fun runPipelineFrame() {
+        // v1.0.68: the null checks come first — returning after
+        // compareAndSet would leave cvBusy set and drop every later frame.
+        val mat = frameMat ?: return
         if (!cvBusy.compareAndSet(false, true)) return
-        val handler = cvHandler ?: return
+        val handler = cvHandler
+        if (handler == null) {
+            cvBusy.set(false)
+            return
+        }
         handler.post {
             try {
-                val result = pipeline?.process(frameMat) ?: return@post
+                val result = pipeline?.process(mat) ?: return@post
                 OverlayBus.post(result)
                 recordDiagnostics(result)
-                postPreview(frameMat, result.isCaptureBlack)
+                postPreview(mat, result.isCaptureBlack)
                 maybeUpdateNotification(result.status)
             } catch (e: Exception) {
                 Log.e(TAG, "pipeline frame failed", e)
@@ -439,13 +461,14 @@ class CaptureService : Service() {
 
     private fun postPreview(source: Mat, isBlack: Boolean) {
         if (PreviewBus.listener == null) return
-        Imgproc.resize(source, previewMat, org.opencv.core.Size(360.0, 202.0))
+        val dst = previewMat ?: return
+        Imgproc.resize(source, dst, org.opencv.core.Size(360.0, 202.0))
         var bmp = previewBitmap
         if (bmp == null || bmp.width != 360 || bmp.height != 202) {
             bmp = Bitmap.createBitmap(360, 202, Bitmap.Config.ARGB_8888)
             previewBitmap = bmp
         }
-        Utils.matToBitmap(previewMat, bmp)
+        Utils.matToBitmap(dst, bmp)
         PreviewBus.post(bmp, isBlack)
     }
 
@@ -489,6 +512,13 @@ class CaptureService : Service() {
         cvThread = null
         cvHandler = null
         pipeline = null
+        // v1.0.68: the frame Mats are created per capture run now, so
+        // release them here instead of leaking native memory across
+        // restarts.
+        frameMat?.release()
+        frameMat = null
+        previewMat?.release()
+        previewMat = null
         val displayManager = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
         try {
             displayManager.unregisterDisplayListener(displayListener)
