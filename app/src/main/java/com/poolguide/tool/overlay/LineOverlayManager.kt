@@ -4,6 +4,8 @@ import android.content.Context
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.PointF
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.util.TypedValue
 import android.view.Gravity
@@ -15,12 +17,14 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import com.poolguide.tool.R
+import com.poolguide.tool.capture.OverlayBus
 import com.poolguide.tool.cv.Ball
 import com.poolguide.tool.cv.BallColor
 import com.poolguide.tool.cv.DetectionResult
 import com.poolguide.tool.data.CalibrationStore
 import com.poolguide.tool.data.DiagnosticsLog
 import com.poolguide.tool.data.ShotHistory
+import com.poolguide.tool.geometry.BallGroup
 import com.poolguide.tool.geometry.BallGroupTag
 import com.poolguide.tool.geometry.BlockedPathLabel
 import com.poolguide.tool.geometry.CutAngleLabel
@@ -29,6 +33,7 @@ import com.poolguide.tool.geometry.PocketDistanceLabel
 import com.poolguide.tool.geometry.RailContactMarker
 import com.poolguide.tool.geometry.Segment
 import com.poolguide.tool.geometry.ShotSolver
+import com.poolguide.tool.geometry.UiRect
 import com.poolguide.tool.geometry.Vec2
 import kotlin.math.PI
 import kotlin.math.atan2
@@ -56,11 +61,13 @@ import kotlin.math.min
  *    see README, "Honest limits".
  * 3. Auto-hide: when the game's own guideline is lost for 15 consecutive
  *    frames, the lines are removed — a stale shot is worse than no shot.
- * 4. Black capture (v1.0.37, REA hardening R2): a black run that
- *    persists past 30 frames shows "Capture blocked (FLAG_SECURE?)"
- *    on the bubble, so the user is told the game is hiding the table
- *    instead of seeing no lines and no explanation; the run is also
- *    recorded in DiagnosticsLog with its context (see CaptureService).
+ * 4. Black capture (v1.0.37, REA hardening R2; v1.0.69 threshold):
+ *    a pure-black run (mean grey < 1.0) that persists past 30 frames
+ *    shows "Capture is black" on the bubble, so the user is told the
+ *    capture is black instead of seeing no lines and no explanation;
+ *    the run is also recorded in DiagnosticsLog with its context
+ *    (see CaptureService). The game's loading screen is dark but
+ *    not black (mean ~5.3) and no longer trips this.
  * 5. Windows are reused by index across frames (updateViewLayout), not
  *    re-added, to avoid flicker.
  * 6. EDIT mode (v1.0.4, Line Guide lead): the bubble's Edit button freezes
@@ -137,6 +144,11 @@ class LineOverlayManager(
         private const val BUBBLE_RING_SIZE_DP = 28f
         /** Bubble default top offset. */
         private const val BUBBLE_DEFAULT_Y_DP = 120f
+
+        /** The expanded bubble menu (v1.0.69) collapses on its own
+         * after this long without a tap, so it cannot sit over the
+         * table after the user forgets it. */
+        private const val BUBBLE_MENU_AUTO_COLLAPSE_MS = 8000L
     }
 
     private val windowManager =
@@ -197,6 +209,23 @@ class LineOverlayManager(
     private var lastPotRateText: String? = null
     private var hideButton: Button? = null
     private var editButton: Button? = null
+    /** Expanded bubble menu (v1.0.69): the Hide / Edit / Stop
+     * buttons and the pot-rate label live in a separate vertical
+     * window that opens below the collapsed bubble from the "⋯"
+     * button and auto-collapses after 8 s idle, so the controls
+     * never sit over the table. */
+    private var menuView: View? = null
+    private var menuParams: WindowManager.LayoutParams? = null
+    private var menuOpen = false
+    private val menuCollapseHandler = Handler(Looper.getMainLooper())
+    private val menuCollapseRunnable = Runnable { hideMenu() }
+    /** Table-lock state on the previous update() (v1.0.69): the
+     * bubble position self-heals on the false → true transition. */
+    private var wasTableLocked = false
+    /** UI rects last published to the overlay bus (v1.0.69): the
+     * bus is written only when the rects changed, so the capture
+     * thread is not woken with identical lists every frame. */
+    private var lastPublishedUiRects: List<UiRect> = emptyList()
     private var framesWithoutGuideline = 0
     /** Shot-in-progress state (v1.0.37, REA hardening R1): hides the
      * lines while the aim is moving or a shot is in flight. */
@@ -407,6 +436,19 @@ class LineOverlayManager(
 
     fun update(result: DetectionResult) {
         ensureBubble()
+        // Bubble self-heal (v1.0.69, real-phone fix): a saved drag
+        // position can leave the bubble over the table (Jawad's test
+        // showed the old control bar across the table middle). When
+        // the table first locks, if the bubble overlaps the table
+        // rect on screen, move it to a corner that does not.
+        if (result.tableLocked && !wasTableLocked) healBubblePosition(result)
+        wasTableLocked = result.tableLocked
+        // UI exclusion (v1.0.69): publish the bubble + menu rects
+        // to the overlay bus so the detector can exclude its own UI.
+        // Runs after the self-heal, so a healed position is what
+        // gets published, and every frame, so a drag is picked up
+        // on the next frame. Writes only on change.
+        publishUiRects()
         // Lock ring (v1.0.5): fills as the table stabilises, green
         // once locked, empty while no table is detected. In EDIT mode
         // (v1.0.6) the shot is frozen, so the ring shows the neutral
@@ -839,18 +881,23 @@ class LineOverlayManager(
         )
     }
 
-    /** Group tags (v1.0.14): one small tag per detected ball, in the
-     * ball's own colour family (white for the cue and the 8-ball —
-     * black text would be unreadable on the dark tag backing — grey
-     * for an unknown group). The anchor sits 2.2 radii off the
-     * nearest drawn shot segment through the ball (or straight above
-     * it when no line passes through it), so a tag never sits on the
-     * line it sits next to. [segments] are screen coordinates, the
-     * same space as the drawn lines. */
+    /** Group tags (v1.0.14; v1.0.69 UNKNOWN suppression): one small
+     * tag per confidently classified ball, in the ball's own colour
+     * family (white for the cue and the 8-ball — black text would be
+     * unreadable on the dark tag backing — grey for an unknown
+     * group). Balls whose group is UNKNOWN draw NO tag at all: a
+     * "?" tag next to a ball the detector could not identify is
+     * noise, and a wrong tag is worse than no tag. The anchor sits
+     * 2.2 radii off the nearest drawn shot segment through the ball
+     * (or straight above it when no line passes through it), so a
+     * tag never sits on the line it sits next to. [segments] are
+     * screen coordinates, the same space as the drawn lines. */
     private fun groupTags(result: DetectionResult, segments: List<Segment>): List<DrawLabel> {
         val sx = result.scaleToScreenX
         val sy = result.scaleToScreenY
-        return result.balls.map { ball ->
+        return result.balls
+            .filter { it.group != BallGroup.UNKNOWN }
+            .map { ball -> {
             val center = Vec2(ball.center.x * sx, ball.center.y * sy)
             val radiusScreen = ball.radiusPx * sx
             val anchor = BallGroupTag.anchor(center, radiusScreen, segments)
@@ -1698,12 +1745,19 @@ class LineOverlayManager(
     }
 
     // ---- Control bubble (draggable, small footprint) ----
-    // Bubble behaviour (v1.0.5, Bloro lead): drag after 10 dp of
-    // movement; a tap (short, no drag) on the bubble background toggles
-    // the guides; on release after a drag the bubble edge-snaps and its
-    // position is saved. The ring at the left of the bubble shows the
+    // Bubble behaviour (v1.0.5, Bloro lead; v1.0.69 collapsed):
+    // the bubble itself is only the lock ring (+ the black-capture
+    // label when it applies) and a small "⋯" button. Drag after 10 dp
+    // of movement; a tap (short, no drag) on the bubble background
+    // toggles the guides; on release after a drag the bubble
+    // edge-snaps and its position is saved. The ring shows the
     // table-lock progress (Bloro's ring showed remaining paid minutes;
-    // ours has no credits, so the ring shows the lock instead).
+    // ours has no credits, so the ring shows the lock instead). The
+    // "⋯" button opens a separate menu window with Hide / Edit /
+    // Stop and the pot-rate label; the menu auto-collapses after 8 s
+    // idle, and the bubble self-heals off the table when the table
+    // first locks (healBubblePosition) — the old wide bar sat across
+    // the table middle on a real phone.
     private fun ensureBubble() {
         if (bubbleView != null) return
         val metrics = context.resources.displayMetrics
@@ -1733,11 +1787,11 @@ class LineOverlayManager(
         }
         lockRing = ring
         layout.addView(ring)
-        // "Capture blocked" status (v1.0.37, REA hardening R2): a small
-        // amber label that appears only while a black run persists past
-        // the threshold, so the user knows the game is hiding the
-        // table. GONE the rest of the time, so the bubble keeps its
-        // normal size.
+        // "Capture is black" status (v1.0.37, REA hardening R2;
+        // v1.0.69 wording): a small amber label that appears only
+        // while a pure-black run persists past the threshold, so the
+        // user knows the capture is black. GONE the rest of the
+        // time, so the bubble keeps its normal size.
         val blocked = TextView(context).apply {
             text = context.getString(R.string.bubble_capture_blocked)
             setTextColor(WARNING_COLOR)
@@ -1753,41 +1807,27 @@ class LineOverlayManager(
         }
         blockedStatusView = blocked
         layout.addView(blocked)
-        // Session pot-rate stat (v1.0.42, REA hardening R6): a small
-        // label that appears once the first shot of the session is
-        // taken, GONE before that, so the bubble keeps its normal
-        // size. Updated from update(), not from here.
-        val potRate = TextView(context).apply {
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+        // Menu button (v1.0.69): the collapsed bubble is only the
+        // ring (+ the black-capture label when it applies) and this
+        // small "⋯" button. Hide / Edit / Stop and the pot-rate
+        // label live in a separate menu window (buildMenuLayout)
+        // that opens below the bubble and auto-collapses after 8 s
+        // idle — the old wide bar with all three buttons sat across
+        // the table middle on a real phone.
+        val menuButton = Button(context).apply {
+            text = "⋯"
+            minWidth = 0
+            minimumWidth = 0
+            setPadding(12, 0, 12, 0)
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply {
                 gravity = Gravity.CENTER_VERTICAL
-                marginEnd = 8
             }
-            visibility = View.GONE
+            setOnClickListener { toggleMenu() }
         }
-        potRateView = potRate
-        layout.addView(potRate)
-        val hide = Button(context).apply {
-            text = if (store.guidesHidden) context.getString(R.string.show_guides)
-            else context.getString(R.string.hide_guides)
-            setOnClickListener { toggleGuidesHidden() }
-        }
-        hideButton = hide
-        val edit = Button(context).apply {
-            text = context.getString(R.string.edit_guides)
-            setOnClickListener { toggleEditMode() }
-        }
-        editButton = edit
-        val stop = Button(context).apply {
-            text = context.getString(R.string.stop)
-            setOnClickListener { onStopRequested() }
-        }
-        layout.addView(hide)
-        layout.addView(edit)
-        layout.addView(stop)
+        layout.addView(menuButton)
 
         // TOP|START so edge-snapping is plain left/right math. The
         // saved position wins; otherwise the bubble starts top-right.
@@ -1870,6 +1910,188 @@ class LineOverlayManager(
         bubbleParams = params
     }
 
+    /** The expanded bubble menu (v1.0.69): a small vertical window
+     * holding the controls that used to sit in the wide bubble bar —
+     * the session pot-rate label (v1.0.42) and the Hide / Edit /
+     * Stop buttons. Built once and reused; the label and button
+     * references are the same fields update() already drives. */
+    private fun buildMenuLayout(): LinearLayout {
+        val menu = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.argb(200, 0, 0, 0))
+            setPadding(8, 8, 8, 8)
+        }
+        val potRate = TextView(context).apply {
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            visibility = View.GONE
+        }
+        potRateView = potRate
+        menu.addView(potRate)
+        val hide = Button(context).apply {
+            text = if (store.guidesHidden) context.getString(R.string.show_guides)
+            else context.getString(R.string.hide_guides)
+            setOnClickListener {
+                toggleGuidesHidden()
+                hideMenu()
+            }
+        }
+        hideButton = hide
+        val edit = Button(context).apply {
+            text = context.getString(R.string.edit_guides)
+            setOnClickListener {
+                toggleEditMode()
+                hideMenu()
+            }
+        }
+        editButton = edit
+        val stop = Button(context).apply {
+            text = context.getString(R.string.stop)
+            setOnClickListener { onStopRequested() }
+        }
+        menu.addView(hide)
+        menu.addView(edit)
+        menu.addView(stop)
+        return menu
+    }
+
+    /** Open the bubble menu below the bubble (v1.0.69), clamped on
+     * screen; above the bubble when there is no room below. The menu
+     * auto-collapses after [BUBBLE_MENU_AUTO_COLLAPSE_MS] idle. */
+    private fun showMenu() {
+        val bubble = bubbleView ?: return
+        val bubbleP = bubbleParams ?: return
+        val menu = menuView ?: buildMenuLayout().also { menuView = it }
+        if (menu.parent != null) {
+            menuOpen = true
+            return
+        }
+        val metrics = context.resources.displayMetrics
+        val edgeMarginPx = TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_DIP, BUBBLE_EDGE_MARGIN_DP, metrics
+        ).toInt()
+        menu.measure(
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        )
+        val menuW = menu.measuredWidth
+        val menuH = menu.measuredHeight
+        val bubbleH = if (bubble.height > 0) bubble.height else bubble.measuredHeight
+        val x = bubbleP.x.coerceIn(
+            edgeMarginPx,
+            (metrics.widthPixels - menuW - edgeMarginPx).coerceAtLeast(edgeMarginPx)
+        )
+        var y = bubbleP.y + bubbleH + 8
+        if (y + menuH > metrics.heightPixels - edgeMarginPx) {
+            y = bubbleP.y - menuH - 8
+        }
+        val mParams = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            this.x = x
+            this.y = y.coerceAtLeast(edgeMarginPx)
+        }
+        menuParams = mParams
+        try {
+            windowManager.addView(menu, mParams)
+        } catch (_: Exception) {
+            return
+        }
+        menuOpen = true
+        menuCollapseHandler.removeCallbacks(menuCollapseRunnable)
+        menuCollapseHandler.postDelayed(menuCollapseRunnable, BUBBLE_MENU_AUTO_COLLAPSE_MS)
+    }
+
+    /** Close the bubble menu (v1.0.69), cancelling the auto-collapse
+     * timer. Safe to call when the menu is already closed. */
+    private fun hideMenu() {
+        menuCollapseHandler.removeCallbacks(menuCollapseRunnable)
+        val menu = menuView ?: return
+        if (menu.parent == null) {
+            menuOpen = false
+            return
+        }
+        try {
+            windowManager.removeView(menu)
+        } catch (_: Exception) {
+        }
+        menuOpen = false
+    }
+
+    private fun toggleMenu() {
+        if (menuOpen) hideMenu() else showMenu()
+    }
+
+    /** Bubble self-heal (v1.0.69, real-phone fix): when the table
+     * first locks, if the bubble overlaps the table rect on screen
+     * (a saved drag position can leave it there — the old bar sat
+     * across the table middle on Jawad's phone), move it to the
+     * first screen corner whose bubble rect clears the table. If
+     * every corner overlaps (the table covers nearly the whole
+     * screen), the top-right corner is the least-bad spot. The new
+     * position is saved, and an open menu closes with it. */
+    private fun healBubblePosition(result: DetectionResult) {
+        val table = result.table ?: return
+        val params = bubbleParams ?: return
+        val layout = bubbleView ?: return
+        val metrics = context.resources.displayMetrics
+        val edgeMarginPx = TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_DIP, BUBBLE_EDGE_MARGIN_DP, metrics
+        ).toInt()
+        val bubbleW = if (layout.width > 0) layout.width else layout.measuredWidth
+        val bubbleH = if (layout.height > 0) layout.height else layout.measuredHeight
+        if (bubbleW <= 0 || bubbleH <= 0) return
+        val sx = result.scaleToScreenX
+        val sy = result.scaleToScreenY
+        val xs = table.corners.map { it.x * sx }
+        val ys = table.corners.map { it.y * sy }
+        val tableLeft = xs.minOrNull() ?: return
+        val tableRight = xs.maxOrNull() ?: return
+        val tableTop = ys.minOrNull() ?: return
+        val tableBottom = ys.maxOrNull() ?: return
+        val overlaps = { x: Int, y: Int ->
+            val left = x.toDouble()
+            val right = left + bubbleW
+            val top = y.toDouble()
+            val bottom = top + bubbleH
+            left < tableRight && right > tableLeft &&
+                top < tableBottom && bottom > tableTop
+        }
+        val defaultYPx = TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_DIP, BUBBLE_DEFAULT_Y_DP, metrics
+        ).toInt()
+        val rightX = (metrics.widthPixels - bubbleW - edgeMarginPx).coerceAtLeast(edgeMarginPx)
+        val bottomY = (metrics.heightPixels - bubbleH - edgeMarginPx).coerceAtLeast(edgeMarginPx)
+        val candidates = listOf(
+            rightX to defaultYPx,
+            edgeMarginPx to defaultYPx,
+            rightX to bottomY,
+            edgeMarginPx to bottomY
+        )
+        val current = params.x to params.y
+        if (!overlaps(current.first, current.second)) return
+        val (newX, newY) = candidates.firstOrNull { !overlaps(it.first, it.second) }
+            ?: (rightX to defaultYPx)
+        params.x = newX
+        params.y = newY
+        try {
+            windowManager.updateViewLayout(layout, params)
+        } catch (_: Exception) {
+        }
+        store.bubbleX = params.x
+        store.bubbleY = params.y
+        hideMenu()
+    }
+
     fun removeAll() {
         smoother.reset()
         aimTracker.reset()
@@ -1878,6 +2100,7 @@ class LineOverlayManager(
         removeLabelWindows()
         removeTagWindows()
         removeHandles()
+        hideMenu()
         bubbleView?.let {
             try {
                 windowManager.removeView(it)
@@ -1892,7 +2115,58 @@ class LineOverlayManager(
         lastPotRateText = null
         hideButton = null
         editButton = null
+        menuView = null
+        menuParams = null
+        menuOpen = false
+        wasTableLocked = false
+        // UI exclusion (v1.0.69): no UI, no rects — the detector
+        // stops excluding and the bus holds nothing stale.
+        lastPublishedUiRects = emptyList()
+        OverlayBus.uiRectsScreen = emptyList()
         framesWithoutGuideline = 0
         lastResult = null
+    }
+
+    /** Publish the bubble + menu rects (screen pixels) to the
+     * overlay bus for the detector-side UI exclusion (v1.0.69,
+     * real-phone fix): without it the detector sees its own white
+     * buttons as balls and their bright edges as guideline
+     * segments. The bubble rect is its WindowManager position plus
+     * its measured size (width/height once laid out, measured size
+     * before that); the menu rect is published only while the menu
+     * is open. Writes only when the rects changed, so the capture
+     * thread is not handed identical lists every frame. */
+    private fun publishUiRects() {
+        val rects = mutableListOf<UiRect>()
+        val layout = bubbleView
+        val params = bubbleParams
+        if (layout != null && params != null) {
+            val w = if (layout.width > 0) layout.width else layout.measuredWidth
+            val h = if (layout.height > 0) layout.height else layout.measuredHeight
+            if (w > 0 && h > 0) {
+                rects += UiRect(
+                    params.x.toDouble(), params.y.toDouble(),
+                    (params.x + w).toDouble(), (params.y + h).toDouble()
+                )
+            }
+        }
+        if (menuOpen) {
+            val menu = menuView
+            val mParams = menuParams
+            if (menu != null && mParams != null) {
+                val w = if (menu.width > 0) menu.width else menu.measuredWidth
+                val h = if (menu.height > 0) menu.height else menu.measuredHeight
+                if (w > 0 && h > 0) {
+                    rects += UiRect(
+                        mParams.x.toDouble(), mParams.y.toDouble(),
+                        (mParams.x + w).toDouble(), (mParams.y + h).toDouble()
+                    )
+                }
+            }
+        }
+        if (rects != lastPublishedUiRects) {
+            lastPublishedUiRects = rects
+            OverlayBus.uiRectsScreen = rects
+        }
     }
 }

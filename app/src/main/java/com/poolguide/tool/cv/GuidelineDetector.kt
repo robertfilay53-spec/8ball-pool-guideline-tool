@@ -1,6 +1,7 @@
 package com.poolguide.tool.cv
 
 import com.poolguide.tool.geometry.Segment
+import com.poolguide.tool.geometry.UiRect
 import com.poolguide.tool.geometry.Vec2
 import org.opencv.core.Core
 import org.opencv.core.CvType
@@ -14,6 +15,7 @@ import kotlin.math.acos
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.floor
+import kotlin.math.hypot
 import kotlin.math.sin
 import kotlin.math.sqrt
 
@@ -56,8 +58,18 @@ class GuidelineDetector {
     /** Tracked segments with their fade alpha. */
     private var tracked = mutableListOf<GuidelineSegment>()
 
-    /** Detect the guideline in [grayRoi]. Returns the tracked segments. */
-    fun detect(grayRoi: Mat): List<GuidelineSegment> {
+    /** Detect the guideline in [grayRoi] (edges) with its HSV twin
+     * [hsvRoi] (whiteness) and the felt's mean HSV [feltHsv] (the
+     * felt-relative V floor). [exclusionRects] are UI rectangles in
+     * ROI coordinates whose lines must not be reported (the tool's
+     * own overlay, whose bright edges would otherwise verify as
+     * guideline segments). Returns the tracked segments. */
+    fun detect(
+        grayRoi: Mat,
+        hsvRoi: Mat? = null,
+        feltHsv: DoubleArray? = null,
+        exclusionRects: List<UiRect> = emptyList()
+    ): List<GuidelineSegment> {
         if (grayRoi.empty()) return tracked
 
         // v1.0.32: GaussianBlur 5x5 replaces the bilateral filter
@@ -78,9 +90,9 @@ class GuidelineDetector {
 
         // Main pass (aim-master params). The short-line Hough only runs
         // when nothing verifies — it produces ~150 junk candidates a frame.
-        var verified = verifyLines(collectLines(houghMain()), edges)
+        var verified = verifyLines(collectLines(houghMain()), edges, hsvRoi, feltHsv, exclusionRects)
         if (verified.isEmpty()) {
-            verified = verifyLines(collectLines(houghShort()), edges)
+            verified = verifyLines(collectLines(houghShort()), edges, hsvRoi, feltHsv, exclusionRects)
         }
 
         // LineTracker: match against tracked segments, fade the rest.
@@ -140,7 +152,78 @@ class GuidelineDetector {
      * the same white line are dropped BEFORE the top-3 take, so the
      * freed slot goes to the next distinct segment.
      */
-    private fun verifyLines(candidates: List<Segment>, edgeMat: Mat): List<Segment> {
+    /**
+     * Whiteness of one candidate segment (v1.0.69, real-phone fix):
+     * fraction of samples along the segment that read WHITE in HSV —
+     * saturation below [CvConfig.GUIDELINE_WHITE_MAX_S] and V above
+     * the felt's V by [CvConfig.GUIDELINE_WHITE_V_ABOVE_FELT]
+     * (no absolute minimum: at 0.3x light the guideline is V ~76
+     * against felt V ~41, and the ball classifier's 90 absolute
+     * floor would reject it; no felt measured -> 90). The game's
+     * guideline is achromatic white (S ~0, V ~230 at 1.0x, ~153 at
+     * 0.6x, ~76 at 0.3x); a rail/cushion boundary is saturated
+     * colour (felt S ~150, cushion S ~130-170) or dark, so it never
+     * reads white. S < 100 (not 60): a blurred guideline mixes white
+     * with the green felt and reads S ~81 — the felt (S ~170) and
+     * cushion (S ~130) still fail 100. An absolute grey cut cannot
+     * do this: at 0.6x light the white guideline is grey ~153, below
+     * any grey cut that still rejects a bright rail. Samples every
+     * integer perpendicular offset out to +-4 px (the Hough segment
+     * can sit on the guideline's black outline, up to ~3 px off the
+     * white centre; a 1 px line's centre is 1 px off its Canny edge).
+     * [hsv] is the ROI HSV mat, same coordinates as the candidates.
+     * A null HSV mat (older call sites) reads no whiteness.
+     */
+    private fun whiteFraction(segment: Segment, hsv: Mat?, feltHsv: DoubleArray?): Double {
+        if (hsv == null || hsv.empty()) return 0.0
+        val dx = segment.end.x - segment.start.x
+        val dy = segment.end.y - segment.start.y
+        val length = hypot(dx, dy)
+        if (length < 1.0) return 0.0
+        val ux = dx / length
+        val uy = dy / length
+        // Perpendicular unit vector.
+        val px = -uy
+        val py = ux
+        var samples = 0
+        var white = 0
+        val steps = maxOf(1, (length / 2.0).toInt())
+        // Felt-relative V floor, no absolute minimum (see above).
+        val vFloor = if (feltHsv != null && feltHsv.size >= 3) {
+            feltHsv[2] + CvConfig.GUIDELINE_WHITE_V_ABOVE_FELT
+        } else {
+            90.0
+        }
+        val perp = CvConfig.GUIDELINE_WHITE_PERP_PX.toInt()
+        for (i in 0..steps) {
+            val t = i.toDouble() / steps
+            val cx = segment.start.x + dx * t
+            val cy = segment.start.y + dy * t
+            var isWhite = false
+            for (off in -perp..perp) {
+                val sx = (cx + px * off).toInt().coerceIn(0, hsv.cols() - 1)
+                val sy = (cy + py * off).toInt().coerceIn(0, hsv.rows() - 1)
+                val v = hsv.get(sy, sx)
+                if (v != null && v.size >= 3) {
+                    val s = v[1]
+                    val vv = v[2]
+                    if (s < CvConfig.GUIDELINE_WHITE_MAX_S && vv > vFloor) {
+                        isWhite = true
+                        break
+                    }
+                }
+            }
+            samples++
+            if (isWhite) white++
+        }
+        return if (samples > 0) white.toDouble() / samples else 0.0
+    }
+
+    private fun verifyLines(
+        candidates: List<Segment>, edgeMat: Mat,
+        hsvRoi: Mat?, feltHsv: DoubleArray?,
+        exclusionRects: List<UiRect> = emptyList()
+    ): List<Segment> {
         if (candidates.isEmpty()) return emptyList()
         Core.findNonZero(edgeMat, edgePoints)
         val count = edgePoints.rows()
@@ -166,12 +249,30 @@ class GuidelineDetector {
             .map { seg -> seg to inlierPoints(seg, grid.nearby(seg)) }
             .filter { (_, inliers) -> inliers.size > CvConfig.VERIFY_MIN_INLIERS }
             .sortedByDescending { (_, inliers) -> inliers.size }
+        // v1.0.69: whiteness filter, BEFORE dedup + the top-3 take.
+        // A rail/cushion boundary is the strongest edge in the ROI
+        // (a 400 px bottom rail out-votes the real 2 px guideline on
+        // inlier count alone), and without this filter it consumes a
+        // slot and wins the cue pick. Rail lines are strong edges
+        // but not white, so they drop here; the real white guideline
+        // (fraction ~0.9) passes.
+        val whiteScored = scored.filter {
+            whiteFraction(it.first, hsvRoi, feltHsv) >= CvConfig.GUIDELINE_WHITE_MIN_FRACTION
+        }
+        // v1.0.69: UI exclusion — drop a segment whose BOTH endpoints
+        // sit inside one exclusion rect (the tool's own overlay,
+        // whose bright button edges would otherwise verify as
+        // guideline segments). A real guideline merely crossing a
+        // rect is kept: only segments fully inside a rect drop.
+        val uiFiltered = whiteScored.filter { (seg, _) ->
+            exclusionRects.none { it.containsSegment(seg.start, seg.end) }
+        }
         // v1.0.39: drop a segment when an already-kept (higher-inlier)
         // segment is the same white line's other edge. Dedup runs
         // BEFORE the top-3 take, so the freed slot goes to the next
         // distinct segment instead of being wasted on a duplicate edge.
         val kept = mutableListOf<Pair<Segment, List<Point>>>()
-        for (entry in scored) {
+        for (entry in uiFiltered) {
             if (kept.none { (keptSeg, _) -> isParallelDuplicate(keptSeg, entry.first) }) {
                 kept += entry
             }

@@ -38,11 +38,14 @@ object CuePicker {
      * A white ball counts as on the guideline ray only this close to
      * its line (px, working resolution). The real cue's centre sits
      * ~1-3 px off the detected midline (midline error ~2 px + centre
-     * error ~1 px); the a09 phantom sits 79 px off it. 20 px admits
+     * error ~1 px); the a09 phantom sits 79 px off it. 12 px admits
      * the real cue with a wide margin and excludes the phantom by
-     * 4x. Judgement call, pinned by CuePickerTest.
+     * 6x (was 20 px, v1.0.69, real-phone fix: the loose gate let a
+     * misdetected white blob win the ray score off a rail line the
+     * verifier had wrongly returned as the guideline). Judgement
+     * call, pinned by CuePickerTest.
      */
-    const val RAY_PERP_GATE_PX = 20.0
+    const val RAY_PERP_GATE_PX = 12.0
 
     /** The cue ball in [balls], or null when no ball qualifies. */
     fun pickCue(

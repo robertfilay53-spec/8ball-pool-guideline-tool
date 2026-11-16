@@ -2,6 +2,7 @@ package com.poolguide.tool.cv
 
 import com.poolguide.tool.geometry.BallGroup
 import com.poolguide.tool.geometry.BallGroupClassifier
+import com.poolguide.tool.geometry.UiRect
 import com.poolguide.tool.geometry.Vec2
 import org.opencv.core.Core
 import org.opencv.core.Mat
@@ -146,6 +147,11 @@ class BallDetector {
      * is the felt's mean HSV (from the table detector) for the adaptive
      * green/blue windows; [pocketRadiusPx] is the pocket radius at the
      * working resolution for the disc-overlap exclusion.
+     * [exclusionRects] are the tool's own UI rectangles in working
+     * coordinates (the floating control bubble and its menu): a ball
+     * whose centre is inside one is the overlay itself, never a real
+     * ball — the real-phone failure had the control bar's white
+     * buttons detected as white balls and one picked as the cue ball.
      *
      * v1.0.36: the expensive passes (inRange + findContours per colour,
      * HoughCircles) run on the table ROI only ([tableRoi]). The ROI is
@@ -160,7 +166,8 @@ class BallDetector {
     fun detect(
         hsv: Mat, gray: Mat, table: TableRect?, pockets: List<Vec2> = emptyList(),
         runHough: Boolean, frameIndex: Long,
-        feltHsv: DoubleArray? = null, pocketRadiusPx: Double = 12.0
+        feltHsv: DoubleArray? = null, pocketRadiusPx: Double = 12.0,
+        exclusionRects: List<UiRect> = emptyList()
     ): List<Ball> {
         val roi = tableRoi(table, hsv.cols(), hsv.rows())
         val hsvRoi = if (roi != null) hsv.submat(roi) else hsv
@@ -168,7 +175,7 @@ class BallDetector {
         val ox = roi?.x?.toDouble() ?: 0.0
         val oy = roi?.y?.toDouble() ?: 0.0
         try {
-            return detectCropped(hsv, hsvRoi, grayRoi, ox, oy, table, pockets, runHough, frameIndex, feltHsv, pocketRadiusPx)
+            return detectCropped(hsv, hsvRoi, grayRoi, ox, oy, table, pockets, runHough, frameIndex, feltHsv, pocketRadiusPx, exclusionRects)
         } finally {
             // Only the submat views are released here: when the ROI
             // fell back to the full frame, hsvRoi/grayRoi ARE the
@@ -189,9 +196,22 @@ class BallDetector {
         hsv: Mat, hsvRoi: Mat, grayRoi: Mat, ox: Double, oy: Double,
         table: TableRect?, pockets: List<Vec2>,
         runHough: Boolean, frameIndex: Long,
-        feltHsv: DoubleArray?, pocketRadiusPx: Double
+        feltHsv: DoubleArray?, pocketRadiusPx: Double,
+        exclusionRects: List<UiRect> = emptyList()
     ): List<Ball> {
         val found = mutableListOf<Ball>()
+        // v1.0.69: contour-path radius cap, table-relative — a real
+        // ball is ~2.2% of the table width across, so 4% is generous
+        // and still excludes the tool's own white control buttons
+        // (a button over the table fits a 24 px circle and was once
+        // detected, and picked, as a ball). HoughCircles already caps
+        // at 18 px, so only the contour path needs this.
+        val contourMaxRadiusPx = table?.let {
+            maxOf(
+                CvConfig.HOUGH_CIRCLES_MAX_RADIUS.toDouble(),
+                it.width * CvConfig.BALL_MAX_RADIUS_TABLE_FRACTION
+            )
+        } ?: CvConfig.BALL_MAX_RADIUS_PX
 
         for ((color, lower, upper) in colorWindows(feltHsv)) {
             Core.inRange(hsvRoi, Scalar(lower), Scalar(upper), mask)
@@ -205,12 +225,17 @@ class BallDetector {
                 val radius = FloatArray(1)
                 Imgproc.minEnclosingCircle(MatOfPoint2f(*contour.toArray()), center, radius)
                 val r = radius[0].toDouble()
-                if (r < CvConfig.BALL_MIN_RADIUS_PX || r > CvConfig.BALL_MAX_RADIUS_PX) continue
+                if (r < CvConfig.BALL_MIN_RADIUS_PX || r > contourMaxRadiusPx) continue
                 val area = Imgproc.contourArea(contour)
                 if (area / (PI * r * r) < CvConfig.BALL_MIN_CIRCULARITY) continue
                 val c = Vec2(center.x + ox, center.y + oy)
                 if (table != null && !insideTable(c, table)) continue
                 if (isPocket(c, r, pockets, pocketRadiusPx)) continue
+                // v1.0.69: UI exclusion — a centre inside one of the
+                // tool's own UI rects is the overlay itself, never a
+                // real ball (the control bar's white buttons were once
+                // detected, and picked, as white balls).
+                if (exclusionRects.any { it.contains(c) }) continue
                 if (found.any { it.center.distanceTo(c) < CvConfig.BALL_DEDUP_DIST_PX }) continue
                 found += Ball(0, c, r, color, isStripeAt(hsv, c, color, feltHsv))
             }
@@ -242,13 +267,79 @@ class BallDetector {
                 if (r < CvConfig.BALL_MIN_RADIUS_PX || r > CvConfig.BALL_MAX_RADIUS_PX) continue
                 if (table != null && !insideTable(c, table)) continue
                 if (isPocket(c, r, pockets, pocketRadiusPx)) continue
+                if (exclusionRects.any { it.contains(c) }) continue
                 if (found.any { it.center.distanceTo(c) < CvConfig.BALL_DEDUP_DIST_PX }) continue
                 val color = colorAt(hsv, c, feltHsv)
                 found += Ball(0, c, r, color, isStripeAt(hsv, c, color, feltHsv))
             }
         }
 
-        return track(classifyGroups(hsv, found, feltHsv), frameIndex)
+        val classified = classifyGroups(hsv, found, feltHsv)
+        // v1.0.69: cue rescue — when no ball classified CUE the real
+        // cue ball was missed (cream, split by the guideline, touched
+        // by the stick). A low-threshold Hough pass finds its circle;
+        // only discs that classify CUE are kept.
+        val withRescue = if (classified.none { it.group == BallGroup.CUE }) {
+            val rescued = rescueCue(hsv, grayRoi, ox, oy, table, pockets, feltHsv, pocketRadiusPx, found, exclusionRects)
+            if (rescued.isEmpty()) classified
+            else classified + classifyGroups(hsv, rescued, feltHsv)
+                .filter { it.group == BallGroup.CUE }
+        } else {
+            classified
+        }
+        return track(withRescue, frameIndex)
+    }
+
+    /**
+     * Cue rescue (v1.0.69, real-phone fix): a second HoughCircles
+     * pass at [CvConfig.HOUGH_CIRCLES_RESCUE_PARAM2] (8) for the
+     * cream cue ball the main passes miss. Only circles whose disc
+     * classifies CUE (cream rule included) are returned, so the low
+     * threshold cannot flood the ball list with the false circles it
+     * finds elsewhere. Runs only when the caller found no CUE ball.
+     * [found] is the already-detected list, for dedup.
+     */
+    private fun rescueCue(
+        hsv: Mat, grayRoi: Mat, ox: Double, oy: Double,
+        table: TableRect?, pockets: List<Vec2>,
+        feltHsv: DoubleArray?, pocketRadiusPx: Double,
+        found: List<Ball>,
+        exclusionRects: List<UiRect> = emptyList()
+    ): List<Ball> {
+        val houghSrc = if (CvConfig.MEDIAN_BLUR_KSIZE <= 0) {
+            grayRoi
+        } else {
+            Imgproc.medianBlur(grayRoi, grayBlurred, CvConfig.MEDIAN_BLUR_KSIZE)
+            grayBlurred
+        }
+        Imgproc.HoughCircles(
+            houghSrc, circles, Imgproc.HOUGH_GRADIENT,
+            CvConfig.HOUGH_CIRCLES_DP,
+            CvConfig.HOUGH_CIRCLES_MIN_DIST,
+            CvConfig.HOUGH_CIRCLES_PARAM1,
+            CvConfig.HOUGH_CIRCLES_RESCUE_PARAM2,
+            CvConfig.HOUGH_CIRCLES_MIN_RADIUS,
+            CvConfig.HOUGH_CIRCLES_MAX_RADIUS
+        )
+        val out = mutableListOf<Ball>()
+        for (i in 0 until circles.cols()) {
+            val v = circles.get(0, i) ?: continue
+            if (v.size < 3) continue
+            val c = Vec2(v[0] + ox, v[1] + oy)
+            val r = v[2]
+            if (r < CvConfig.BALL_MIN_RADIUS_PX || r > CvConfig.HOUGH_CIRCLES_MAX_RADIUS) continue
+            if (table != null && !insideTable(c, table)) continue
+            if (isPocket(c, r, pockets, pocketRadiusPx)) continue
+            if (exclusionRects.any { it.contains(c) }) continue
+            if (found.any { it.center.distanceTo(c) < CvConfig.BALL_DEDUP_DIST_PX }) continue
+            if (out.any { it.center.distanceTo(c) < CvConfig.BALL_DEDUP_DIST_PX }) continue
+            // The disc test is what makes the low threshold safe:
+            // keep only circles that read as a cue ball.
+            val stats = BallClassifier.sampleDisc(hsv, c, r, feltHsv)
+            if (BallGroupClassifier.classify(stats) != BallGroup.CUE) continue
+            out += Ball(0, c, r, BallColor.WHITE, false, BallGroup.CUE)
+        }
+        return out
     }
 
     /**

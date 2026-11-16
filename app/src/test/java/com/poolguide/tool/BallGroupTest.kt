@@ -28,8 +28,18 @@ class BallGroupTest {
         meanV: Double,
         meanS: Double,
         sampledPx: Int = 46,
-        expectedPx: Int = 46
-    ) = DiscStats(whiteFraction, meanV, meanS, sampledPx, expectedPx)
+        expectedPx: Int = 46,
+        // v1.0.69: saturated-colour fraction of the disc (S > 150).
+        // A stripe's caps read ~1 - whiteFraction; a cream cue reads
+        // ~0.00-0.11. Defaults 0.0 for the older cases that predate it.
+        coloredFraction: Double = 0.0,
+        // v1.0.69: max per-sector saturated-colour fraction. A
+        // stripe's caps live in one sector (the a09 blue stripe
+        // reads 0.56 at its detected radius); a cream cue's disc is
+        // cream in every sector (0.00-0.10 at its detected radius).
+        // Defaults 0.0 for the older cases that predate it.
+        maxSectorColoredFraction: Double = 0.0
+    ) = DiscStats(whiteFraction, meanV, meanS, sampledPx, expectedPx, coloredFraction, maxSectorColoredFraction)
 
     // ---- Classification: measured harness stats ----
 
@@ -42,8 +52,13 @@ class BallGroupTest {
 
     @Test
     fun classify_stripeBall_measuredRange() {
-        assertEquals(BallGroup.STRIPE, BallGroupClassifier.classify(stats(0.651, 237.0, 69.7)))
-        assertEquals(BallGroup.STRIPE, BallGroupClassifier.classify(stats(0.791, 247.7, 50.8)))
+        // v1.0.69: the coloured fraction is pinned too — a stripe's
+        // caps are saturated colour (~1 - white fraction), which is
+        // what keeps it a stripe under the cream-cue rule. The caps
+        // also colour one sector (max sector 0.56-0.80), so the
+        // sector test agrees.
+        assertEquals(BallGroup.STRIPE, BallGroupClassifier.classify(stats(0.651, 237.0, 69.7, coloredFraction = 0.35, maxSectorColoredFraction = 0.80)))
+        assertEquals(BallGroup.STRIPE, BallGroupClassifier.classify(stats(0.791, 247.7, 50.8, coloredFraction = 0.21, maxSectorColoredFraction = 0.70)))
     }
 
     @Test
@@ -71,9 +86,12 @@ class BallGroupTest {
     @Test
     fun classify_stripeVsAmbiguousBoundary() {
         // 0.20 is the stripe floor: at it, stripe; just below it,
-        // the ambiguous middle — UNKNOWN, never guessed.
-        assertEquals(BallGroup.STRIPE, BallGroupClassifier.classify(stats(0.20, 200.0, 100.0)))
-        assertEquals(BallGroup.UNKNOWN, BallGroupClassifier.classify(stats(0.19, 200.0, 100.0)))
+        // the ambiguous middle — UNKNOWN, never guessed. v1.0.69: a
+        // stripe at the floor still shows its saturated caps
+        // (coloured ~0.80), which is what keeps it out of the
+        // cream-cue rule.
+        assertEquals(BallGroup.STRIPE, BallGroupClassifier.classify(stats(0.20, 200.0, 100.0, coloredFraction = 0.80)))
+        assertEquals(BallGroup.UNKNOWN, BallGroupClassifier.classify(stats(0.19, 200.0, 100.0, coloredFraction = 0.81)))
     }
 
     @Test
@@ -191,5 +209,72 @@ class BallGroupTest {
             Vec2(200.0, 80.2),
             BallGroupTag.anchor(Vec2(200.0, 100.0), 9.0, listOf(far))
         )
+    }
+
+    // ---- Cream cue ball (v1.0.69, real-phone fix) ----
+
+    @Test
+    fun classify_creamCueBall_realPhoneMeasured() {
+        // Jawad's real frame, cue ball at (412, 252), sampled at
+        // radii 8/9/10 px: white 0.73/0.56/0.44, coloured
+        // 0.00/0.05/0.11, mean S 27/45/66, mean V 188/179/165, max
+        // sector 0.00/0.10/0.38. The pure-white rule misses it; the
+        // cream rule must not.
+        assertEquals(BallGroup.CUE, BallGroupClassifier.classify(stats(0.73, 188.0, 27.0, coloredFraction = 0.00, maxSectorColoredFraction = 0.00)))
+        assertEquals(BallGroup.CUE, BallGroupClassifier.classify(stats(0.56, 179.0, 45.0, coloredFraction = 0.05, maxSectorColoredFraction = 0.10)))
+        assertEquals(BallGroup.CUE, BallGroupClassifier.classify(stats(0.44, 165.0, 66.0, coloredFraction = 0.11, maxSectorColoredFraction = 0.38)))
+    }
+
+    @Test
+    fun classify_creamCueBall_stripeWithLowColoredButHighSectorStaysStripe() {
+        // The a09 blue stripe in the cluster: its white band is so
+        // wide that its overall coloured fraction is only 0.11
+        // (under the 0.15 ceiling), so the aggregate test alone
+        // would call it a cream cue. Its caps still colour one
+        // sector (max sector 0.56), so the sector test keeps it a
+        // stripe. This is the a09 regression: without the sector
+        // test the stripe won group-first over the real (occluded)
+        // cue ball.
+        assertEquals(BallGroup.STRIPE, BallGroupClassifier.classify(stats(0.78, 241.0, 31.0, coloredFraction = 0.11, maxSectorColoredFraction = 0.56)))
+    }
+
+    @Test
+    fun classify_creamCueBall_sectorBoundary() {
+        // Sector cap: max sector 0.40 passes (cue), 0.41 does not
+        // (stripe) — with the overall coloured fraction under the
+        // ceiling in both cases, so only the sector decides.
+        assertEquals(BallGroup.CUE, BallGroupClassifier.classify(stats(0.50, 170.0, 40.0, coloredFraction = 0.10, maxSectorColoredFraction = 0.40)))
+        assertEquals(BallGroup.STRIPE, BallGroupClassifier.classify(stats(0.50, 170.0, 40.0, coloredFraction = 0.10, maxSectorColoredFraction = 0.41)))
+    }
+
+    @Test
+    fun classify_creamCueBall_stripeWithBigBandStaysStripe() {
+        // A stripe with a big white band still shows its saturated
+        // caps (coloured ~0.21-0.35), so it stays a stripe even
+        // though its white fraction sits in the cream range.
+        assertEquals(BallGroup.STRIPE, BallGroupClassifier.classify(stats(0.70, 200.0, 60.0, coloredFraction = 0.25)))
+        assertEquals(BallGroup.STRIPE, BallGroupClassifier.classify(stats(0.79, 247.7, 50.8, coloredFraction = 0.21)))
+    }
+
+    @Test
+    fun classify_creamCueBall_pureWhiteFragmentIsNotCream() {
+        // A white UI fragment (mean S ~5, almost no saturation) is
+        // not cream — the cream rule needs a warm mean S, so the
+        // fragment is not picked as the cue ball.
+        assertEquals(BallGroup.STRIPE, BallGroupClassifier.classify(stats(0.83, 187.0, 5.0, coloredFraction = 0.00)))
+    }
+
+    @Test
+    fun classify_creamCueBall_boundaries() {
+        // Cream floor: white 0.20 with no saturated colour, warm and
+        // bright, is a cue; white 0.19 is not.
+        assertEquals(BallGroup.CUE, BallGroupClassifier.classify(stats(0.20, 150.0, 20.0, coloredFraction = 0.10)))
+        assertEquals(BallGroup.UNKNOWN, BallGroupClassifier.classify(stats(0.19, 150.0, 20.0, coloredFraction = 0.10)))
+        // Coloured ceiling: coloured 0.15 passes, 0.16 does not.
+        assertEquals(BallGroup.CUE, BallGroupClassifier.classify(stats(0.50, 170.0, 40.0, coloredFraction = 0.15)))
+        assertEquals(BallGroup.STRIPE, BallGroupClassifier.classify(stats(0.50, 170.0, 40.0, coloredFraction = 0.16)))
+        // Brightness floor: mean V 140 passes, 139 does not.
+        assertEquals(BallGroup.CUE, BallGroupClassifier.classify(stats(0.50, 140.0, 40.0, coloredFraction = 0.10)))
+        assertEquals(BallGroup.STRIPE, BallGroupClassifier.classify(stats(0.50, 139.0, 40.0, coloredFraction = 0.10)))
     }
 }

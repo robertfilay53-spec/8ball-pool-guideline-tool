@@ -4,6 +4,7 @@ import com.poolguide.tool.data.GameProfile
 import com.poolguide.tool.geometry.PathBlock
 import com.poolguide.tool.geometry.Segment
 import com.poolguide.tool.geometry.ShotSolver
+import com.poolguide.tool.geometry.UiRect
 import com.poolguide.tool.geometry.Vec2
 import org.opencv.android.OpenCVLoader
 import org.opencv.core.Core
@@ -101,6 +102,27 @@ class CvPipeline(
         screenHeight = height
     }
 
+    /** The tool's own UI rectangles in WORKING coordinates (the
+     * floating control bubble and its menu), for the detector-side
+     * exclusion (v1.0.69, real-phone fix): the overlay's white
+     * buttons and bright edges must not be detected as balls or
+     * guideline segments. Written by the capture service from the
+     * overlay bus, in screen coordinates, via
+     * [setUiExclusionRectsScreen]; converted here to working coords
+     * (the working frame is the screen frame downscaled to 720
+     * wide, aspect preserved). Empty until the service publishes
+     * its first rects — the detectors treat an empty list as "no
+     * exclusion", so old call sites keep working. */
+    private var uiExclusionRects: List<UiRect> = emptyList()
+
+    fun setUiExclusionRectsScreen(screenRects: List<UiRect>) {
+        val sx = workingWidth.toDouble() / screenWidth.coerceAtLeast(1)
+        val sy = workingHeight.toDouble() / screenHeight.coerceAtLeast(1)
+        uiExclusionRects = screenRects.map { r ->
+            UiRect(r.left * sx, r.top * sy, r.right * sx, r.bottom * sy)
+        }
+    }
+
     fun reset() {
         table = null
         tableIsFallback = false
@@ -177,7 +199,7 @@ class CvPipeline(
         } else {
             ballDetector.detect(
                 hsv, gray, table, table?.pockets(gameProfile) ?: emptyList(), runHough, frameIndex,
-                tableDetector.feltHsvMean, pocketRadiusPx
+                tableDetector.feltHsvMean, pocketRadiusPx, uiExclusionRects
             )
         }
         // Guideline: detect every 3rd frame inside the table ROI; between
@@ -272,8 +294,20 @@ class CvPipeline(
         val y1 = ys.max().toInt().coerceIn(1, workingHeight)
         if (x1 - x0 < 50 || y1 - y0 < 50) return emptyList()
         val roi = gray.submat(Rect(x0, y0, x1 - x0, y1 - y0))
-        val found = guidelineDetector.detect(roi)
+        val hsvRoi = hsv.submat(Rect(x0, y0, x1 - x0, y1 - y0))
+        // v1.0.69: translate the working-coord UI exclusion rects
+        // into ROI coords for the guideline detector; a rect that
+        // does not intersect the ROI drops out of the list.
+        val roiRects = uiExclusionRects.mapNotNull { r ->
+            val l = (r.left - x0).coerceAtLeast(0.0)
+            val tp = (r.top - y0).coerceAtLeast(0.0)
+            val rr = (r.right - x0).coerceAtMost((x1 - x0).toDouble())
+            val b = (r.bottom - y0).coerceAtMost((y1 - y0).toDouble())
+            if (rr <= l || b <= tp) null else UiRect(l, tp, rr, b)
+        }
+        val found = guidelineDetector.detect(roi, hsvRoi, tableDetector.feltHsvMean, roiRects)
         roi.release()
+        hsvRoi.release()
         // Translate ROI-relative coords to working coords.
         return found.map {
             val s = it.segment
