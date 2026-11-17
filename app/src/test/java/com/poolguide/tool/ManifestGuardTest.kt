@@ -33,13 +33,19 @@ class ManifestGuardTest {
         "BIND_ACCESSIBILITY_SERVICE"
     )
 
-    /** The full permission set the manifest is allowed to declare. */
+    /** The full permission set the manifest is allowed to declare.
+     * v1.0.71 adds REQUEST_IGNORE_BATTERY_OPTIMIZATIONS (a settings
+     * request, not a data permission — it opens the system screen
+     * that asks the user to exempt the app from battery optimisation,
+     * so Vivo/Funtouch cannot silently kill the overlay service
+     * mid-game; it adds no detection surface). */
     private val allowedPermissions = setOf(
         "SYSTEM_ALERT_WINDOW",
         "FOREGROUND_SERVICE",
         "FOREGROUND_SERVICE_MEDIA_PROJECTION",
         "FOREGROUND_SERVICE_SPECIAL_USE",
-        "POST_NOTIFICATIONS"
+        "POST_NOTIFICATIONS",
+        "REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"
     )
 
     private fun manifestDocument(): Element {

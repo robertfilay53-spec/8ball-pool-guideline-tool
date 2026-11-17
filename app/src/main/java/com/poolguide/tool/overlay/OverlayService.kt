@@ -98,11 +98,30 @@ class OverlayService : Service() {
                 startOverlay()
                 return START_STICKY
             }
+            // v1.0.71, Vivo survival: the system restarting a sticky
+            // service after the process was killed passes a null
+            // intent. The old code returned START_NOT_STICKY and
+            // restarted nothing, so a Vivo background kill left the
+            // bubble gone until the user reopened the app. A session
+            // that was never cleanly stopped is recovered here; a
+            // stopped one (or a fresh boot) is not.
+            null -> {
+                if (!::store.isInitialized) store = CalibrationStore(this)
+                if (com.poolguide.tool.capture.SessionRecovery
+                        .shouldRecoverSession(store.sessionActive, null)
+                ) {
+                    running = true
+                    demoMode = store.sessionDemo
+                    startOverlay(recovered = true)
+                    return START_STICKY
+                }
+                return START_NOT_STICKY
+            }
         }
         return START_NOT_STICKY
     }
 
-    private fun startOverlay() {
+    private fun startOverlay(recovered: Boolean = false) {
         // v1.0.35: attach the on-disk diagnostics sink before the
         // session starts (same file as CaptureService; the two
         // services starting together share one session).
@@ -120,15 +139,31 @@ class OverlayService : Service() {
         var step = "CalibrationStore"
         try {
             store = CalibrationStore(this)
+            // v1.0.71: a session is active from here until a clean
+            // stop clears it, so a null-intent restart after a kill
+            // can tell a live session from a stopped one.
+            store.sessionActive = true
+            store.sessionDemo = demoMode
             // Diagnostics session (v1.0.6). A second start while a session
             // is active is a no-op, so CaptureService starting at the
             // same time cannot wipe these first events.
             DiagnosticsLog.start()
+            if (recovered) {
+                DiagnosticsLog.record(
+                    DiagnosticsLog.Kind.SESSION_RESTARTED,
+                    "OverlayService restarted after process death, " +
+                        if (demoMode) "demo mode" else "live mode"
+                )
+            }
             step = "createNotificationChannel"
             createNotificationChannel()
             step = "buildNotification"
             val notif = buildNotification(
-                if (demoMode) "Demo mode — synthetic table" else "Guide overlay active"
+                when {
+                    recovered -> getString(R.string.notif_overlay_restored)
+                    demoMode -> "Demo mode — synthetic table"
+                    else -> "Guide overlay active"
+                }
             )
             step = "startForeground"
             if (Build.VERSION.SDK_INT >= 34) {
@@ -281,6 +316,16 @@ class OverlayService : Service() {
 
     private fun stopOverlay() {
         running = false
+        // v1.0.71: a clean stop clears the session, so a later
+        // null-intent restart does not resurrect a stopped session.
+        // Guarded: stopOverlay also runs from onDestroy on a service
+        // that never started, where the store was never created. A
+        // process kill never runs onDestroy, so a killed session
+        // keeps its flag and is recovered.
+        if (::store.isInitialized) {
+            store.sessionActive = false
+            store.sessionDemo = false
+        }
         DiagnosticsLog.end()
         OverlayBus.listener = null
         demoRunnable?.let { cvHandler?.removeCallbacks(it) }

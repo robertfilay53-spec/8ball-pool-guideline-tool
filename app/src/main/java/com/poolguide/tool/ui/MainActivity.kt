@@ -2,6 +2,7 @@ package com.poolguide.tool.ui
 
 import android.Manifest
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -9,6 +10,7 @@ import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
 import android.widget.Button
@@ -62,6 +64,13 @@ class MainActivity : AppCompatActivity() {
     private val overlayLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { onOverlayResult() }
+
+    /** v1.0.71: returns from the battery-optimisation exemption
+     * settings screen; continue the start flow either way (the
+     * exemption is best-effort, capture still works without it). */
+    private val batteryLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { checkNotificationsThenStart() }
 
     private val notificationsLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -266,15 +275,54 @@ class MainActivity : AppCompatActivity() {
             )
             overlayLauncher.launch(intent)
         } else {
-            checkNotificationsThenStart()
+            checkBatteryThenStart()
         }
     }
 
     private fun onOverlayResult() {
         if (Settings.canDrawOverlays(this)) {
-            checkNotificationsThenStart()
+            checkBatteryThenStart()
         } else {
             setStatus(getString(R.string.status_overlay_denied))
+        }
+    }
+
+    /** Battery-optimisation exemption (v1.0.71, Vivo survival):
+     * Funtouch OS kills background services aggressively, and a
+     * killed service is the most likely reason the bubble vanished
+     * on Jawad's Vivo Y03. Asked once, before the projection
+     * consent, so the exemption is in place before the session
+     * starts. "Not now" continues the flow — the exemption is
+     * best-effort, and the README carries the manual Vivo steps. */
+    private fun checkBatteryThenStart() {
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (Build.VERSION.SDK_INT >= 23 &&
+            !powerManager.isIgnoringBatteryOptimizations(packageName) &&
+            !store.batteryOptAsked
+        ) {
+            store.batteryOptAsked = true
+            AlertDialog.Builder(this)
+                .setTitle(R.string.battery_title)
+                .setMessage(R.string.battery_body)
+                .setPositiveButton(R.string.battery_allow) { _, _ ->
+                    try {
+                        batteryLauncher.launch(
+                            Intent(
+                                Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                                Uri.parse("package:$packageName")
+                            )
+                        )
+                    } catch (_: Exception) {
+                        checkNotificationsThenStart()
+                    }
+                }
+                .setNegativeButton(R.string.battery_later) { _, _ ->
+                    checkNotificationsThenStart()
+                }
+                .setCancelable(false)
+                .show()
+        } else {
+            checkNotificationsThenStart()
         }
     }
 
@@ -330,6 +378,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun stopCapture() {
+        // v1.0.71: the user stopped, so no session is active — a
+        // later null-intent restart must not resurrect it. (The
+        // services clear the same flags on their own clean stop.)
+        store.sessionActive = false
+        store.sessionDemo = false
         // The two services run as a pair: stop both, so the lines never
         // outlive the capture (and vice versa).
         // v1.0.68: starting a service can throw while the app is being

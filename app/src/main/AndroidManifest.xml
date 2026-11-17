@@ -22,6 +22,12 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <!-- Android 13+ : requested at runtime before starting capture -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- v1.0.71: REQUEST_IGNORE_BATTERY_OPTIMIZATIONS is a settings
+         request, not a data permission — it opens the system screen
+         that asks the user to exempt the app from battery
+         optimisation, so Vivo/Funtouch cannot silently kill the
+         overlay service mid-game. It adds no detection surface. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <application
         android:name=".PoolGuideApp"

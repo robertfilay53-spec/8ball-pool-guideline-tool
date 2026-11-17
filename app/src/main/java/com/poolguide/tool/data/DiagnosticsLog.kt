@@ -63,7 +63,31 @@ object DiagnosticsLog {
          * (getMediaProjection / createVirtualDisplay / CvPipeline
          * init). The detail names the failing call, so the next
          * cloud-emulator run can say what threw. */
-        CAPTURE_START_FAILED
+        CAPTURE_START_FAILED,
+        /** v1.0.71, Vivo survival: the system restarted a sticky
+         * service with a null intent after the process was killed,
+         * and a session was active, so the service resumed it. The
+         * detail names the service and the mode (live/demo). */
+        SESSION_RESTARTED,
+        /** v1.0.71, Vivo survival: a restarted capture service could
+         * not restore its MediaProjection token (tokens do not
+         * survive a process death), so capture waits for the user to
+         * tap Start again. The overlay bubble is left up. */
+        CAPTURE_TOKEN_LOST,
+        /** v1.0.71, Vivo survival: an overlay window operation
+         * (addView / updateViewLayout) threw. The detail names the
+         * operation and the exception; the service stays alive and
+         * the next frame retries the operation, instead of the throw
+         * killing the process. */
+        OVERLAY_WINDOW_FAILED,
+        /** v1.0.71: the virtual display was created (capture really
+         * started). The detail carries its size. */
+        CAPTURE_STARTED,
+        /** v1.0.71: the first frame was processed. The detail carries
+         * the working size, so the next phone test can prove capture
+         * flowed at all (a dead ImageReader leaves no trace without
+         * this). */
+        CAPTURE_FIRST_FRAME
     }
 
     /** One recorded event. [elapsedMs] is milliseconds since [start]. */

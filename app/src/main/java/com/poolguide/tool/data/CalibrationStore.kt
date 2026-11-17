@@ -26,6 +26,28 @@ class CalibrationStore(context: Context) {
         get() = prefs.getBoolean(KEY_GUIDES_HIDDEN, false)
         set(value) = prefs.edit().putBoolean(KEY_GUIDES_HIDDEN, value).apply()
 
+    /** A live/demo session is active (v1.0.71, Vivo survival): set when
+     * a session starts, cleared on every clean stop. The services read
+     * this on a null-intent restart (the system restarting a sticky
+     * service after the process was killed): a session that was never
+     * cleanly stopped is recovered, a stopped one is not. */
+    var sessionActive: Boolean
+        get() = prefs.getBoolean(KEY_SESSION_ACTIVE, false)
+        set(value) = prefs.edit().putBoolean(KEY_SESSION_ACTIVE, value).apply()
+
+    /** The active session is Demo mode (v1.0.71): the overlay recovery
+     * restarts the demo loop instead of live mode when this is set. */
+    var sessionDemo: Boolean
+        get() = prefs.getBoolean(KEY_SESSION_DEMO, false)
+        set(value) = prefs.edit().putBoolean(KEY_SESSION_DEMO, value).apply()
+
+    /** Battery-optimisation exemption asked once (v1.0.71): the dialog
+     * is shown at most once per install, so a declined answer is never
+     * nagged again; the README carries the manual Vivo steps. */
+    var batteryOptAsked: Boolean
+        get() = prefs.getBoolean(KEY_BATTERY_OPT_ASKED, false)
+        set(value) = prefs.edit().putBoolean(KEY_BATTERY_OPT_ASKED, value).apply()
+
     /** Draw one-rail bank and kick lines when no direct shot exists
      * (v1.0.13: also the two-rail bank/kick and combo/kiss fallback
      * lines — every family the live overlay draws after direct). */
@@ -192,6 +214,9 @@ class CalibrationStore(context: Context) {
         const val KEY_SHOW_ALL_SHOTS = "show_all_shots"
         const val KEY_BUBBLE_X = "bubble_x"
         const val KEY_BUBBLE_Y = "bubble_y"
+        const val KEY_SESSION_ACTIVE = "session_active"
+        const val KEY_SESSION_DEMO = "session_demo"
+        const val KEY_BATTERY_OPT_ASKED = "battery_opt_asked"
         const val KEY_PRESET_NAMES = "preset_names"
         const val DEFAULT_GAME_VERSION = "56.35.0"
     }
