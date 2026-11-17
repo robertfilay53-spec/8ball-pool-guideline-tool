@@ -19,7 +19,6 @@ import android.widget.TextView
 import android.widget.Toast
 import com.poolguide.tool.R
 import com.poolguide.tool.capture.OverlayBus
-import com.poolguide.tool.data.DiagnosticsLog
 import com.poolguide.tool.cv.Ball
 import com.poolguide.tool.cv.BallColor
 import com.poolguide.tool.cv.DetectionResult
