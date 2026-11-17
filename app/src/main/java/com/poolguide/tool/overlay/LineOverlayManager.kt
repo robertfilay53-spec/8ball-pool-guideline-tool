@@ -7,6 +7,7 @@ import android.graphics.PointF
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
@@ -18,6 +19,7 @@ import android.widget.TextView
 import android.widget.Toast
 import com.poolguide.tool.R
 import com.poolguide.tool.capture.OverlayBus
+import com.poolguide.tool.data.DiagnosticsLog
 import com.poolguide.tool.cv.Ball
 import com.poolguide.tool.cv.BallColor
 import com.poolguide.tool.cv.DetectionResult
@@ -194,6 +196,27 @@ class LineOverlayManager(
     private val tagWindows = mutableListOf<LabelWindow>()
     private var bubbleParams: WindowManager.LayoutParams? = null
     private var bubbleView: View? = null
+    private var lastBubbleAddAttemptMs = 0L
+
+    /** v1.0.71, Vivo survival: a WindowManager failure (overlay
+     * permission revoked mid-session, stale token, Vivo killing the
+     * window) must never kill the process — the old code called
+     * addView / updateViewLayout unwrapped, so a SecurityException
+     * or BadTokenException on the main thread was a process death.
+     * Record it (throttled to one per second) and keep going; the
+     * next frame retries, and the bubble re-creation is throttled
+     * the same way so a revoked permission cannot spin the loop. */
+    private var lastWindowFailureMs = 0L
+    private fun reportWindowFailure(op: String, e: Exception) {
+        val now = SystemClock.uptimeMillis()
+        if (now - lastWindowFailureMs < 1000) return
+        lastWindowFailureMs = now
+        Log.e("LineOverlayManager", "window op failed: $op", e)
+        DiagnosticsLog.record(
+            DiagnosticsLog.Kind.OVERLAY_WINDOW_FAILED,
+            "$op: ${e::class.java.simpleName}: ${e.message}"
+        )
+    }
     /** Lock-progress ring on the bubble (v1.0.5). */
     private var lockRing: LockRingView? = null
     /** "Capture blocked" status on the bubble (v1.0.37, REA hardening
@@ -1050,7 +1073,11 @@ class LineOverlayManager(
                 win.view.setDot(
                     PointF(sizePx / 2f, sizePx / 2f), sizePx * 0.22f, color
                 )
-                windowManager.updateViewLayout(win.view, win.params)
+                try {
+                    windowManager.updateViewLayout(win.view, win.params)
+                } catch (e: Exception) {
+                    reportWindowFailure("updateViewLayout handle", e)
+                }
             } else {
                 val view = LineView(context)
                 view.setDot(PointF(sizePx / 2f, sizePx / 2f), sizePx * 0.22f, color)
@@ -1066,8 +1093,12 @@ class LineOverlayManager(
                     this.y = y
                 }
                 makeHandleDraggable(view, anchor)
-                windowManager.addView(view, params)
-                handleWindows += HandleWindow(anchor, view, params)
+                try {
+                    windowManager.addView(view, params)
+                    handleWindows += HandleWindow(anchor, view, params)
+                } catch (e: Exception) {
+                    reportWindowFailure("addView handle", e)
+                }
             }
         }
         while (handleWindows.size > positions.size) {
@@ -1512,7 +1543,14 @@ class LineOverlayManager(
                 win.params.width = w
                 win.params.height = h
                 setLineOnView(win.view, line, localStart, localEnd)
-                windowManager.updateViewLayout(win.view, win.params)
+                // v1.0.71: an unwrapped updateViewLayout could kill
+                // the process on a stale token; record and retry
+                // next frame instead.
+                try {
+                    windowManager.updateViewLayout(win.view, win.params)
+                } catch (e: Exception) {
+                    reportWindowFailure("updateViewLayout line", e)
+                }
             } else {
                 val view = LineView(context)
                 val params = WindowManager.LayoutParams(
@@ -1528,8 +1566,12 @@ class LineOverlayManager(
                     this.y = y
                 }
                 setLineOnView(view, line, localStart, localEnd)
-                windowManager.addView(view, params)
-                lineWindows += LineWindow(view, params)
+                try {
+                    windowManager.addView(view, params)
+                    lineWindows += LineWindow(view, params)
+                } catch (e: Exception) {
+                    reportWindowFailure("addView line", e)
+                }
             }
         }
         // Remove surplus windows.
@@ -1561,7 +1603,11 @@ class LineOverlayManager(
                 win.params.y = (label.centerY - h / 2).toInt()
                 win.params.width = w
                 win.params.height = h
-                windowManager.updateViewLayout(win.view, win.params)
+                try {
+                    windowManager.updateViewLayout(win.view, win.params)
+                } catch (e: Exception) {
+                    reportWindowFailure("updateViewLayout label", e)
+                }
             } else {
                 val view = TextView(context).apply {
                     text = label.text
@@ -1583,8 +1629,12 @@ class LineOverlayManager(
                     x = (label.centerX - w / 2).toInt()
                     y = (label.centerY - h / 2).toInt()
                 }
-                windowManager.addView(view, params)
-                labelWindows += LabelWindow(view, params)
+                try {
+                    windowManager.addView(view, params)
+                    labelWindows += LabelWindow(view, params)
+                } catch (e: Exception) {
+                    reportWindowFailure("addView label", e)
+                }
             }
         }
         // Remove surplus windows.
@@ -1614,7 +1664,11 @@ class LineOverlayManager(
                 win.params.y = (tag.centerY - h / 2).toInt()
                 win.params.width = w
                 win.params.height = h
-                windowManager.updateViewLayout(win.view, win.params)
+                try {
+                    windowManager.updateViewLayout(win.view, win.params)
+                } catch (e: Exception) {
+                    reportWindowFailure("updateViewLayout tag", e)
+                }
             } else {
                 val view = TextView(context).apply {
                     text = tag.text
@@ -1636,8 +1690,12 @@ class LineOverlayManager(
                     x = (tag.centerX - w / 2).toInt()
                     y = (tag.centerY - h / 2).toInt()
                 }
-                windowManager.addView(view, params)
-                tagWindows += LabelWindow(view, params)
+                try {
+                    windowManager.addView(view, params)
+                    tagWindows += LabelWindow(view, params)
+                } catch (e: Exception) {
+                    reportWindowFailure("addView tag", e)
+                }
             }
         }
         // Remove surplus windows.
@@ -1760,6 +1818,10 @@ class LineOverlayManager(
     // the table middle on a real phone.
     private fun ensureBubble() {
         if (bubbleView != null) return
+        // v1.0.71: a failed add is retried at most once a second, so
+        // a revoked overlay permission cannot spin the frame loop.
+        if (SystemClock.uptimeMillis() - lastBubbleAddAttemptMs < 1000) return
+        lastBubbleAddAttemptMs = SystemClock.uptimeMillis()
         val metrics = context.resources.displayMetrics
         val edgeMarginPx = TypedValue.applyDimension(
             TypedValue.COMPLEX_UNIT_DIP, BUBBLE_EDGE_MARGIN_DP, metrics
@@ -1905,9 +1967,15 @@ class LineOverlayManager(
                 else -> false
             }
         }
-        windowManager.addView(layout, params)
-        bubbleView = layout
-        bubbleParams = params
+        try {
+            windowManager.addView(layout, params)
+            bubbleView = layout
+            bubbleParams = params
+        } catch (e: Exception) {
+            // v1.0.71: a failed bubble add must not kill the process;
+            // the next frame retries (throttled above).
+            reportWindowFailure("addView bubble", e)
+        }
     }
 
     /** The expanded bubble menu (v1.0.69): a small vertical window

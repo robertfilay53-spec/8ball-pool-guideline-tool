@@ -70,6 +70,12 @@
     <string name="notif_channel_desc">Shows while the guideline tool is capturing the screen.</string>
     <string name="notif_overlay_channel_name">Guide overlay</string>
     <string name="notif_overlay_channel_desc">Shows while the aim-line overlay is active.</string>
+    <string name="notif_overlay_restored">Guide overlay restored — open Pool Guide and tap Start to resume capture</string>
+    <!-- Battery-optimisation exemption dialog (v1.0.71, Vivo survival) -->
+    <string name="battery_title">Keep Pool Guide running</string>
+    <string name="battery_body">Vivo and other phones stop apps running in the background to save battery. If Pool Guide is stopped while you play, the aim lines disappear. Allow Pool Guide to ignore battery optimisation so it stays alive while you play. On Vivo, also allow it under Settings &gt; Battery &gt; Background power consumption management, and lock the app in the recents screen.</string>
+    <string name="battery_allow">Allow</string>
+    <string name="battery_later">Not now</string>
 
     <string name="overlay_needed">The tool needs “Display over other apps” to draw aim lines. Please enable it, then come back.</string>
 

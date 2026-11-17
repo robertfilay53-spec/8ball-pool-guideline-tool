@@ -103,6 +103,12 @@ class CaptureService : Service() {
 
     private var running = false
     private var lastNotifUpdateMs = 0L
+    /** v1.0.71: true while this service object is in post-kill
+     * recovery (null-intent restart with a lost token). The service
+     * records the loss and stops itself; stopCapture must NOT cascade
+     * to the overlay in that case, or the recovery would kill the
+     * bubble it just restored. */
+    private var recoveryMode = false
     /** UI exclusion (v1.0.69): the overlay's UI rects last handed
      * to the pipeline. The bus holds a new list reference only when
      * the rects changed (the overlay writes on change), so comparing
@@ -144,8 +150,41 @@ class CaptureService : Service() {
                 startCapture(intent)
                 return START_STICKY
             }
+            // v1.0.71, Vivo survival: the system restarting a sticky
+            // service after the process was killed passes a null
+            // intent. A MediaProjection token does not survive a
+            // process death, so capture cannot resume on its own —
+            // but the failure must leave a trace and must NOT kill
+            // the overlay bubble the OverlayService just restored.
+            // Record the loss, stop cleanly (guarded, no cascade),
+            // and wait for the user to tap Start for a fresh token.
+            null -> {
+                if (!::store.isInitialized) store = CalibrationStore(this)
+                if (SessionRecovery.shouldRecoverSession(store.sessionActive, null)) {
+                    recoverCaptureSession()
+                }
+                return START_NOT_STICKY
+            }
         }
         return START_NOT_STICKY
+    }
+
+    /** Post-kill recovery (v1.0.71): the token is gone, so capture
+     * cannot resume. Leave the loss in the diagnostics (the next
+     * export names it) and stop without touching the overlay. */
+    private fun recoverCaptureSession() {
+        DiagnosticsLog.attachFile(File(filesDir, DiagnosticsLog.PREVIOUS_SESSION_FILE))
+        DiagnosticsLog.start()
+        DiagnosticsLog.record(
+            DiagnosticsLog.Kind.SESSION_RESTARTED,
+            "CaptureService restarted after process death"
+        )
+        DiagnosticsLog.record(
+            DiagnosticsLog.Kind.CAPTURE_TOKEN_LOST,
+            "MediaProjection token does not survive a process death — tap Start to resume capture"
+        )
+        recoveryMode = true
+        stopSelf()
     }
 
     private fun startCapture(intent: Intent) {
@@ -168,6 +207,11 @@ class CaptureService : Service() {
         var step = "CalibrationStore"
         try {
             store = CalibrationStore(this)
+            // v1.0.71: a fresh token supersedes any recovery state,
+            // and a session is active from here until a clean stop.
+            recoveryMode = false
+            store.sessionActive = true
+            store.sessionDemo = false
             // Diagnostics session (v1.0.6): a second start while a session
             // is active is a no-op, so the overlay service starting at
             // the same time cannot wipe these first events.
@@ -321,6 +365,13 @@ class CaptureService : Service() {
             failCaptureStart("createVirtualDisplay returned null")
             return
         }
+        // v1.0.71: capture really started — the next phone test can
+        // prove the virtual display existed (a dead ImageReader
+        // leaves no trace without this).
+        DiagnosticsLog.record(
+            DiagnosticsLog.Kind.CAPTURE_STARTED,
+            "virtual display ${VD_WIDTH}x${VD_HEIGHT}"
+        )
 
         cvThread = HandlerThread("poolguide-cv").apply { start() }
         cvHandler = Handler(cvThread!!.looper)
@@ -421,6 +472,14 @@ class CaptureService : Service() {
      * a compact frame-stats line every 150 frames (~10 s at 15 FPS).
      * Runs on the CV thread; DiagnosticsLog is synchronised. */
     private fun recordDiagnostics(result: DetectionResult) {
+        // v1.0.71: the first processed frame proves capture flowed at
+        // all (a dead ImageReader leaves no trace without this).
+        if (result.frameIndex == 1L) {
+            DiagnosticsLog.record(
+                DiagnosticsLog.Kind.CAPTURE_FIRST_FRAME,
+                "first frame ${result.workingWidth}x${result.workingHeight}"
+            )
+        }
         if (result.tableLocked && !lastWasLocked) {
             DiagnosticsLog.record(
                 DiagnosticsLog.Kind.TABLE_LOCKED,
@@ -520,6 +579,19 @@ class CaptureService : Service() {
 
     private fun stopCapture() {
         running = false
+        // v1.0.71: a clean stop clears the session, so a later
+        // null-intent restart does not resurrect a stopped session.
+        // Guarded: stopCapture also runs from onDestroy on a service
+        // that never started. A process kill never runs onDestroy,
+        // so a killed session keeps its flag and is recovered. NOT in
+        // recovery mode: the recovery stop is the system cleaning up
+        // a dead session, not the user stopping — and the overlay
+        // service reads this flag on its own restart, so clearing it
+        // here would race the overlay's recovery.
+        if (::store.isInitialized && !recoveryMode) {
+            store.sessionActive = false
+            store.sessionDemo = false
+        }
         DiagnosticsLog.end()
         virtualDisplay?.release()
         virtualDisplay = null
@@ -546,16 +618,20 @@ class CaptureService : Service() {
         // The overlay lives in its own service: stop it too, so the
         // lines never outlive the capture. v1.0.35: starting a service
         // can throw while the app is being torn down; stopCapture runs
-        // from onDestroy, so it must never throw.
-        val stopOverlay = Intent(this, OverlayService::class.java).apply {
-            action = OverlayService.ACTION_STOP
+        // from onDestroy, so it must never throw. v1.0.71: NOT in
+        // recovery mode — a post-kill recovery stop must leave the
+        // overlay bubble the OverlayService just restored alone.
+        if (!recoveryMode) {
+            val stopOverlay = Intent(this, OverlayService::class.java).apply {
+                action = OverlayService.ACTION_STOP
+            }
+            try {
+                startService(stopOverlay)
+            } catch (e: Exception) {
+                Log.e(TAG, "failed to stop overlay service", e)
+            }
+            stopForeground(STOP_FOREGROUND_REMOVE)
         }
-        try {
-            startService(stopOverlay)
-        } catch (e: Exception) {
-            Log.e(TAG, "failed to stop overlay service", e)
-        }
-        stopForeground(STOP_FOREGROUND_REMOVE)
     }
 
     override fun onDestroy() {
